@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Scout by Tactica — Coming Soon</title>
-<meta name="description" content="Live scores, head-to-head, and player comparisons — built the Tactica way. Join the waitlist." />
+<title>Scout by Tactica: Coming Soon</title>
+<meta name="description" content="Live scores, head-to-head, and player comparisons, built the Tactica way. Join the waitlist." />
 
 <!-- Open Graph -->
 <meta property="og:title" content="Scout by Tactica" />
-<meta property="og:description" content="Live scores, head-to-head, and player comparisons — built the Tactica way." />
+<meta property="og:description" content="Live scores, head-to-head, and player comparisons, built the Tactica way." />
 <meta property="og:type" content="website" />
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -314,27 +314,26 @@
     list-style: none;
     margin: 18px 0 0;
     padding: 0;
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
-  @media (min-width: 560px) {
-    .feature-list { grid-template-columns: 1fr 1fr; }
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
   }
   .feature-list li {
-    display: flex; align-items: flex-start; gap: 10px;
-    font-size: 13.5px; color: var(--mt);
-    line-height: 1.45;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13px; color: var(--mt);
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .feature-list li::before {
     content: "";
     width: 7px; height: 7px;
-    margin-top: 6px;
     border-radius: 2px;
     background: var(--volt);
     flex-shrink: 0;
   }
-  .feature-list li b { color: #fff; }
+  .feature-list li b { color: #fff; flex-shrink: 0; }
 
   footer {
     border-top: 1px solid var(--bd);
@@ -374,7 +373,7 @@
     <h1>Live football,<br/>read the <span class="accent">Tactica</span> way.</h1>
     <p>
       Scout is a livescore and player-comparison app built on top of Tactica's own match
-      intelligence — live scores, head-to-head history, and win-probability facts for every
+      intelligence: live scores, head-to-head history, and win-probability facts for every
       match, plus side-by-side player radar comparisons.
     </p>
 
@@ -385,7 +384,7 @@
       </form>
       <div id="form-msg"></div>
     </div>
-    <p class="form-note">No spam — just one email when Scout goes live.</p>
+    <p class="form-note">No spam, just one email when Scout goes live.</p>
   </section>
 
   <section class="preview">
@@ -436,10 +435,10 @@
       </div>
 
       <ul class="feature-list">
-        <li><b>Live scores</b> — grouped by league, every kickoff of the day</li>
-        <li><b>Match detail</b> — lineups, H2H, stats, and incidents</li>
-        <li><b>Tactica facts</b> — win probability built from our own models</li>
-        <li><b>Player comparison</b> — radar charts, side by side, any two players</li>
+        <li><b>Live scores:</b> grouped by league, every kickoff of the day</li>
+        <li><b>Match detail:</b> lineups, H2H, stats, and incidents</li>
+        <li><b>Tactica facts:</b> win probability built from our own models</li>
+        <li><b>Player comparison:</b> radar charts for any two players</li>
       </ul>
     </div>
   </section>
@@ -457,7 +456,7 @@
 <script>
   // Swap FORM_ENDPOINT for your real Formspree (or Getform) endpoint before deploying.
   // e.g. "https://formspree.io/f/abcdwxyz"
-  const FORM_ENDPOINT = "FORM_ENDPOINT_PLACEHOLDER";
+  const FORM_ENDPOINT = "https://formspree.io/f/mlgqyrgl";
 
   const form = document.getElementById('waitlist-form');
   const msg = document.getElementById('form-msg');
@@ -466,7 +465,7 @@
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (FORM_ENDPOINT.includes('PLACEHOLDER')) {
-      msg.textContent = 'Form not wired up yet — add your Formspree endpoint.';
+      msg.textContent = 'Form not wired up yet. Add your Formspree endpoint.';
       msg.className = 'err';
       return;
     }
@@ -485,7 +484,7 @@
         body: new FormData(form),
       });
       if (res.ok) {
-        msg.textContent = "You're on the list — we'll email you when Scout goes live.";
+        msg.textContent = "You're on the list. We'll email you when Scout goes live.";
         msg.className = 'ok';
         form.reset();
       } else {
@@ -493,7 +492,7 @@
         msg.className = 'err';
       }
     } catch (err) {
-      msg.textContent = 'Network error — check your connection and try again.';
+      msg.textContent = 'Network error. Check your connection and try again.';
       msg.className = 'err';
     } finally {
       btn.disabled = false;
