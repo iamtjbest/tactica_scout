@@ -1,0 +1,13 @@
+# render.yaml — Render Web Service specification for Tactica Scout API
+services:
+  - type: web
+    name: tactica-scout-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.8
+      - key: BSD_API_KEY
+        sync: false

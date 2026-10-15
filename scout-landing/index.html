@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Scout by Tactica — Coming Soon</title>
+<meta name="description" content="Live scores, head-to-head, and player comparisons — built the Tactica way. Join the waitlist." />
+
+<!-- Open Graph -->
+<meta property="og:title" content="Scout by Tactica" />
+<meta property="og:description" content="Live scores, head-to-head, and player comparisons — built the Tactica way." />
+<meta property="og:type" content="website" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #0D1317;
+    --bg2: #0A0F13;
+    --sur: #151E25;
+    --sur2: #1A242B;
+    --bd: #1E2A33;
+    --bd2: #2A3B47;
+    --volt: #CCFF00;
+    --volt2: #E8FF66;
+    --cyan: #00E5FF;
+    --cyan2: #6FF0FF;
+    --mt: #8A9BA8;
+    --mt2: #5C6B7C;
+    --grn: #00E676;
+    --red: #EF4444;
+    --red2: #FF4444;
+    --amber: #FFB830;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: #fff;
+    font-family: 'DM Sans', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background:
+      radial-gradient(ellipse 800px 500px at 15% -10%, rgba(204,255,0,0.08), transparent),
+      radial-gradient(ellipse 700px 500px at 100% 10%, rgba(0,229,255,0.07), transparent),
+      var(--bg);
+    min-height: 100vh;
+  }
+
+  .wrap {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 0 20px;
+  }
+
+  /* ---- Header ---- */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 22px 0;
+    border-bottom: 1px solid var(--bd);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+  }
+  .brand-badge {
+    width: 32px; height: 32px;
+    border-radius: 9px;
+    background: linear-gradient(135deg, var(--volt), var(--cyan));
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Playfair Display', serif;
+    font-weight: 900;
+    color: var(--bg);
+    font-size: 16px;
+  }
+  .brand-text {
+    font-family: 'Playfair Display', serif;
+    font-weight: 900;
+    font-size: 19px;
+    letter-spacing: -0.01em;
+    color: #fff;
+  }
+  .brand-sub {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--mt);
+    margin-left: 2px;
+  }
+  .by-tactica {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--mt);
+    text-decoration: none;
+    border: 1px solid var(--bd2);
+    padding: 6px 12px;
+    border-radius: 999px;
+    transition: color .2s, border-color .2s;
+  }
+  .by-tactica:hover { color: #fff; border-color: var(--mt2); }
+
+  /* ---- Hero ---- */
+  .hero {
+    text-align: center;
+    padding: 72px 0 48px;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--volt);
+    background: rgba(204,255,0,0.08);
+    border: 1px solid rgba(204,255,0,0.25);
+    padding: 7px 14px;
+    border-radius: 999px;
+    margin-bottom: 26px;
+  }
+  .badge .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--volt);
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+  h1 {
+    font-family: 'Playfair Display', serif;
+    font-weight: 900;
+    font-size: clamp(34px, 6vw, 58px);
+    line-height: 1.07;
+    letter-spacing: -0.015em;
+    margin: 0 0 18px;
+  }
+  h1 .accent {
+    background: linear-gradient(90deg, var(--volt), var(--cyan));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .hero p {
+    font-size: 17px;
+    line-height: 1.6;
+    color: var(--mt);
+    max-width: 560px;
+    margin: 0 auto 36px;
+  }
+
+  /* ---- Email form ---- */
+  .form-box {
+    max-width: 440px;
+    margin: 0 auto 14px;
+  }
+  form {
+    display: flex;
+    gap: 8px;
+    background: var(--sur);
+    border: 1px solid var(--bd);
+    border-radius: 14px;
+    padding: 6px;
+  }
+  form input[type="email"] {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #fff;
+    font-size: 15px;
+    font-family: 'DM Sans', sans-serif;
+    padding: 12px 14px;
+  }
+  form input::placeholder { color: var(--mt2); }
+  form button {
+    background: var(--volt);
+    color: var(--bg);
+    border: none;
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    padding: 0 22px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background .2s, transform .1s;
+    white-space: nowrap;
+  }
+  form button:hover { background: var(--volt2); }
+  form button:active { transform: scale(0.97); }
+  form button:disabled { opacity: 0.6; cursor: default; }
+
+  .form-note {
+    font-size: 12px;
+    color: var(--mt2);
+    text-align: center;
+  }
+  #form-msg {
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    margin-top: 14px;
+    min-height: 18px;
+  }
+  #form-msg.ok { color: var(--grn); }
+  #form-msg.err { color: var(--red2); }
+
+  /* ---- UI preview section ---- */
+  .preview {
+    padding: 10px 0 60px;
+  }
+  .preview-label {
+    text-align: center;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--volt);
+    margin-bottom: 20px;
+  }
+  .preview-frame {
+    background: var(--sur);
+    border: 1px solid var(--bd);
+    border-radius: 20px;
+    padding: 22px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+  }
+  .grid2 {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  @media (min-width: 680px) {
+    .grid2 { grid-template-columns: 1.2fr 1fr; }
+  }
+
+  /* mock match card */
+  .mock-card {
+    background: var(--sur2);
+    border: 1px solid var(--bd);
+    border-radius: 14px;
+    padding: 14px 16px;
+  }
+  .mock-comp {
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--mt);
+    margin-bottom: 12px;
+  }
+  .mock-comp .live {
+    display: inline-flex; align-items: center; gap: 5px;
+    color: var(--red2); font-weight: 700;
+  }
+  .mock-comp .live .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red2); animation: pulse 1.2s infinite; }
+  .mock-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 0;
+  }
+  .mock-team { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; }
+  .mock-crest {
+    width: 26px; height: 26px; border-radius: 7px;
+    background: linear-gradient(135deg, var(--bd2), var(--sur));
+    border: 1px solid var(--bd2);
+  }
+  .mock-score {
+    font-family: 'Playfair Display', serif;
+    font-weight: 900;
+    font-size: 17px;
+  }
+  .mock-score.lead { color: var(--volt); }
+
+  .mock-stat-row {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12px; color: var(--mt);
+    margin-top: 4px;
+  }
+  .mock-bar {
+    flex: 1; height: 5px; border-radius: 3px; background: var(--bd);
+    overflow: hidden; display: flex;
+  }
+  .mock-bar .fill-a { background: var(--volt); }
+  .mock-bar .fill-b { background: var(--bd2); }
+
+  .mock-h2h-title, .mock-radar-title {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--mt);
+    margin-bottom: 10px;
+  }
+  .mock-radar-wrap { display: flex; align-items: center; justify-content: center; padding: 6px 0 2px; }
+
+  .feature-list {
+    list-style: none;
+    margin: 18px 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  @media (min-width: 560px) {
+    .feature-list { grid-template-columns: 1fr 1fr; }
+  }
+  .feature-list li {
+    display: flex; align-items: flex-start; gap: 10px;
+    font-size: 13.5px; color: var(--mt);
+    line-height: 1.45;
+  }
+  .feature-list li::before {
+    content: "";
+    width: 7px; height: 7px;
+    margin-top: 6px;
+    border-radius: 2px;
+    background: var(--volt);
+    flex-shrink: 0;
+  }
+  .feature-list li b { color: #fff; }
+
+  footer {
+    border-top: 1px solid var(--bd);
+    padding: 26px 0 40px;
+    text-align: center;
+  }
+  footer p {
+    color: var(--mt2);
+    font-size: 12.5px;
+    margin: 0 0 10px;
+  }
+  footer .links { display: flex; gap: 18px; justify-content: center; }
+  footer a {
+    color: var(--mt);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+    transition: color .2s;
+  }
+  footer a:hover { color: var(--volt); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <a href="https://tactica.com.ng" class="brand">
+      <div class="brand-badge">S</div>
+      <span class="brand-text">Scout</span>
+      <span class="brand-sub">by Tactica</span>
+    </a>
+    <a class="by-tactica" href="https://tactica.com.ng" target="_blank" rel="noopener">tactica.com.ng →</a>
+  </header>
+
+  <section class="hero">
+    <div class="badge"><span class="dot"></span> Coming soon</div>
+    <h1>Live football,<br/>read the <span class="accent">Tactica</span> way.</h1>
+    <p>
+      Scout is a livescore and player-comparison app built on top of Tactica's own match
+      intelligence — live scores, head-to-head history, and win-probability facts for every
+      match, plus side-by-side player radar comparisons.
+    </p>
+
+    <div class="form-box">
+      <form id="waitlist-form">
+        <input type="email" name="email" placeholder="you@email.com" required autocomplete="email" />
+        <button type="submit" id="submit-btn">Notify me</button>
+      </form>
+      <div id="form-msg"></div>
+    </div>
+    <p class="form-note">No spam — just one email when Scout goes live.</p>
+  </section>
+
+  <section class="preview">
+    <p class="preview-label">A look inside</p>
+    <div class="preview-frame">
+      <div class="grid2">
+        <div class="mock-card">
+          <div class="mock-comp">
+            <span>Premier League · Matchday 8</span>
+            <span class="live"><span class="dot"></span>67'</span>
+          </div>
+          <div class="mock-row">
+            <div class="mock-team"><div class="mock-crest"></div> Arsenal</div>
+            <div class="mock-score lead">2</div>
+          </div>
+          <div class="mock-row">
+            <div class="mock-team"><div class="mock-crest"></div> Chelsea</div>
+            <div class="mock-score">1</div>
+          </div>
+          <div class="mock-stat-row">
+            <span>58%</span>
+            <div class="mock-bar"><div class="fill-a" style="width:58%"></div><div class="fill-b" style="width:42%"></div></div>
+            <span>42%</span>
+          </div>
+          <div class="mock-h2h-title" style="margin-top:14px;">Tactica win probability</div>
+          <div class="mock-stat-row">
+            <span style="width:38px;">61%</span>
+            <div class="mock-bar"><div class="fill-a" style="width:61%"></div><div class="fill-b" style="width:39%"></div></div>
+            <span style="width:38px;text-align:right;">39%</span>
+          </div>
+        </div>
+
+        <div class="mock-card">
+          <div class="mock-radar-title">Player comparison</div>
+          <div class="mock-radar-wrap">
+            <svg width="190" height="170" viewBox="0 0 190 170">
+              <polygon points="95,10 170,65 142,150 48,150 20,65" fill="none" stroke="#1E2A33" stroke-width="1"/>
+              <polygon points="95,40 148,72 128,130 62,130 42,72" fill="none" stroke="#1E2A33" stroke-width="1"/>
+              <polygon points="95,22 128,58 112,122 66,120 50,60" fill="rgba(204,255,0,0.18)" stroke="#CCFF00" stroke-width="1.5"/>
+              <polygon points="95,55 140,80 118,135 70,132 55,82" fill="rgba(0,229,255,0.14)" stroke="#00E5FF" stroke-width="1.5"/>
+            </svg>
+          </div>
+          <div style="display:flex;justify-content:center;gap:16px;font-size:11px;color:var(--mt);margin-top:4px;">
+            <span style="display:flex;align-items:center;gap:5px;"><span style="width:8px;height:8px;border-radius:2px;background:var(--volt);display:inline-block;"></span>Saka</span>
+            <span style="display:flex;align-items:center;gap:5px;"><span style="width:8px;height:8px;border-radius:2px;background:var(--cyan);display:inline-block;"></span>Palmer</span>
+          </div>
+        </div>
+      </div>
+
+      <ul class="feature-list">
+        <li><b>Live scores</b> — grouped by league, every kickoff of the day</li>
+        <li><b>Match detail</b> — lineups, H2H, stats, and incidents</li>
+        <li><b>Tactica facts</b> — win probability built from our own models</li>
+        <li><b>Player comparison</b> — radar charts, side by side, any two players</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    <p>Built by Cantera Football, the team behind Tactica.</p>
+    <div class="links">
+      <a href="https://tactica.com.ng" target="_blank" rel="noopener">Tactica</a>
+      <a href="https://x.com/TacticaEngine" target="_blank" rel="noopener">@TacticaEngine</a>
+      <a href="https://x.com/iamtjbest" target="_blank" rel="noopener">@iamtjbest</a>
+    </div>
+  </footer>
+</div>
+
+<script>
+  // Swap FORM_ENDPOINT for your real Formspree (or Getform) endpoint before deploying.
+  // e.g. "https://formspree.io/f/abcdwxyz"
+  const FORM_ENDPOINT = "FORM_ENDPOINT_PLACEHOLDER";
+
+  const form = document.getElementById('waitlist-form');
+  const msg = document.getElementById('form-msg');
+  const btn = document.getElementById('submit-btn');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (FORM_ENDPOINT.includes('PLACEHOLDER')) {
+      msg.textContent = 'Form not wired up yet — add your Formspree endpoint.';
+      msg.className = 'err';
+      return;
+    }
+    const email = form.email.value.trim();
+    if (!email) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+    msg.textContent = '';
+    msg.className = '';
+
+    try {
+      const res = await fetch(FORM_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Accept': 'application/json' },
+        body: new FormData(form),
+      });
+      if (res.ok) {
+        msg.textContent = "You're on the list — we'll email you when Scout goes live.";
+        msg.className = 'ok';
+        form.reset();
+      } else {
+        msg.textContent = 'Something went wrong. Try again in a moment.';
+        msg.className = 'err';
+      }
+    } catch (err) {
+      msg.textContent = 'Network error — check your connection and try again.';
+      msg.className = 'err';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Notify me';
+    }
+  });
+</script>
+
+</body>
+</html>

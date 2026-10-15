@@ -1,0 +1,58 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+
+body {
+  background: #0D1317;
+  color: #FFFFFF;
+  font-family: 'DM Sans', sans-serif;
+}
+
+@layer components {
+  .card {
+    @apply bg-sur border border-bd rounded-xl p-4;
+  }
+  .btn-volt {
+    @apply bg-volt text-bg font-body font-bold tracking-wide
+           px-5 py-2.5 rounded-xl transition-all duration-200
+           hover:bg-volt2 hover:shadow-volt;
+  }
+  .tab-pill {
+    @apply px-4 py-2 rounded-full text-[13px] font-semibold transition-all duration-200;
+  }
+  .tab-pill-active {
+    @apply bg-volt/10 text-volt border border-volt/25;
+  }
+  .tab-pill-inactive {
+    @apply text-mt hover:text-white hover:bg-sur2 border border-transparent;
+  }
+  .section-label {
+    @apply font-mono text-[11px] font-bold tracking-[0.22em] uppercase text-volt;
+  }
+  .score-badge {
+    @apply font-display font-black text-lg text-white;
+  }
+  .live-dot {
+    @apply inline-block w-1.5 h-1.5 rounded-full bg-red2 animate-pulse;
+  }
+  .input-select {
+    @apply w-full bg-sur2 border border-bd rounded-lg px-3 py-2
+           text-white focus:outline-none focus:border-volt focus:ring-1
+           focus:ring-volt transition-colors;
+  }
+}
+
+@layer utilities {
+  /* Used by DateNav's horizontal day strip -- lets it scroll on narrow
+     screens without an ugly scrollbar cutting across the pills. */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
