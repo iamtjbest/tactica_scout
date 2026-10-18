@@ -5,6 +5,10 @@ Serves both the Scout web app and the Scout mobile app. Separate
 service from the main Tactica backend (app.tactica.com.ng's engine) —
 same BSD data source, same auth token, own cache namespace, own repo.
 
+Auth is Firebase (frontend signs in, sends the ID token) and user
+records live in Supabase. The backend has no signup/login endpoint and
+never handles a password.
+
 Endpoints:
   GET  /api/live-scores               → all live/upcoming matches grouped by league
   GET  /api/matches-by-date           → Matches tab, every match for one calendar day, grouped by league
@@ -15,9 +19,7 @@ Endpoints:
   GET  /api/players/search            → player search by name
   GET  /api/players/{id}/seasons      → club-spell / season breakdown for the comparison screen's dropdown
   GET  /api/players/{id}/radar        → 6-axis radar aggregation for player comparison
-  POST /api/auth/signup               → create an account
-  POST /api/auth/login                → sign in
-  GET  /api/auth/me                   → current account (Authorization: Bearer <token>)
+  GET  /api/auth/me                   → current account (Authorization: Bearer <firebase_id_token>)
   POST /api/me/followed-teams         → update followed teams (auth required)
   POST /api/me/settings               → update language, etc. (auth required)
   GET  /api/health                    → health check
@@ -25,12 +27,12 @@ Endpoints:
 import os
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import live, matches, players, compare, leagues, news, auth, teams, search
+from app.routers import live, matches, players, compare, leagues, news, me, teams, search
 
 app = FastAPI(
     title="Scout by Tactica API",
     description="Livescore + player comparison backend for Scout by Tactica",
-    version="0.1.0",
+    version="0.2.0",
 )
 
 app.add_middleware(
@@ -52,7 +54,7 @@ app.include_router(players.router,  prefix="/api")
 app.include_router(compare.router,  prefix="/api")
 app.include_router(leagues.router,  prefix="/api")
 app.include_router(news.router,     prefix="/api")
-app.include_router(auth.router,     prefix="/api")
+app.include_router(me.router,       prefix="/api")
 app.include_router(teams.router,    prefix="/api")
 app.include_router(search.router,   prefix="/api")
 
@@ -67,4 +69,3 @@ def debug_bsd(request: Request, path: str):
     params = dict(request.query_params)
     params.pop("path", None)
     return bsd_get(path, params=params)
-

@@ -6,8 +6,23 @@ services:
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.8
+
+      # Sports data
       - key: BSD_API_KEY
+        sync: false
+
+      # Supabase — service role key, bypasses RLS. Never expose to a client.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
+      # Firebase Admin — paste the whole service-account JSON as one value.
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
         sync: false

@@ -1,3 +1,39 @@
+# ── dependencies ────────────────────────────────────────────────
 node_modules/
-scout-web/node_modules/
-scout-backend/node_modules/
+
+# ── python ──────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+*.egg-info/
+
+# ── secrets / local env ─────────────────────────────────────────
+# .env.example files ARE tracked on purpose — they hold placeholders only.
+.env
+.env.local
+.env.*.local
+*.pem
+serviceAccount*.json
+firebase-adminsdk*.json
+
+# ── build output ────────────────────────────────────────────────
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# ── expo / react native ─────────────────────────────────────────
+.expo/
+.expo-shared/
+
+# ── editor / os ─────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ── logs ────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
