@@ -50,9 +50,29 @@ create table profiles (
   role            user_role not null default 'user',
   followed_teams  jsonb not null default '[]',
   language        text not null default 'en',
+
+  -- Where this account first came in. One value, set once, never changed:
+  -- 'scout_mobile' | 'scout_web' | 'editor', and whatever you add later
+  -- ('invite', 'partner', ...). Deliberately text and not an enum, so
+  -- adding a value isn't a migration every time.
+  signup_source   text,
+
+  -- Which tournament dragged them in, if any. A fan who opens a share
+  -- link for the Unilorin League and signs up gets stamped with it.
+  -- This is the growth-loop metric: which organiser is actually driving
+  -- installs. FK is attached at the bottom, since tournaments doesn't
+  -- exist yet at this point in the file.
+  referred_by_tournament_id uuid,
+
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
+create index profiles_signup_source_idx on profiles (signup_source);
+create index profiles_referrer_idx on profiles (referred_by_tournament_id);
+
+-- Whether someone is an ORGANISER is not stored. It's a query:
+--   select 1 from tournaments where owner_id = <profile id>
+-- Same for "uses both apps". Nothing to keep in sync, nothing to go stale.
 create trigger profiles_updated_at before update on profiles
   for each row execute function set_updated_at();
 
@@ -64,8 +84,21 @@ returns trigger
 language plpgsql
 security definer set search_path = public
 as $$
+declare
+  ref_id uuid;
 begin
-  insert into public.profiles (id, email, display_name)
+  -- The frontend passes these at signUp via options.data, so they land
+  -- in raw_user_meta_data. A bad or absent uuid just becomes null
+  -- rather than blowing up account creation.
+  begin
+    ref_id := nullif(new.raw_user_meta_data ->> 'referred_by_tournament_id', '')::uuid;
+  exception when others then
+    ref_id := null;
+  end;
+
+  insert into public.profiles (
+    id, email, display_name, signup_source, referred_by_tournament_id
+  )
   values (
     new.id,
     new.email,
@@ -73,7 +106,9 @@ begin
       new.raw_user_meta_data ->> 'display_name',
       new.raw_user_meta_data ->> 'full_name',
       split_part(coalesce(new.email, ''), '@', 1)
-    )
+    ),
+    nullif(new.raw_user_meta_data ->> 'signup_source', ''),
+    ref_id
   )
   on conflict (id) do nothing;
   return new;
@@ -172,6 +207,14 @@ create index tournaments_status_idx on tournaments (status);
 create index tournaments_owner_idx  on tournaments (owner_id);
 create trigger tournaments_updated_at before update on tournaments
   for each row execute function set_updated_at();
+
+-- Now that tournaments exists, attach the referral FK declared on
+-- profiles above. on delete set null: deleting a tournament must never
+-- take its referred signups with it.
+alter table profiles
+  add constraint profiles_referred_by_tournament_fkey
+  foreign key (referred_by_tournament_id)
+  references tournaments (id) on delete set null;
 
 -- ============================================================
 -- PROOF OF LEGITIMACY
