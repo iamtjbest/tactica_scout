@@ -5,15 +5,15 @@ Replaces the old app/routers/auth.py, which kept users in a JSON file
 on disk. That could never work on Render: the filesystem is ephemeral,
 so every deploy and every spin-down wiped the accounts.
 
-Signup and login are gone from the backend entirely. The frontend talks
-to Firebase directly for those and sends us the resulting ID token.
+Signup, login, email verification and password reset all happen in
+Supabase Auth, called from the frontend. Nothing here.
 
     GET  /api/auth/me             -> {user}
     POST /api/me/followed-teams   -> {user}
     POST /api/me/settings         -> {user}
 
 Paths are unchanged from the old router on purpose, so the frontends
-only have to swap how they obtain a token, not every call site.
+only have to change how they get a token, not every call site.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -38,7 +38,7 @@ class SettingsBody(BaseModel):
 def _update_self(user: dict, patch: dict) -> dict:
     sb = get_supabase()
     res = (
-        sb.table("users")
+        sb.table("profiles")
         .update(patch)
         .eq("id", user["id"])          # scoped to the caller's own row
         .execute()
@@ -50,8 +50,8 @@ def _update_self(user: dict, patch: dict) -> dict:
 
 @router.get("/auth/me")
 def me(user: dict = Depends(require_user)):
-    """Verifies the Firebase token and creates the users row on first
-    call, so the frontend can treat this as 'finish signing in'."""
+    """Verifies the token and returns the caller's profile. The frontend
+    can treat a 200 here as 'session is good'."""
     return {"user": public_user(user)}
 
 

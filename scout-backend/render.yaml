@@ -1,9 +1,16 @@
 # render.yaml — Render Web Service specification for Tactica Scout API
+#
+# Only read when deployed as a Blueprint, and Render looks for it at the
+# REPOSITORY ROOT. A service created by hand in the dashboard ignores this
+# file entirely. To switch to Blueprint-managed config, move this file to
+# the repo root (the rootDir below already points at scout-backend).
 services:
   - type: web
     name: tactica-scout-api
     runtime: python
     plan: free
+    region: frankfurt          # match the Supabase project's region
+    rootDir: scout-backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
@@ -15,14 +22,12 @@ services:
       - key: BSD_API_KEY
         sync: false
 
-      # Supabase — service role key, bypasses RLS. Never expose to a client.
+      # Supabase. Service role key bypasses RLS — backend only, never
+      # expose it to a client. Anon key is only used as the `apikey`
+      # header when asking the Auth server to validate a token.
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
-
-      # Firebase Admin — paste the whole service-account JSON as one value.
-      - key: FIREBASE_PROJECT_ID
-        sync: false
-      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+      - key: SUPABASE_ANON_KEY
         sync: false

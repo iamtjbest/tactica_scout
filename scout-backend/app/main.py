@@ -5,9 +5,10 @@ Serves both the Scout web app and the Scout mobile app. Separate
 service from the main Tactica backend (app.tactica.com.ng's engine) —
 same BSD data source, same auth token, own cache namespace, own repo.
 
-Auth is Firebase (frontend signs in, sends the ID token) and user
-records live in Supabase. The backend has no signup/login endpoint and
-never handles a password.
+Auth is Supabase Auth. The frontend signs in, verifies email codes and
+resets passwords against Supabase directly, then sends us the access
+token. This backend has no signup/login endpoint, never handles a
+password, and never sends an email.
 
 Endpoints:
   GET  /api/live-scores               → all live/upcoming matches grouped by league
@@ -19,7 +20,7 @@ Endpoints:
   GET  /api/players/search            → player search by name
   GET  /api/players/{id}/seasons      → club-spell / season breakdown for the comparison screen's dropdown
   GET  /api/players/{id}/radar        → 6-axis radar aggregation for player comparison
-  GET  /api/auth/me                   → current account (Authorization: Bearer <firebase_id_token>)
+  GET  /api/auth/me                   → current account (Authorization: Bearer <supabase_access_token>)
   POST /api/me/followed-teams         → update followed teams (auth required)
   POST /api/me/settings               → update language, etc. (auth required)
   GET  /api/health                    → health check
