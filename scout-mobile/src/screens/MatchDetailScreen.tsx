@@ -14,6 +14,8 @@ import { COLORS } from '../theme';
 import {
   getMatchDetail,
   teamLogoUrl,
+  getMatchFacts,
+  type MatchFacts,
   MatchDetail,
   MatchSummary,
 } from '../services/api';
@@ -30,6 +32,10 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
   const [detail, setDetail] = useState<MatchDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
+  // Facts come from their own endpoint. Tactica's backend sleeps on
+  // Render's free tier, so a cold start costs this tab, not the page.
+  const [facts, setFacts] = useState<MatchFacts | null>(null);
+  const [factsFailed, setFactsFailed] = useState(false);
 
   useEffect(() => {
     getMatchDetail(eventId)
@@ -37,6 +43,15 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
       .catch((err) => console.warn('Failed to load match detail:', err))
       .finally(() => setLoading(false));
   }, [eventId]);
+
+  useEffect(() => {
+    if (activeTab !== 'facts' || facts || factsFailed) return;
+    let alive = true;
+    getMatchFacts(eventId)
+      .then((f: MatchFacts) => { if (alive) setFacts(f); })
+      .catch(() => { if (alive) setFactsFailed(true); });
+    return () => { alive = false; };
+  }, [activeTab, eventId, facts, factsFailed]);
 
   const home = detail?.home_team || matchSummary?.home_team || 'Home';
   const away = detail?.away_team || matchSummary?.away_team || 'Away';
@@ -405,12 +420,32 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
           {activeTab === 'facts' && (
             <View style={styles.cardSection}>
               {(() => {
-                const f = detail?.facts;
+                const f = facts;
                 const hasRatings = f?.home?.attack != null || f?.away?.attack != null;
                 const hasProbs =
                   f?.home?.win_prob != null || f?.away?.win_prob != null;
 
-                if (!f || (!hasRatings && !hasProbs)) {
+                if (factsFailed) {
+                  return (
+                    <>
+                      <Text style={styles.sectionTitle}>TACTICA NUMBERS</Text>
+                      <Text style={styles.factsEmpty}>
+                        Tactica ratings couldn't be loaded right now.
+                      </Text>
+                    </>
+                  );
+                }
+                if (!f) {
+                  return (
+                    <>
+                      <Text style={styles.sectionTitle}>TACTICA NUMBERS</Text>
+                      <Text style={styles.factsEmpty}>
+                        Loading ratings... the model may be waking up.
+                      </Text>
+                    </>
+                  );
+                }
+                if (!hasRatings && !hasProbs) {
                   return (
                     <>
                       <Text style={styles.sectionTitle}>TACTICA NUMBERS</Text>

@@ -125,30 +125,8 @@ export type MatchDetail = {
   // the UI can show an accurate "not published yet" instead of
   // guessing from an empty response.
   availability: Record<string, boolean>;
-  facts: {
-    // Both sides, explicitly. Sourced from the main Tactica backend's
-    // /api/predict -- Scout never computes these itself. The endpoint is
-    // asymmetric, so it's called once per side to get both win numbers,
-    // which is how Tactica reports a fixture.
-    home: {
-      attack: number | null; defence: number | null; win_prob: number | null;
-      /** True when /api/form used the live Dixon-Coles calculation. False
-       *  means it fell back to a baseline: not wrong, but not current. */
-      live_rating: boolean;
-    };
-    away: {
-      attack: number | null; defence: number | null; win_prob: number | null;
-      live_rating: boolean;
-    };
-    /** Only set when the two independent runs actually leave room for a
-     *  draw. Null means the model didn't, not that a draw is impossible. */
-    draw_prob: number | null;
-    best_formation: string | null;
-    away_best_formation: string | null;
-    /** True when the model was unreachable, as opposed to having no
-     *  rating for these teams. */
-    degraded: boolean;
-  };
+  /** Facts live at their own endpoint; see getMatchFacts. */
+  facts_url?: string;
 };
 
 export async function getMatchDetail(eventId: number): Promise<MatchDetail> {
@@ -526,4 +504,25 @@ export function formatFee(fee: number | null | undefined): string {
   if (fee >= 1_000_000) return `€${(fee / 1_000_000).toFixed(fee >= 10_000_000 ? 0 : 1)}m`;
   if (fee >= 1_000) return `€${Math.round(fee / 1_000)}k`;
   return `€${fee}`;
+}
+
+
+// ── Tactica facts ─────────────────────────────────────────────────────
+// Fetched separately from match detail: Tactica's backend sleeps on
+// Render's free tier, and a ~50s cold start must not block the match page.
+export type MatchFacts = {
+  home: { attack: number | null; defence: number | null; win_prob: number | null; live_rating: boolean };
+  away: { attack: number | null; defence: number | null; win_prob: number | null; live_rating: boolean };
+  draw_prob: number | null;
+  best_formation: string | null;
+  away_best_formation: string | null;
+  degraded: boolean;
+  /** Non-null when a team name resolved to the wrong club upstream. */
+  name_mismatch: string[] | null;
+};
+
+export async function getMatchFacts(eventId: number): Promise<MatchFacts> {
+  const res = await fetch(`${API_BASE}/api/matches/${eventId}/facts`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`match facts failed: ${res.status}`);
+  return res.json();
 }

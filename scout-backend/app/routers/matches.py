@@ -297,6 +297,31 @@ def _recent_form(team_id, exclude_event_id: int | None = None, limit: int = 5) -
     return out
 
 
+@router.get("/matches/{event_id}/facts")
+def match_facts(event_id: int):
+    """Tactica ATK/DEF + win probability for one fixture.
+
+    Split out of match_detail on purpose: this calls Tactica's backend
+    (two /api/form lookups plus two /api/predict runs) and that service
+    sleeps on Render's free tier. Keeping it off the match-detail path
+    means a cold Tactica costs you the Facts tab, not the whole page.
+
+    Next step when this gets slow in the wild: precompute before kickoff
+    and store the row in Supabase, so this endpoint reads instead of
+    fetching. The shape it returns won't change when that happens.
+    """
+    base = bsd_get(f"/events/{event_id}/")
+    if not base:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    return get_match_ratings(
+        base.get("home_team"),
+        base.get("away_team"),
+        base.get("home_team_id"),
+        base.get("away_team_id"),
+    )
+
+
 @router.get("/matches/{event_id}")
 def match_detail(event_id: int):
     cache_key = f"match__v4__{event_id}"
@@ -353,11 +378,12 @@ def match_detail(event_id: int):
         "h2h":           h2h,
         "stats":         stats,
         "availability":  (availability or {}).get("available") or {},
-        # Ratings come from the main Tactica backend, never computed
-        # here -- see app/tactica.py for why. Both sides are returned
-        # explicitly: a match has two attacks and two defences, and the
-        # old single tactica_atk_rating field couldn't say whose it was.
-        "facts": get_match_ratings(base.get("home_team"), base.get("away_team")),
+        # Facts are NOT fetched here. Tactica's backend is on Render's
+        # free tier and sleeps when idle, so a cold start is roughly 50
+        # seconds -- inline, that would hold the entire match page
+        # hostage for a tab most people never open. The Facts tab calls
+        # /api/matches/{id}/facts itself and shows its own loading state.
+        "facts_url": f"/api/matches/{event_id}/facts",
         "_debug_base_keys": list(base.keys()),
         "_debug_incidents_sample": incidents[0] if incidents else None,
         "cached": False,

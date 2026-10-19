@@ -4,7 +4,7 @@ import { useParams } from "next/navigation";
 import clsx from "clsx";
 import { User } from "lucide-react";
 import Link from "next/link";
-import { getMatchDetail, playerImageUrl, type MatchDetail, type TeamFormResult, BSD_IMG_BASE } from "@/lib/api";
+import { getMatchDetail, getMatchFacts, type MatchFacts, playerImageUrl, type MatchDetail, type TeamFormResult, BSD_IMG_BASE } from "@/lib/api";
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
 type Tab = "overview" | "timeline" | "lineups" | "h2h" | "stats" | "facts";
@@ -854,7 +854,44 @@ function StatsTab({ match }: { match: MatchDetail }) {
 // (MatchDetailScreen.tsx). They render the same backend response, so if
 // one changes, change both.
 function FactsTab({ match }: { match: MatchDetail }) {
-  const { home, away, draw_prob, best_formation, degraded } = match.facts;
+  // Fetched here rather than with the match: Tactica's backend sleeps on
+  // Render's free tier and a cold start is ~50s. That cost belongs to
+  // this tab, not to the whole page.
+  const [facts, setFacts] = useState<MatchFacts | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setFailed(false);
+    getMatchFacts(match.event_id)
+      .then((f: MatchFacts) => { if (alive) setFacts(f); })
+      .catch(() => { if (alive) setFailed(true); });
+    return () => {
+      alive = false;
+    };
+  }, [match.event_id]);
+
+  if (failed) {
+    return (
+      <div className="card">
+        <p className="section-label mb-3">Tactica Numbers</p>
+        <p className="text-mt text-sm">Tactica ratings couldn&apos;t be loaded right now.</p>
+      </div>
+    );
+  }
+  if (!facts) {
+    return (
+      <div className="card">
+        <p className="section-label mb-3">Tactica Numbers</p>
+        <p className="text-mt text-sm">Loading ratings...</p>
+        <p className="text-mt2 text-xs mt-1">
+          The model may be waking up, this can take a moment.
+        </p>
+      </div>
+    );
+  }
+
+  const { home, away, draw_prob, best_formation, degraded, name_mismatch } = facts;
   const hasRatings = home.attack != null || away.attack != null;
   const hasProbs = home.win_prob != null || away.win_prob != null;
 
@@ -882,9 +919,6 @@ function FactsTab({ match }: { match: MatchDetail }) {
             <ProbBar label={match.away_team} value={away.win_prob} tone="cyan" />
           </div>
           {draw_prob == null && (
-            // Each side's number is its own model run, so they don't
-            // always leave a clean remainder. Saying nothing beats
-            // printing a draw figure the model never produced.
             <p className="text-mt2 text-xs mt-3">
               Each figure is that side&apos;s own model run, so they won&apos;t always
               total 100.
@@ -899,6 +933,12 @@ function FactsTab({ match }: { match: MatchDetail }) {
           <RatingRow team={match.home_team} teamId={match.home_team_id} attack={home.attack} defence={home.defence} live={home.live_rating} />
           <RatingRow team={match.away_team} teamId={match.away_team_id} attack={away.attack} defence={away.defence} live={away.live_rating} />
         </div>
+        {name_mismatch && (
+          <p className="text-mt2 text-xs mt-3">
+            A rating was withheld because the name matched a different club
+            upstream.
+          </p>
+        )}
       </div>
 
       {best_formation && (
@@ -930,10 +970,8 @@ function ProbBar({
         </span>
       </div>
       <div className="h-1.5 rounded-full bg-bg2 overflow-hidden">
-        <div
-          className={`h-full rounded-full ${bar}`}
-          style={{ width: `${Math.max(0, Math.min(100, value ?? 0))}%` }}
-        />
+        <div className={`h-full rounded-full ${bar}`}
+             style={{ width: `${Math.min(100, Math.max(0, value ?? 0))}%` }} />
       </div>
     </div>
   );
@@ -956,8 +994,6 @@ function RatingRow({
           />
         )}
         <span className="text-white text-sm truncate">{team}</span>
-        {/* A baseline rating is not a live one. Say so rather than
-            letting a stale number pass as this season's form. */}
         {live === false && attack != null && (
           <span className="text-mt2 text-[10px] font-mono shrink-0" title="Not enough matches for a live rating; showing baseline">
             BASE

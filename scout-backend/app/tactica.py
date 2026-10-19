@@ -45,6 +45,21 @@ def _num(v):
     return v if isinstance(v, (int, float)) else None
 
 
+def _resolved_team_id(form_payload: dict | None):
+    """Which BSD team did Tactica actually resolve this name to?
+
+    /api/form takes a team NAME and resolves it via its own BSD search.
+    That search can be ambiguous -- "Manchester United" returns both id
+    17 and id 8624, and reserve/U21 sides share names with first teams.
+    Scout already knows the BSD id of the team on screen, so comparing
+    the two catches a wrong resolution instead of showing one club's
+    rating under another club's name.
+    """
+    dbg = (form_payload or {}).get("_debug") or {}
+    tid = dbg.get("team_id")
+    return tid if isinstance(tid, int) else None
+
+
 def _form(team: str) -> dict | None:
     """GET /api/form -- the LIVE Dixon-Coles ratings off real fixtures.
 
@@ -91,7 +106,12 @@ def _predict(my_team: str, opp_team: str, overrides: dict | None = None) -> dict
         return None
 
 
-def get_match_ratings(home_team: str | None, away_team: str | None) -> dict:
+def get_match_ratings(
+    home_team: str | None,
+    away_team: str | None,
+    home_team_id: int | None = None,
+    away_team_id: int | None = None,
+) -> dict:
     """ATK/DEF for both sides plus a win probability for EACH team.
 
     /api/predict is asymmetric: it answers "what are my_team's chances
@@ -111,12 +131,13 @@ def get_match_ratings(home_team: str | None, away_team: str | None) -> dict:
         "best_formation":  None,
         "away_best_formation": None,
         "degraded":        True,
+        "name_mismatch":   None,
     }
 
     if not home_team or not away_team:
         return empty
 
-    cache_key = f"tactica_ratings_v3__{home_team.lower()}__{away_team.lower()}"
+    cache_key = f"tactica_ratings_v4__{home_team.lower()}__{away_team.lower()}"
     cached = cache_read(cache_key)
     if cached:
         ttl = DEGRADED_TTL if cached.get("degraded") else RATINGS_TTL
@@ -135,6 +156,22 @@ def get_match_ratings(home_team: str | None, away_team: str | None) -> dict:
 
     h_att, h_def = _rt(hf)
     a_att, a_def = _rt(af)
+
+    # Drop a rating that belongs to a different club. Showing nothing
+    # beats showing Man United U21's numbers on a Man United fixture.
+    mismatch = []
+    if home_team_id is not None:
+        rid = _resolved_team_id(hf)
+        if rid is not None and rid != home_team_id:
+            mismatch.append(f"home name resolved to BSD team {rid}, expected {home_team_id}")
+            h_att = h_def = None
+            hf = None
+    if away_team_id is not None:
+        rid = _resolved_team_id(af)
+        if rid is not None and rid != away_team_id:
+            mismatch.append(f"away name resolved to BSD team {rid}, expected {away_team_id}")
+            a_att = a_def = None
+            af = None
 
     # 2. Feed them into the model as overrides, once from each side.
     h = _predict(home_team, away_team, {
@@ -192,6 +229,9 @@ def get_match_ratings(home_team: str | None, away_team: str | None) -> dict:
         "best_formation":      h.get("best_formation"),
         "away_best_formation": a.get("best_formation"),
         "degraded":            False,
+        # Non-empty when a name resolved to the wrong club. Surfaced so a
+        # silent mismatch shows up instead of becoming a wrong number.
+        "name_mismatch":       mismatch or None,
     }
     if result["home"]["attack"] is None and home_prob is None and away_prob is None:
         result["degraded"] = True
