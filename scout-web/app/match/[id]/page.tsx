@@ -271,17 +271,49 @@ function FormColumn({ team, teamId, form }: { team: string; teamId?: number | nu
         <p className="text-mt text-xs">No recent form yet.</p>
       ) : (
         <div className="space-y-1.5">
-          {form.map((f, i) => (
-            <div
-              key={f.event_id ?? i}
-              className={clsx("flex items-center justify-between rounded-md border px-2 py-1 text-xs", resultClasses(f.result))}
-            >
-              <span className="truncate pr-2">{f.opponent}</span>
-              <span className="font-mono font-bold shrink-0">
-                {f.is_home ? `${f.own_score ?? "-"}-${f.opp_score ?? "-"}` : `${f.opp_score ?? "-"}-${f.own_score ?? "-"}`}
-              </span>
-            </div>
-          ))}
+          {form.map((f, i) => {
+            const score = f.is_home
+              ? `${f.own_score ?? "-"}-${f.opp_score ?? "-"}`
+              : `${f.opp_score ?? "-"}-${f.own_score ?? "-"}`;
+
+            const inner = (
+              <>
+                {/* Crest where BSD gave us an opponent id. A fixed-width
+                    box either way, so rows without one still line up
+                    instead of the names jumping left. */}
+                <span className="w-4 h-4 shrink-0 flex items-center justify-center">
+                  {f.opponent_id != null && (
+                    <img
+                      src={`${BSD_IMG_BASE}/img/team/${f.opponent_id}/?sor=true&bg=transparent`}
+                      alt=""
+                      className="w-4 h-4 object-contain"
+                      onError={(e) => { e.currentTarget.style.visibility = "hidden"; }}
+                    />
+                  )}
+                </span>
+                <span className="truncate pr-2 flex-1">{f.opponent}</span>
+                <span className="font-mono font-bold shrink-0">{score}</span>
+              </>
+            );
+
+            const cls = clsx(
+              "flex items-center gap-2 rounded-md border px-2 py-1 text-xs",
+              resultClasses(f.result)
+            );
+
+            // Link only where we have a match to link to.
+            return f.event_id ? (
+              <Link
+                key={f.event_id}
+                href={`/match/${f.event_id}`}
+                className={clsx(cls, "hover:brightness-125 transition-all")}
+              >
+                {inner}
+              </Link>
+            ) : (
+              <div key={i} className={cls}>{inner}</div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -294,8 +326,8 @@ function TeamFormCard({ match }: { match: MatchDetail }) {
     <div className="card">
       <p className="section-label mb-3 text-center">Team Form</p>
       <div className="flex gap-4">
-        <FormColumn team={match.home_team} form={match.home_form} />
-        <FormColumn team={match.away_team} form={match.away_form} />
+        <FormColumn team={match.home_team} teamId={match.home_team_id} form={match.home_form} />
+        <FormColumn team={match.away_team} teamId={match.away_team_id} form={match.away_form} />
       </div>
     </div>
   );

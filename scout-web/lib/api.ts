@@ -80,6 +80,8 @@ export type H2HSummary = {
 export type TeamFormResult = {
   event_id: number | null;
   opponent: string;
+  /** Opponent's team id, for the crest. Null where BSD didn't give one. */
+  opponent_id: number | null;
   own_score: number | null;
   opp_score: number | null;
   is_home: boolean;

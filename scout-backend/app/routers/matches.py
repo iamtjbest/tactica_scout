@@ -263,7 +263,10 @@ def _recent_form(team_id, exclude_event_id: int | None = None, limit: int = 5) -
         if len(out) >= limit:
             break
         status = str(fx.get("status", "")).lower()
-        if status not in ["finished", "ended", "played"]:
+        # "ft" belongs here too -- it's in FINISHED_STATUSES everywhere
+        # else in this codebase, and leaving it out silently dropped
+        # finished matches from the form strip.
+        if status not in ["finished", "ended", "played", "ft"]:
             continue
         if exclude_event_id is not None and fx.get("id") == exclude_event_id:
             continue
@@ -278,6 +281,10 @@ def _recent_form(team_id, exclude_event_id: int | None = None, limit: int = 5) -
         out.append({
             "event_id":  fx.get("id"),
             "opponent":  (fx.get("away_team") if is_home else fx.get("home_team")) or "",
+            # Needed for the opponent crest on the Team Form strip. The
+            # fixture already carries both ids; we just weren't passing
+            # the other side's through.
+            "opponent_id": (fx.get("away_team_id") if is_home else fx.get("home_team_id")),
             "own_score": own_score,
             "opp_score": opp_score,
             "is_home":   is_home,
