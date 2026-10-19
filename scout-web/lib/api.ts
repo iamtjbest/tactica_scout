@@ -392,3 +392,89 @@ export async function globalSearch(q: string) {
   if (!res.ok) throw new Error("Search failed");
   return res.json();
 }
+
+// ── Player career / transfers / international / season totals ─────────
+// Wrappers for the four endpoints added to players.py. Each one can come
+// back `degraded: true`, which means BSD gave us nothing on this request
+// -- distinct from a genuinely empty record. The UI must tell those apart
+// so a player page never claims a 15-year veteran has no career just
+// because one fetch failed.
+
+export type PlayerCareerSeason = {
+  season?: string | null;
+  season_name?: string | null;
+  team_name?: string | null;
+  team_id?: number | null;
+  league_name?: string | null;
+  appearances?: number | null;
+  goals?: number | null;
+  assists?: number | null;
+  minutes_played?: number | null;
+  [k: string]: any;
+};
+
+export type PlayerTransfer = {
+  date?: string | null;
+  transfer_date?: string | null;
+  from_team_name?: string | null;
+  to_team_name?: string | null;
+  from_team_id?: number | null;
+  to_team_id?: number | null;
+  // null means undisclosed, NOT free. BSD is explicit that a move with
+  // no published figure is not a fee of zero.
+  fee_eur?: number | null;
+  transfer_type?: string | null;
+  [k: string]: any;
+};
+
+export type PlayerSeasonStats = {
+  player_id: number;
+  season: string | null;
+  seasons_available: string[];
+  grouped_by: string;
+  record_keys: string[];
+  totals: Record<string, number | null>;
+  recent_matches: any[];
+  degraded: boolean;
+};
+
+async function playerSub<T>(playerId: number, path: string, label: string): Promise<T> {
+  const res = await fetch(`${API_BASE}/api/players/${playerId}/${path}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`${label} failed: ${res.status}`);
+  return res.json();
+}
+
+export function getPlayerCareer(
+  playerId: number
+): Promise<{ seasons: PlayerCareerSeason[]; degraded: boolean }> {
+  return playerSub(playerId, "career", "player career");
+}
+
+export function getPlayerTransfers(
+  playerId: number
+): Promise<{ transfers: PlayerTransfer[]; degraded: boolean }> {
+  return playerSub(playerId, "transfers", "player transfers");
+}
+
+export function getPlayerNationalTeam(
+  playerId: number
+): Promise<{ teams: any[]; summary: any | null; degraded: boolean }> {
+  return playerSub(playerId, "national-team", "player national team");
+}
+
+export function getPlayerSeasonStats(
+  playerId: number,
+  season?: string
+): Promise<PlayerSeasonStats> {
+  const q = season ? `season-stats?season=${encodeURIComponent(season)}` : "season-stats";
+  return playerSub(playerId, q, "player season stats");
+}
+
+/** Format a transfer fee. Undisclosed is not zero -- see PlayerTransfer. */
+export function formatFee(fee: number | null | undefined): string {
+  if (fee == null) return "Undisclosed";
+  if (fee === 0) return "Free";
+  if (fee >= 1_000_000) return `€${(fee / 1_000_000).toFixed(fee >= 10_000_000 ? 0 : 1)}m`;
+  if (fee >= 1_000) return `€${Math.round(fee / 1_000)}k`;
+  return `€${fee}`;
+}
