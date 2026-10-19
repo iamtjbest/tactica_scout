@@ -126,9 +126,28 @@ export type MatchDetail = {
   // guessing from an empty response.
   availability: Record<string, boolean>;
   facts: {
-    tactica_atk_rating: number | null;
-    tactica_def_rating: number | null;
-    tactica_win_prob: Record<string, number> | null;
+    // Both sides, explicitly. Sourced from the main Tactica backend's
+    // /api/predict -- Scout never computes these itself. The endpoint is
+    // asymmetric, so it's called once per side to get both win numbers,
+    // which is how Tactica reports a fixture.
+    home: {
+      attack: number | null; defence: number | null; win_prob: number | null;
+      /** True when /api/form used the live Dixon-Coles calculation. False
+       *  means it fell back to a baseline: not wrong, but not current. */
+      live_rating: boolean;
+    };
+    away: {
+      attack: number | null; defence: number | null; win_prob: number | null;
+      live_rating: boolean;
+    };
+    /** Only set when the two independent runs actually leave room for a
+     *  draw. Null means the model didn't, not that a draw is impossible. */
+    draw_prob: number | null;
+    best_formation: string | null;
+    away_best_formation: string | null;
+    /** True when the model was unreachable, as opposed to having no
+     *  rating for these teams. */
+    degraded: boolean;
   };
 };
 
@@ -277,10 +296,38 @@ export type NewsItem = {
   published: string;
 };
 
-export async function getNews(): Promise<{ count: number; items: NewsItem[] }> {
-  const res = await fetch(`${API_BASE}/api/news`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`news failed: ${res.status}`);
-  return res.json();
+export type NewsSources = {
+  medium: { handle: string; count: number; error: string | null };
+  x: { count: number; error: string | null };
+};
+
+export async function getNews(): Promise<{
+  count: number;
+  items: NewsItem[];
+  sources?: NewsSources;
+}> {
+  // Render's free tier sleeps when idle and takes roughly a minute to
+  // wake. Without a timeout the News tab sat on "Loading news..."
+  // indefinitely with no way to tell a cold start from a dead backend.
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 75_000);
+  try {
+    const res = await fetch(`${API_BASE}/api/news`, {
+      cache: "no-store",
+      signal: ctl.signal,
+    });
+    if (!res.ok) throw new Error(`news failed: ${res.status}`);
+    return await res.json();
+  } catch (e: any) {
+    if (e?.name === "AbortError") {
+      throw new Error(
+        "The backend didn't respond in time. It may be waking up from idle, try again in a minute."
+      );
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ── Auth / settings ──────────────────────────────────────────────────

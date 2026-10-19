@@ -32,6 +32,11 @@ interface TeamDetailScreenProps {
 
 type TabType = 'overview' | 'matches' | 'squad' | 'table';
 
+// Matches tab shows this many before the View All screen. Same number
+// as scout-web's INITIAL so the two apps agree. Was 5, which on a
+// 38-game season meant you couldn't see past the next fortnight.
+const FIXTURES_PREVIEW = 10;
+
 export const TeamDetailScreen: React.FC<TeamDetailScreenProps> = ({ route, navigation }) => {
   const { teamId, teamName } = route.params;
   const [team, setTeam] = useState<TeamDetail | null>(null);
@@ -235,7 +240,7 @@ export const TeamDetailScreen: React.FC<TeamDetailScreenProps> = ({ route, navig
             <View>
               <Text style={styles.sectionTitle}>RECENT</Text>
               {recentFixtures.length > 0 ? (
-                recentFixtures.slice(0, 5).map((m, idx) => (
+                recentFixtures.slice(0, FIXTURES_PREVIEW).map((m, idx) => (
                   <MatchCard
                     key={`recent-fix-${m.event_id || idx}`}
                     match={m}
@@ -253,7 +258,7 @@ export const TeamDetailScreen: React.FC<TeamDetailScreenProps> = ({ route, navig
 
               <Text style={[styles.sectionTitle, { marginTop: 16 }]}>UPCOMING</Text>
               {upcomingFixtures.length > 0 ? (
-                upcomingFixtures.slice(0, 5).map((m, idx) => (
+                upcomingFixtures.slice(0, FIXTURES_PREVIEW).map((m, idx) => (
                   <MatchCard
                     key={`upcoming-fix-${m.event_id || idx}`}
                     match={m}

@@ -129,7 +129,7 @@ export const NewsScreen: React.FC = () => {
                     </Text>
                   </View>
 
-                  <Text style={styles.dateText}>{item.published || 'Recent'}</Text>
+                  <Text style={styles.dateText}>{item.published || ''}</Text>
                 </View>
 
                 <Text style={styles.titleText}>{item.title}</Text>

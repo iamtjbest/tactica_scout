@@ -170,42 +170,81 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
           {/* TAB 1: OVERVIEW */}
           {activeTab === 'overview' && (
             <View>
-              {/* Form Strip */}
-              {(detail?.home_form?.length || 0) > 0 && (
+              {/* Form Strip -- mirrors scout-web's TeamFormCard:
+                  opponent crest, name and score, tappable through to the
+                  match. Was W/D/L pills only, which told you a result
+                  happened but not against whom. */}
+              {((detail?.home_form?.length || 0) > 0 ||
+                (detail?.away_form?.length || 0) > 0) && (
                 <View style={styles.cardSection}>
-                  <Text style={styles.sectionTitle}>RECENT FORM</Text>
-                  <View style={styles.formRow}>
-                    <Text style={styles.formTeamLabel} numberOfLines={1}>{home}</Text>
-                    <View style={styles.formPills}>
-                      {detail?.home_form.map((f, i) => (
-                        <View
-                          key={`hf-${i}`}
-                          style={[
-                            styles.formPill,
-                            f.result === 'W' ? styles.pillW : f.result === 'D' ? styles.pillD : styles.pillL,
-                          ]}
+                  <Text style={styles.sectionTitle}>TEAM FORM</Text>
+                  <View style={styles.formColumns}>
+                    {[
+                      { label: home, id: homeId, rows: detail?.home_form || [] },
+                      { label: away, id: awayId, rows: detail?.away_form || [] },
+                    ].map((col, ci) => (
+                      <View key={`fc-${ci}`} style={styles.formColumn}>
+                        <Text
+                          style={styles.formTeamLabel}
+                          numberOfLines={1}
+                          onPress={() =>
+                            col.id &&
+                            navigation.navigate('TeamDetail', {
+                              teamId: col.id,
+                              teamName: col.label,
+                            })
+                          }
                         >
-                          <Text style={styles.formPillText}>{f.result || '-'}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
+                          {col.label}
+                        </Text>
 
-                  <View style={[styles.formRow, { marginTop: 8 }]}>
-                    <Text style={styles.formTeamLabel} numberOfLines={1}>{away}</Text>
-                    <View style={styles.formPills}>
-                      {detail?.away_form.map((f, i) => (
-                        <View
-                          key={`af-${i}`}
-                          style={[
-                            styles.formPill,
-                            f.result === 'W' ? styles.pillW : f.result === 'D' ? styles.pillD : styles.pillL,
-                          ]}
-                        >
-                          <Text style={styles.formPillText}>{f.result || '-'}</Text>
-                        </View>
-                      ))}
-                    </View>
+                        {col.rows.length === 0 ? (
+                          <Text style={styles.factsEmpty}>No recent form yet.</Text>
+                        ) : (
+                          col.rows.map((f, i) => {
+                            const score = f.is_home
+                              ? `${f.own_score ?? '-'}-${f.opp_score ?? '-'}`
+                              : `${f.opp_score ?? '-'}-${f.own_score ?? '-'}`;
+                            const tone =
+                              f.result === 'W'
+                                ? styles.pillW
+                                : f.result === 'D'
+                                ? styles.pillD
+                                : styles.pillL;
+                            return (
+                              <TouchableOpacity
+                                key={f.event_id ?? `f-${ci}-${i}`}
+                                activeOpacity={f.event_id ? 0.6 : 1}
+                                disabled={!f.event_id}
+                                onPress={() =>
+                                  f.event_id &&
+                                  navigation.navigate('MatchDetail', {
+                                    eventId: f.event_id,
+                                  })
+                                }
+                                style={[styles.formResultRow, tone]}
+                              >
+                                {/* Fixed-width slot either way, so rows
+                                    without a crest still line up. */}
+                                <View style={styles.formCrestSlot}>
+                                  {f.opponent_id != null && (
+                                    <Image
+                                      source={{ uri: teamLogoUrl(f.opponent_id) || '' }}
+                                      style={styles.formCrest}
+                                      resizeMode="contain"
+                                    />
+                                  )}
+                                </View>
+                                <Text style={styles.formOpponent} numberOfLines={1}>
+                                  {f.opponent}
+                                </Text>
+                                <Text style={styles.formScore}>{score}</Text>
+                              </TouchableOpacity>
+                            );
+                          })
+                        )}
+                      </View>
+                    ))}
                   </View>
                 </View>
               )}
@@ -255,7 +294,7 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
               {detail?.lineups && Object.keys(detail.lineups).length > 0 ? (
                 <View>
                   <Text style={styles.lineupNote}>
-                    Status: {detail.lineup_status || 'Official'}
+                    Status: {detail.lineup_status || 'Not confirmed'}
                   </Text>
                   {/* Home and Away Lineup rosters */}
                   {['home', 'away'].map((side) => {
@@ -278,7 +317,7 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
                           >
                             <Text style={styles.shirtNum}>{p.shirt_number || idx + 1}</Text>
                             <Text style={styles.lineupPlayerName}>{p.name}</Text>
-                            <Text style={styles.posBadge}>{p.position || 'Starter'}</Text>
+                            <Text style={styles.posBadge}>{p.position || '--'}</Text>
                           </TouchableOpacity>
                         ))}
                       </View>
@@ -357,41 +396,110 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
             </View>
           )}
 
-          {/* TAB 5: FACTS & ALGORITHMIC RATINGS */}
+          {/* TAB 5: FACTS -- Tactica ratings from the main backend.
+              Mirrors scout-web's FactsTab: same conditions, same copy.
+              NEVER put a placeholder rating here. This used to fall back
+              to a hardcoded '7.4' / '6.8', which meant every match in the
+              app showed the same two invented numbers under Tactica's
+              name. */}
           {activeTab === 'facts' && (
             <View style={styles.cardSection}>
-              <Text style={styles.sectionTitle}>TACTICA DATA ENGINE FACTS</Text>
-              <View style={styles.factsGrid}>
-                <View style={styles.factCard}>
-                  <Text style={styles.factLabel}>ATTACK INDEX</Text>
-                  <Text style={[styles.factVal, { color: COLORS.volt }]}>
-                    {detail?.facts?.tactica_atk_rating != null ? detail.facts.tactica_atk_rating : '7.4'}
-                  </Text>
-                </View>
-                <View style={styles.factCard}>
-                  <Text style={styles.factLabel}>DEFENSE INDEX</Text>
-                  <Text style={[styles.factVal, { color: '#38bdf8' }]}>
-                    {detail?.facts?.tactica_def_rating != null ? detail.facts.tactica_def_rating : '6.8'}
-                  </Text>
-                </View>
-              </View>
+              {(() => {
+                const f = detail?.facts;
+                const hasRatings = f?.home?.attack != null || f?.away?.attack != null;
+                const hasProbs =
+                  f?.home?.win_prob != null || f?.away?.win_prob != null;
 
-              {detail?.facts?.tactica_win_prob && (
-                <View style={{ marginTop: 16 }}>
-                  <Text style={styles.winProbTitle}>WIN PROBABILITIES</Text>
-                  <View style={styles.winProbRow}>
-                    <Text style={styles.winProbText}>
-                      Home: {(detail.facts.tactica_win_prob.home * 100).toFixed(0)}%
-                    </Text>
-                    <Text style={styles.winProbText}>
-                      Draw: {(detail.facts.tactica_win_prob.draw * 100).toFixed(0)}%
-                    </Text>
-                    <Text style={styles.winProbText}>
-                      Away: {(detail.facts.tactica_win_prob.away * 100).toFixed(0)}%
-                    </Text>
+                if (!f || (!hasRatings && !hasProbs)) {
+                  return (
+                    <>
+                      <Text style={styles.sectionTitle}>TACTICA NUMBERS</Text>
+                      <Text style={styles.factsEmpty}>
+                        {f?.degraded
+                          ? "Tactica ratings couldn't be loaded right now."
+                          : "Tactica ratings aren't available for this match yet."}
+                      </Text>
+                    </>
+                  );
+                }
+
+                const Bar = ({ label, value, color }: any) => (
+                  <View style={{ marginBottom: 12 }}>
+                    <View style={styles.probHead}>
+                      <Text style={styles.probLabel} numberOfLines={1}>{label}</Text>
+                      <Text style={[styles.probVal, { color }]}>
+                        {value != null ? `${value.toFixed(1)}%` : '--'}
+                      </Text>
+                    </View>
+                    <View style={styles.probTrack}>
+                      <View
+                        style={[styles.probFill, {
+                          backgroundColor: color,
+                          width: `${Math.max(0, Math.min(100, value ?? 0))}%`,
+                        }]}
+                      />
+                    </View>
                   </View>
-                </View>
-              )}
+                );
+
+                return (
+                  <>
+                    {hasProbs && (
+                      <>
+                        <Text style={styles.sectionTitle}>WIN PROBABILITY</Text>
+                        <Bar label={detail?.home_team} value={f.home?.win_prob} color={COLORS.volt} />
+                        {f.draw_prob != null && (
+                          <Bar label="Draw" value={f.draw_prob} color={COLORS.textSecondary} />
+                        )}
+                        <Bar label={detail?.away_team} value={f.away?.win_prob} color="#38bdf8" />
+                        {f.draw_prob == null && (
+                          <Text style={styles.factsEmpty}>
+                            Each figure is that side's own model run, so they won't
+                            always total 100.
+                          </Text>
+                        )}
+                      </>
+                    )}
+
+                    <Text style={[styles.sectionTitle, { marginTop: 18 }]}>
+                      TACTICA RATINGS
+                    </Text>
+                    <View style={styles.ratingRow}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
+                        <Text style={styles.ratingTeam} numberOfLines={1}>{detail?.home_team}</Text>
+                        {f.home?.live_rating === false && f.home?.attack != null && (
+                          <Text style={styles.baseTag}>BASE</Text>
+                        )}
+                      </View>
+                      <Text style={styles.ratingVal}>
+                        ATK <Text style={{ color: COLORS.volt }}>{f.home?.attack ?? '--'}</Text>
+                        {'   '}
+                        DEF <Text style={{ color: '#38bdf8' }}>{f.home?.defence ?? '--'}</Text>
+                      </Text>
+                    </View>
+                    <View style={styles.ratingRow}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
+                        <Text style={styles.ratingTeam} numberOfLines={1}>{detail?.away_team}</Text>
+                        {f.away?.live_rating === false && f.away?.attack != null && (
+                          <Text style={styles.baseTag}>BASE</Text>
+                        )}
+                      </View>
+                      <Text style={styles.ratingVal}>
+                        ATK <Text style={{ color: COLORS.volt }}>{f.away?.attack ?? '--'}</Text>
+                        {'   '}
+                        DEF <Text style={{ color: '#38bdf8' }}>{f.away?.defence ?? '--'}</Text>
+                      </Text>
+                    </View>
+
+                    {!!f.best_formation && (
+                      <View style={{ marginTop: 18 }}>
+                        <Text style={styles.sectionTitle}>MODEL'S BEST SHAPE</Text>
+                        <Text style={styles.bestShape}>{f.best_formation}</Text>
+                      </View>
+                    )}
+                  </>
+                );
+              })()}
             </View>
           )}
         </ScrollView>
@@ -746,6 +854,29 @@ const styles = StyleSheet.create({
     padding: 12,
     alignItems: 'center',
   },
+  probHead: { flexDirection: 'row', alignItems: 'baseline',
+              justifyContent: 'space-between', gap: 10, marginBottom: 5 },
+  probLabel: { color: COLORS.text, fontSize: 13, flex: 1 },
+  probVal: { fontSize: 17, fontWeight: '900' },
+  probTrack: { height: 6, borderRadius: 999, backgroundColor: COLORS.bg, overflow: 'hidden' },
+  probFill: { height: '100%', borderRadius: 999 },
+  baseTag: { color: COLORS.textDim, fontSize: 9, fontWeight: '700' },
+  ratingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+               paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.cardBorder, gap: 12 },
+  ratingTeam: { color: COLORS.text, fontSize: 14, flexShrink: 1 },
+  ratingVal: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '700' },
+  winProbBig: { color: COLORS.volt, fontSize: 32, fontWeight: '900', marginBottom: 6 },
+  bestShape: { color: COLORS.text, fontSize: 18, fontWeight: '700', letterSpacing: 1 },
+  formColumns: { flexDirection: 'row', gap: 12 },
+  formColumn: { flex: 1, minWidth: 0 },
+  formResultRow: { flexDirection: 'row', alignItems: 'center', gap: 6,
+                   borderRadius: 8, borderWidth: 1, paddingHorizontal: 8,
+                   paddingVertical: 6, marginTop: 6 },
+  formCrestSlot: { width: 16, height: 16, alignItems: 'center', justifyContent: 'center' },
+  formCrest: { width: 16, height: 16 },
+  formOpponent: { flex: 1, color: COLORS.text, fontSize: 11 },
+  formScore: { color: COLORS.text, fontSize: 11, fontWeight: '800' },
+  factsEmpty: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 19 },
   factLabel: {
     color: COLORS.textDim,
     fontSize: 10,

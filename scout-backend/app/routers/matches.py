@@ -47,6 +47,7 @@ Managers/referees/venues, Competition structure):
 import time
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
+from app.tactica import get_match_ratings
 from app.config import bsd_get, cache_read, cache_write, cache_age, get_league_id_map, extract_league_name
 
 router = APIRouter()
@@ -352,11 +353,11 @@ def match_detail(event_id: int):
         "h2h":           h2h,
         "stats":         stats,
         "availability":  (availability or {}).get("available") or {},
-        "facts": {
-            "tactica_atk_rating": None,
-            "tactica_def_rating": None,
-            "tactica_win_prob":   None,
-        },
+        # Ratings come from the main Tactica backend, never computed
+        # here -- see app/tactica.py for why. Both sides are returned
+        # explicitly: a match has two attacks and two defences, and the
+        # old single tactica_atk_rating field couldn't say whose it was.
+        "facts": get_match_ratings(base.get("home_team"), base.get("away_team")),
         "_debug_base_keys": list(base.keys()),
         "_debug_incidents_sample": incidents[0] if incidents else None,
         "cached": False,

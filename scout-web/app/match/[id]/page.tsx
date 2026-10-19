@@ -850,25 +850,128 @@ function StatsTab({ match }: { match: MatchDetail }) {
   );
 }
 
+// The copy and the rules here are mirrored in scout-mobile's Facts tab
+// (MatchDetailScreen.tsx). They render the same backend response, so if
+// one changes, change both.
 function FactsTab({ match }: { match: MatchDetail }) {
-  const { tactica_atk_rating, tactica_def_rating, tactica_win_prob } = match.facts;
-  const hasTacticaData = tactica_atk_rating != null || tactica_win_prob != null;
+  const { home, away, draw_prob, best_formation, degraded } = match.facts;
+  const hasRatings = home.attack != null || away.attack != null;
+  const hasProbs = home.win_prob != null || away.win_prob != null;
+
+  if (!hasRatings && !hasProbs) {
+    return (
+      <div className="card">
+        <p className="section-label mb-3">Tactica Numbers</p>
+        <p className="text-mt text-sm">
+          {degraded
+            ? "Tactica ratings couldn't be loaded right now."
+            : "Tactica ratings aren't available for this match yet."}
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div className="card">
-      <p className="section-label mb-3">Tactica Numbers</p>
-      {!hasTacticaData ? (
-        <p className="text-mt text-sm">
-          Not wired up yet — this tab is where the main Tactica backend&apos;s ATK/DEF
-          ratings and win probability get pulled in alongside BSD&apos;s match facts, next
-          build step once the match detail endpoint itself is confirmed working.
-        </p>
-      ) : (
-        <div className="space-y-2 text-sm">
-          <p className="text-white">ATK rating: <span className="text-volt font-bold">{tactica_atk_rating}</span></p>
-          <p className="text-white">DEF rating: <span className="text-cyan font-bold">{tactica_def_rating}</span></p>
+    <div className="space-y-4">
+      {hasProbs && (
+        <div className="card">
+          <p className="section-label mb-4">Win Probability</p>
+          <div className="space-y-3">
+            <ProbBar label={match.home_team} value={home.win_prob} tone="volt" />
+            {draw_prob != null && <ProbBar label="Draw" value={draw_prob} tone="mt" />}
+            <ProbBar label={match.away_team} value={away.win_prob} tone="cyan" />
+          </div>
+          {draw_prob == null && (
+            // Each side's number is its own model run, so they don't
+            // always leave a clean remainder. Saying nothing beats
+            // printing a draw figure the model never produced.
+            <p className="text-mt2 text-xs mt-3">
+              Each figure is that side&apos;s own model run, so they won&apos;t always
+              total 100.
+            </p>
+          )}
         </div>
       )}
+
+      <div className="card">
+        <p className="section-label mb-4">Tactica Ratings</p>
+        <div className="space-y-3">
+          <RatingRow team={match.home_team} teamId={match.home_team_id} attack={home.attack} defence={home.defence} live={home.live_rating} />
+          <RatingRow team={match.away_team} teamId={match.away_team_id} attack={away.attack} defence={away.defence} live={away.live_rating} />
+        </div>
+      </div>
+
+      {best_formation && (
+        <div className="card">
+          <p className="section-label mb-2">Model&apos;s Best Shape</p>
+          <p className="font-mono text-white text-lg">{best_formation}</p>
+          <p className="text-mt2 text-xs mt-1">
+            Highest-rated setup for {match.home_team} against this opponent.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProbBar({
+  label, value, tone,
+}: {
+  label: string; value: number | null; tone: "volt" | "cyan" | "mt";
+}) {
+  const bar = tone === "volt" ? "bg-volt" : tone === "cyan" ? "bg-cyan" : "bg-mt";
+  const txt = tone === "volt" ? "text-volt" : tone === "cyan" ? "text-cyan" : "text-mt";
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3 mb-1.5">
+        <span className="text-white text-sm truncate">{label}</span>
+        <span className={`font-display font-black text-lg ${txt}`}>
+          {value != null ? `${value.toFixed(1)}%` : "--"}
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-bg2 overflow-hidden">
+        <div
+          className={`h-full rounded-full ${bar}`}
+          style={{ width: `${Math.max(0, Math.min(100, value ?? 0))}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function RatingRow({
+  team, teamId, attack, defence, live,
+}: {
+  team: string; teamId: number | null; attack: number | null;
+  defence: number | null; live?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2 border-b border-bd last:border-0">
+      <div className="flex items-center gap-2 min-w-0">
+        {teamId != null && (
+          <img
+            src={`${BSD_IMG_BASE}/img/team/${teamId}/?sor=true&bg=transparent`}
+            alt=""
+            className="w-5 h-5 object-contain shrink-0"
+          />
+        )}
+        <span className="text-white text-sm truncate">{team}</span>
+        {/* A baseline rating is not a live one. Say so rather than
+            letting a stale number pass as this season's form. */}
+        {live === false && attack != null && (
+          <span className="text-mt2 text-[10px] font-mono shrink-0" title="Not enough matches for a live rating; showing baseline">
+            BASE
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-4 shrink-0">
+        <span className="text-mt text-xs font-mono">
+          ATK <span className="text-volt font-bold text-sm">{attack ?? "--"}</span>
+        </span>
+        <span className="text-mt text-xs font-mono">
+          DEF <span className="text-cyan font-bold text-sm">{defence ?? "--"}</span>
+        </span>
+      </div>
     </div>
   );
 }

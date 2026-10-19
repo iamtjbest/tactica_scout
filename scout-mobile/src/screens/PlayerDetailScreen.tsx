@@ -15,6 +15,14 @@ import { RadarChart } from '../components/RadarChart';
 import {
   getPlayerProfile,
   getPlayerRadar,
+  getPlayerCareer,
+  getPlayerTransfers,
+  getPlayerNationalTeam,
+  getPlayerSeasonStats,
+  formatFee,
+  type PlayerCareerSeason,
+  type PlayerTransfer,
+  type PlayerSeasonStats,
   playerImageUrl,
   teamLogoUrl,
   PlayerDetail,
@@ -26,36 +34,82 @@ interface PlayerDetailScreenProps {
   navigation: any;
 }
 
+// Three states, not two: null = loading, [] = genuinely empty,
+// degraded/failed = the fetch returned nothing. Collapsing these is how
+// a page ends up telling a 15-year veteran he has no career.
+type Loadable<T> = { data: T | null; degraded: boolean; failed: boolean };
+const PENDING = { data: null, degraded: false, failed: false };
+
+// Order here is the order they appear in the stats grid.
+const STAT_FIELDS: [string, string][] = [
+  ['appearances', 'APPS'], ['minutes_played', 'MINUTES'],
+  ['goals', 'GOALS'], ['assists', 'ASSISTS'],
+  ['shots', 'SHOTS'], ['shots_on_target', 'ON TARGET'],
+  ['passes', 'PASSES'], ['key_passes', 'KEY PASSES'],
+  ['tackles', 'TACKLES'], ['interceptions', 'INTERCEPTIONS'],
+  ['duels_won', 'DUELS WON'], ['saves', 'SAVES'],
+  ['yellow_cards', 'YELLOWS'], ['red_cards', 'REDS'],
+];
+
 export const PlayerDetailScreen: React.FC<PlayerDetailScreenProps> = ({ route, navigation }) => {
   const { playerId, playerName } = route.params;
   const [profile, setProfile] = useState<PlayerDetail | null>(null);
   const [radar, setRadar] = useState<RadarAxes | null>(null);
   const [matchesUsed, setMatchesUsed] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [subTab, setSubTab] = useState<'season' | 'career' | 'transfers'>('season');
+  const [career, setCareer] = useState<Loadable<PlayerCareerSeason[]>>(PENDING);
+  const [transfers, setTransfers] = useState<Loadable<PlayerTransfer[]>>(PENDING);
+  const [national, setNational] = useState<Loadable<any[]>>(PENDING);
+  const [seasonStats, setSeasonStats] = useState<PlayerSeasonStats | null>(null);
+  const [seasonFailed, setSeasonFailed] = useState(false);
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([
-      getPlayerProfile(playerId),
-      getPlayerRadar(playerId).catch(() => ({
-        radar: {
-          shooting: 72,
-          passing: 78,
-          dribbling: 75,
-          defending: 55,
-          creativity: 70,
-          physical: 74,
-        },
-        matches_used: 12,
-      })),
-    ])
-      .then(([profRes, radarRes]) => {
-        setProfile(profRes);
-        setRadar(radarRes.radar);
-        setMatchesUsed(radarRes.matches_used || 0);
-      })
-      .catch((err) => console.warn('Failed to load player details:', err))
+
+    // The profile gates the screen. Everything else is additive and
+    // catches its own failure, so one dead endpoint can't blank the page.
+    getPlayerProfile(playerId)
+      .then(setProfile)
+      .catch((err) => console.warn('Failed to load player profile:', err))
       .finally(() => setLoading(false));
+
+    // NO placeholder radar. This used to fall back to a hardcoded set of
+    // attributes (shooting 72, passing 78, ...) captioned "normalized
+    // across 12 competitive matches", which meant a failed fetch drew a
+    // complete invented scouting profile and presented it as analysis.
+    // A missing radar is correct; a fabricated one is not.
+    getPlayerRadar(playerId)
+      .then((r) => {
+        setRadar(r?.radar ?? null);
+        setMatchesUsed(r?.matches_used || 0);
+      })
+      .catch(() => {
+        setRadar(null);
+        setMatchesUsed(0);
+      });
+
+    getPlayerCareer(playerId)
+      .then((r) => setCareer({ data: r.seasons || [], degraded: !!r.degraded, failed: false }))
+      .catch(() => setCareer({ data: [], degraded: false, failed: true }));
+
+    getPlayerTransfers(playerId)
+      .then((r) => setTransfers({ data: r.transfers || [], degraded: !!r.degraded, failed: false }))
+      .catch(() => setTransfers({ data: [], degraded: false, failed: true }));
+
+    getPlayerNationalTeam(playerId)
+      .then((r) => {
+        // Backend hands back a list or an object depending on BSD's
+        // shape, which the docs don't pin down. Take whichever is filled.
+        const rows = (r.teams && r.teams.length ? r.teams : null) ?? (r.summary ? [r.summary] : []);
+        setNational({ data: rows, degraded: !!r.degraded, failed: false });
+      })
+      .catch(() => setNational({ data: [], degraded: false, failed: true }));
+
+    setSeasonFailed(false);
+    getPlayerSeasonStats(playerId)
+      .then(setSeasonStats)
+      .catch(() => setSeasonFailed(true));
   }, [playerId]);
 
   const photo = playerImageUrl(playerId);
@@ -98,7 +152,7 @@ export const PlayerDetailScreen: React.FC<PlayerDetailScreenProps> = ({ route, n
                 <Text style={styles.playerName}>{displayName}</Text>
                 <View style={styles.badgeRow}>
                   <View style={styles.posBadge}>
-                    <Text style={styles.posText}>{profile?.position || 'Forward'}</Text>
+                    <Text style={styles.posText}>{profile?.position || '--'}</Text>
                   </View>
                   {profile?.nationality && (
                     <Text style={styles.natText}>• {profile.nationality}</Text>
@@ -171,7 +225,7 @@ export const PlayerDetailScreen: React.FC<PlayerDetailScreenProps> = ({ route, n
                 <View>
                   <Text style={styles.sectionTitle}>TACTICAL RADAR PROFILE</Text>
                   <Text style={styles.radarSub}>
-                    Normalized across {matchesUsed || 10} competitive matches
+                    Normalized across {matchesUsed} competitive matches
                   </Text>
                 </View>
 
@@ -200,6 +254,130 @@ export const PlayerDetailScreen: React.FC<PlayerDetailScreenProps> = ({ route, n
               </View>
             </View>
           )}
+
+          {/* ── Career / Transfers / International ───────────────────
+              Mirrors scout-web's player page tabs. Three independent
+              fetches: null = still loading, [] = genuinely empty,
+              degraded = the fetch came back with nothing. Those three
+              render differently on purpose, so the screen never claims a
+              player has no career because one request failed. */}
+          <View style={styles.cardSection}>
+            <View style={styles.subTabRow}>
+              {(['season', 'career', 'transfers'] as const).map((t) => (
+                <TouchableOpacity
+                  key={t}
+                  onPress={() => setSubTab(t)}
+                  style={[styles.subTab, subTab === t && styles.subTabActive]}
+                >
+                  <Text style={[styles.subTabText, subTab === t && styles.subTabTextActive]}>
+                    {t === 'season' ? 'STATS' : t.toUpperCase()}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {subTab === 'season' && (
+              seasonFailed ? (
+                <Text style={styles.subEmpty}>Couldn't load this right now.</Text>
+              ) : !seasonStats ? (
+                <Text style={styles.subEmpty}>Loading...</Text>
+              ) : seasonStats.totals.appearances ? (
+                <View style={styles.statGrid}>
+                  {/* Only keys BSD actually reported. A stat it didn't send
+                      comes back null and is skipped rather than shown as 0:
+                      a midfielder with no saves hasn't made zero saves. */}
+                  {STAT_FIELDS.filter(([k]) => seasonStats.totals[k] != null).map(([k, label]) => (
+                    <View key={k} style={styles.statCell}>
+                      <Text style={styles.statLabel}>{label}</Text>
+                      <Text style={styles.statVal}>{String(seasonStats.totals[k])}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.subEmpty}>No match data for this season.</Text>
+              )
+            )}
+
+            {subTab === 'career' && (
+              career.data && career.data.length > 0 ? (
+                career.data.map((s, i) => (
+                  <View key={i} style={styles.careerRow}>
+                    <Text style={styles.careerSeason}>{s.season ?? s.season_name ?? '--'}</Text>
+                    <Text style={styles.careerClub} numberOfLines={1}>{s.team_name ?? '--'}</Text>
+                    <Text style={styles.careerNum}>{s.appearances ?? '--'}</Text>
+                    <Text style={[styles.careerNum, { color: COLORS.volt }]}>{s.goals ?? '--'}</Text>
+                    <Text style={[styles.careerNum, { color: '#38bdf8' }]}>{s.assists ?? '--'}</Text>
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.subEmpty}>
+                  {career.failed || career.degraded
+                    ? "Couldn't load this right now."
+                    : career.data === null
+                    ? 'Loading...'
+                    : 'No career history on file.'}
+                </Text>
+              )
+            )}
+
+            {subTab === 'transfers' && (
+              transfers.data && transfers.data.length > 0 ? (
+                transfers.data.map((t, i) => {
+                  const when = t.date ?? t.transfer_date;
+                  return (
+                    <View key={i} style={styles.transferRow}>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.transferTeams} numberOfLines={1}>
+                          {t.from_team_name ?? '--'} → {t.to_team_name ?? '--'}
+                        </Text>
+                        <Text style={styles.transferDate}>
+                          {when
+                            ? new Date(when).toLocaleDateString('en-GB', {
+                                day: 'numeric', month: 'short', year: 'numeric',
+                              })
+                            : '--'}
+                          {t.transfer_type ? ` • ${t.transfer_type}` : ''}
+                        </Text>
+                      </View>
+                      {/* formatFee prints "Undisclosed" for a null fee and
+                          "Free" only for a real published zero. */}
+                      <Text style={styles.transferFee}>{formatFee(t.fee_eur)}</Text>
+                    </View>
+                  );
+                })
+              ) : (
+                <Text style={styles.subEmpty}>
+                  {transfers.failed || transfers.degraded
+                    ? "Couldn't load this right now."
+                    : transfers.data === null
+                    ? 'Loading...'
+                    : 'No transfers on file.'}
+                </Text>
+              )
+            )}
+          </View>
+
+          {/* International record. BSD's docs list the route but not its
+              body shape, so this renders only the fields a row actually
+              has rather than assuming a schema and printing blanks. */}
+          {national.data && national.data.length > 0 && (
+            <View style={styles.cardSection}>
+              <Text style={styles.sectionTitle}>INTERNATIONAL</Text>
+              {national.data.map((n: any, i: number) => (
+                <View key={i} style={styles.natRow}>
+                  <Text style={styles.natName} numberOfLines={1}>
+                    {n.team_name ?? n.name ?? profile?.nationality ?? 'National team'}
+                  </Text>
+                  <Text style={styles.natStat}>
+                    {n.appearances != null ? `${n.appearances} caps` : ''}
+                    {n.appearances != null && n.goals != null ? '   ' : ''}
+                    {n.goals != null ? `${n.goals} goals` : ''}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+
         </ScrollView>
       )}
     </View>
@@ -207,6 +385,32 @@ export const PlayerDetailScreen: React.FC<PlayerDetailScreenProps> = ({ route, n
 };
 
 const styles = StyleSheet.create({
+  subTabRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
+  subTab: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999,
+            borderWidth: 1, borderColor: COLORS.cardBorder },
+  subTabActive: { backgroundColor: COLORS.voltMuted, borderColor: COLORS.cardBorderActive },
+  subTabText: { color: COLORS.textSecondary, fontSize: 11, fontWeight: '800', letterSpacing: 1 },
+  subTabTextActive: { color: COLORS.volt },
+  subEmpty: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 19 },
+  statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  statCell: { width: '47%', backgroundColor: COLORS.cardElevated, borderRadius: 10,
+              paddingVertical: 10, paddingHorizontal: 12 },
+  statLabel: { color: COLORS.textSecondary, fontSize: 9, letterSpacing: 1, fontWeight: '700' },
+  statVal: { color: COLORS.text, fontSize: 18, fontWeight: '900', marginTop: 2 },
+  careerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9,
+               borderBottomWidth: 1, borderBottomColor: COLORS.cardBorder },
+  careerSeason: { color: COLORS.textSecondary, fontSize: 11, width: 56 },
+  careerClub: { color: COLORS.text, fontSize: 12, flex: 1 },
+  careerNum: { color: COLORS.text, fontSize: 12, fontWeight: '700', width: 30, textAlign: 'right' },
+  transferRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10,
+                 borderBottomWidth: 1, borderBottomColor: COLORS.cardBorder },
+  transferTeams: { color: COLORS.text, fontSize: 12 },
+  transferDate: { color: COLORS.textSecondary, fontSize: 10, marginTop: 2 },
+  transferFee: { color: COLORS.text, fontSize: 12, fontWeight: '800' },
+  natRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+            gap: 10, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: COLORS.cardBorder },
+  natName: { color: COLORS.text, fontSize: 13, flex: 1 },
+  natStat: { color: COLORS.textSecondary, fontSize: 11, fontWeight: '700' },
   container: {
     flex: 1,
     backgroundColor: COLORS.bg,

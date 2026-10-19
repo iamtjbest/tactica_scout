@@ -72,6 +72,8 @@ export type LeagueMatches = {
 export type TeamFormResult = {
   event_id: number | null;
   opponent: string;
+  /** Opponent's team id, for the crest. Null where BSD didn't give one. */
+  opponent_id: number | null;
   own_score: number | null;
   opp_score: number | null;
   is_home: boolean;
@@ -128,9 +130,28 @@ export type MatchDetail = {
   stats: any;
   availability: Record<string, boolean>;
   facts: {
-    tactica_atk_rating: number | null;
-    tactica_def_rating: number | null;
-    tactica_win_prob: Record<string, number> | null;
+    // Both sides, explicitly. Sourced from the main Tactica backend's
+    // /api/predict -- Scout never computes these itself. The endpoint is
+    // asymmetric, so it's called once per side to get both win numbers,
+    // which is how Tactica reports a fixture.
+    home: {
+      attack: number | null; defence: number | null; win_prob: number | null;
+      /** True when /api/form used the live Dixon-Coles calculation. False
+       *  means it fell back to a baseline: not wrong, but not current. */
+      live_rating: boolean;
+    };
+    away: {
+      attack: number | null; defence: number | null; win_prob: number | null;
+      live_rating: boolean;
+    };
+    /** Only set when the two independent runs actually leave room for a
+     *  draw. Null means the model didn't, not that a draw is impossible. */
+    draw_prob: number | null;
+    best_formation: string | null;
+    away_best_formation: string | null;
+    /** True when the model was unreachable, as opposed to having no
+     *  rating for these teams. */
+    degraded: boolean;
   };
 };
 
@@ -388,4 +409,91 @@ export async function updateLanguage(language: string): Promise<{ user: ScoutUse
   });
   if (!res.ok) throw new Error(`Failed to update language: ${res.status}`);
   return res.json();
+}
+
+// ── Player career / transfers / international / season totals ─────────
+// Mirrors scout-web/lib/api.ts. Each can return degraded: true, meaning
+// the fetch came back with nothing -- distinct from a genuinely empty
+// record, so the UI never claims a veteran has no career because one
+// request failed.
+
+export type PlayerCareerSeason = {
+  season?: string | null;
+  season_name?: string | null;
+  team_name?: string | null;
+  team_id?: number | null;
+  league_name?: string | null;
+  appearances?: number | null;
+  goals?: number | null;
+  assists?: number | null;
+  [k: string]: any;
+};
+
+export type PlayerTransfer = {
+  date?: string | null;
+  transfer_date?: string | null;
+  from_team_name?: string | null;
+  to_team_name?: string | null;
+  from_team_id?: number | null;
+  to_team_id?: number | null;
+  /** null means undisclosed, NOT free. */
+  fee_eur?: number | null;
+  transfer_type?: string | null;
+  [k: string]: any;
+};
+
+export type PlayerSeasonStats = {
+  player_id: number;
+  season: string | null;
+  seasons_available: string[];
+  grouped_by: string;
+  record_keys: string[];
+  totals: Record<string, number | null>;
+  recent_matches: any[];
+  degraded: boolean;
+};
+
+async function playerSub<T>(playerId: number, path: string, label: string): Promise<T> {
+  // Base is resolved per request here (not a module constant) because the
+  // app lets you point it at a different backend at runtime.
+  const base = await getApiBase();
+  const res = await fetch(`${base}/api/players/${playerId}/${path}`);
+  if (!res.ok) throw new Error(`${label} failed: ${res.status}`);
+  return res.json();
+}
+
+export function getPlayerCareer(
+  playerId: number
+): Promise<{ seasons: PlayerCareerSeason[]; degraded: boolean }> {
+  return playerSub(playerId, 'career', 'player career');
+}
+
+export function getPlayerTransfers(
+  playerId: number
+): Promise<{ transfers: PlayerTransfer[]; degraded: boolean }> {
+  return playerSub(playerId, 'transfers', 'player transfers');
+}
+
+export function getPlayerNationalTeam(
+  playerId: number
+): Promise<{ teams: any[]; summary: any | null; degraded: boolean }> {
+  return playerSub(playerId, 'national-team', 'player national team');
+}
+
+export function getPlayerSeasonStats(
+  playerId: number,
+  season?: string
+): Promise<PlayerSeasonStats> {
+  const q = season ? `season-stats?season=${encodeURIComponent(season)}` : 'season-stats';
+  return playerSub(playerId, q, 'player season stats');
+}
+
+/** Format a transfer fee. Undisclosed is not zero -- BSD's docs are
+ *  explicit that a move with no published figure is not a fee of nothing. */
+export function formatFee(fee: number | null | undefined): string {
+  if (fee == null) return 'Undisclosed';
+  if (fee === 0) return 'Free';
+  if (fee >= 1_000_000) return `€${(fee / 1_000_000).toFixed(fee >= 10_000_000 ? 0 : 1)}m`;
+  if (fee >= 1_000) return `€${Math.round(fee / 1_000)}k`;
+  return `€${fee}`;
 }

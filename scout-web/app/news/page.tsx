@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { getNews, type NewsItem } from "@/lib/api";
+import { getNews, type NewsItem, type NewsSources } from "@/lib/api";
 
 function formatDate(raw: string): string {
   const d = new Date(raw);
@@ -19,12 +19,16 @@ function SourceBadge({ source }: { source: NewsItem["source"] }) {
 
 export default function NewsPage() {
   const [items, setItems] = useState<NewsItem[]>([]);
+  const [sources, setSources] = useState<NewsSources | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     getNews()
-      .then((d) => setItems(d.items))
+      .then((d) => {
+        setItems(d.items);
+        setSources(d.sources ?? null);
+      })
       .catch((e) => setError(e.message || "Failed to load news."))
       .finally(() => setLoading(false));
   }, []);
@@ -48,7 +52,22 @@ export default function NewsPage() {
       )}
 
       {!loading && !error && items.length === 0 && (
-        <p className="text-mt text-sm">Nothing here yet.</p>
+        <div className="card">
+          <p className="text-mt text-sm">Nothing here yet.</p>
+          {/* Say which half is missing and why. An empty feed used to be
+              indistinguishable from a broken one. */}
+          {sources && (
+            <ul className="mt-3 space-y-1">
+              <li className="text-mt2 text-xs">
+                Medium (@{sources.medium.handle}):{" "}
+                {sources.medium.error ?? `${sources.medium.count} articles`}
+              </li>
+              <li className="text-mt2 text-xs">
+                X: {sources.x.error ?? `${sources.x.count} posts`}
+              </li>
+            </ul>
+          )}
+        </div>
       )}
 
       <div className="space-y-3">

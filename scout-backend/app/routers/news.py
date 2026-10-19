@@ -25,7 +25,7 @@ import requests as _requests
 
 router = APIRouter()
 
-MEDIUM_HANDLE  = os.environ.get("MEDIUM_HANDLE", "TacticaEngine")
+MEDIUM_HANDLE  = os.environ.get("MEDIUM_HANDLE", "iamtjbest")
 MEDIUM_RSS_URL = f"https://medium.com/feed/@{MEDIUM_HANDLE}"
 NEWS_TTL       = 900  # 15 min — Medium's RSS doesn't update often enough to poll faster
 
@@ -44,14 +44,20 @@ def _strip_html(raw: str) -> str:
     return re.sub("<[^<]+?>", "", raw or "").strip()
 
 
-def _parse_medium_rss() -> list[dict]:
+def _parse_medium_rss() -> tuple[list[dict], str | None]:
     """Medium's <description> is full HTML, stripped down here to a
     plain-text excerpt rather than shipping raw Medium HTML to the
-    frontend to render."""
+    frontend to render.
+
+    Returns (items, error). The error string is the point: this used to
+    swallow every failure into an empty list, so a wrong handle, a 404,
+    a timeout and "this author has published nothing" were all the same
+    blank tab with nothing to debug.
+    """
     try:
         resp = _requests.get(MEDIUM_RSS_URL, timeout=10)
         if resp.status_code != 200:
-            return []
+            return [], f"medium returned {resp.status_code} for @{MEDIUM_HANDLE}"
         root = ElementTree.fromstring(resp.content)
         items = []
         for item in root.findall("./channel/item"):
@@ -64,9 +70,11 @@ def _parse_medium_rss() -> list[dict]:
                 "excerpt":   excerpt,
                 "published": item.findtext("pubDate") or "",
             })
-        return items
-    except Exception:
-        return []
+        if not items:
+            return [], f"@{MEDIUM_HANDLE}'s feed parsed but has no articles"
+        return items, None
+    except Exception as exc:
+        return [], f"medium fetch failed: {type(exc).__name__}"
 
 
 @router.get("/news")
@@ -77,7 +85,7 @@ def news_feed():
         cached["cached"] = True
         return cached
 
-    medium_items = _parse_medium_rss()
+    medium_items, medium_error = _parse_medium_rss()
     x_items = [
         {
             "source":    "x",
@@ -100,7 +108,22 @@ def news_feed():
         "_cached_at": time.time(),
         "count":      len(items),
         "items":      items,
+        # Named sources so an empty tab can say which half is missing
+        # and why, instead of just showing nothing.
+        "sources": {
+            "medium": {
+                "handle": MEDIUM_HANDLE,
+                "count":  len(medium_items),
+                "error":  medium_error,
+            },
+            "x": {
+                "count": len(x_items),
+                "error": None if x_items else "no posts in featured_x_posts.json",
+            },
+        },
         "cached":     False,
     }
-    cache_write(cache_key, result)
+    # A failed fetch must not sit in cache for the full 15 minutes.
+    if items or not medium_error:
+        cache_write(cache_key, result)
     return result
