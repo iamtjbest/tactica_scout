@@ -18,6 +18,7 @@ export default function TeamPage() {
   // null = still loading, [] = loaded and genuinely empty. Without the
   // distinction the UI can't tell "waiting" from "nothing to show".
   const [recent, setRecent] = useState<any[] | null>(null);
+  const [upcoming, setUpcoming] = useState<any[] | null>(null);
   const [topStatsFailed, setTopStatsFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +35,7 @@ export default function TeamPage() {
         setTeam(teamData);
         setFixtures(fixturesData.matches || []);
         setRecent(fixturesData.recent || []);
+        setUpcoming(fixturesData.upcoming || []);
         
         // Fetch standings and top stats based on primary_league_id
         const leagueIdToUse = teamData.primary_league_id || fixturesData.matches?.find((m: any) => m.status === "notstarted" || m.status === "inprogress")?.league_id;
@@ -181,8 +183,11 @@ export default function TeamPage() {
           {/* A2. Upcoming Fixtures list (excludes whatever is already shown as the hero above) */}
           {(() => {
             const heroMatch = fixtures.find(m => m.status === "notstarted" || m.status === "inprogress");
-            const upcomingList = fixtures
-              .filter(m => m.status !== "finished" && m.event_id !== heroMatch?.event_id)
+            // Use the backend's `upcoming` array. Filtering the combined
+            // list on status !== "finished" let past matches through,
+            // because BSD also reports them as ft/ended/played.
+            const upcomingList = (upcoming || [])
+              .filter((m: any) => m.event_id !== heroMatch?.event_id)
               .slice(0, 6);
             if (upcomingList.length === 0) return null;
             return (
@@ -506,43 +511,86 @@ export default function TeamPage() {
         </div>
       )}
       {activeTab === "matches" && (
-        <TeamMatchesTab teamId={team.id} matches={fixtures} />
+        <TeamMatchesTab teamId={team.id} recent={recent} upcoming={upcoming} />
       )}
     </div>
   );
 }
 
-function TeamMatchesTab({ teamId, matches }: { teamId: number, matches: any[] }) {
-  if (!matches || matches.length === 0) return <p className="text-mt text-sm p-4">No matches found.</p>;
+function TeamMatchesTab({
+  teamId,
+  recent,
+  upcoming,
+}: {
+  teamId: number;
+  recent: any[] | null;
+  upcoming: any[] | null;
+}) {
+  // Show a slice by default. A full season is ~50 fixtures and nobody
+  // wants to scroll May to find next weekend.
+  const INITIAL = 10;
+  const [showAllUpcoming, setShowAllUpcoming] = useState(false);
+  const [showAllPast, setShowAllPast] = useState(false);
 
-  // Group matches by past and upcoming
-  const past = matches.filter((m) => m.status === "finished");
-  const upcoming = matches.filter((m) => m.status !== "finished");
+  if (recent === null || upcoming === null) {
+    return <p className="text-mt text-sm p-4">Loading...</p>;
+  }
+  if (recent.length === 0 && upcoming.length === 0) {
+    return <p className="text-mt text-sm p-4">No matches found.</p>;
+  }
+
+  // The backend already split these using every status string BSD
+  // actually returns (finished/ended/played/ft). Don't re-filter here.
+  const shownUpcoming = showAllUpcoming ? upcoming : upcoming.slice(0, INITIAL);
+  const shownPast = showAllPast ? recent : recent.slice(0, INITIAL);
 
   const groupMatches = (list: any[]) => {
     const grouped: Record<string, any[]> = {};
-    list.forEach(m => {
+    list.forEach((m) => {
       const d = new Date(m.kickoff || m.event_date);
       if (isNaN(d.getTime())) return;
-      const month = d.toLocaleString('default', { month: 'long', year: 'numeric' });
+      const month = d.toLocaleString("default", { month: "long", year: "numeric" });
       if (!grouped[month]) grouped[month] = [];
       grouped[month].push(m);
     });
     return grouped;
   };
 
-  const pastGrouped = groupMatches(past.reverse());
-  const upcomingGrouped = groupMatches(upcoming);
+  const upcomingGrouped = groupMatches(shownUpcoming);
+  const pastGrouped = groupMatches(shownPast);
+
+  const ToggleButton = ({
+    expanded,
+    total,
+    onClick,
+    label,
+  }: {
+    expanded: boolean;
+    total: number;
+    onClick: () => void;
+    label: string;
+  }) => (
+    <button
+      onClick={onClick}
+      className="w-full mt-3 py-2.5 rounded-lg border border-bd hover:border-volt2/50 text-sm font-semibold text-volt2 transition-colors"
+    >
+      {expanded ? "Show less" : `View all ${total} ${label}`}
+    </button>
+  );
 
   return (
     <div className="space-y-8">
       {upcoming.length > 0 && (
         <div>
-          <h2 className="text-xl font-display font-black text-white mb-4">Upcoming Fixtures</h2>
+          <h2 className="text-xl font-display font-black text-white mb-4">
+            Upcoming Fixtures
+          </h2>
           <div className="space-y-6">
-            {Object.keys(upcomingGrouped).map(month => (
+            {Object.keys(upcomingGrouped).map((month) => (
               <div key={month}>
-                <h3 className="section-label mb-3 sticky top-0 bg-bg/90 py-2 backdrop-blur-sm z-10">{month}</h3>
+                <h3 className="section-label mb-3 sticky top-0 bg-bg/90 py-2 backdrop-blur-sm z-10">
+                  {month}
+                </h3>
                 <div className="space-y-2">
                   {upcomingGrouped[month].map((m) => (
                     <MatchCardWrapper key={m.event_id} match={m} teamId={teamId} />
@@ -551,16 +599,28 @@ function TeamMatchesTab({ teamId, matches }: { teamId: number, matches: any[] })
               </div>
             ))}
           </div>
+          {upcoming.length > INITIAL && (
+            <ToggleButton
+              expanded={showAllUpcoming}
+              total={upcoming.length}
+              onClick={() => setShowAllUpcoming((v) => !v)}
+              label="fixtures"
+            />
+          )}
         </div>
       )}
 
-      {past.length > 0 && (
+      {recent.length > 0 && (
         <div>
-          <h2 className="text-xl font-display font-black text-white mb-4">Past Results</h2>
+          <h2 className="text-xl font-display font-black text-white mb-4">
+            Past Results
+          </h2>
           <div className="space-y-6">
-            {Object.keys(pastGrouped).map(month => (
+            {Object.keys(pastGrouped).map((month) => (
               <div key={month}>
-                <h3 className="section-label mb-3 sticky top-0 bg-bg/90 py-2 backdrop-blur-sm z-10">{month}</h3>
+                <h3 className="section-label mb-3 sticky top-0 bg-bg/90 py-2 backdrop-blur-sm z-10">
+                  {month}
+                </h3>
                 <div className="space-y-2">
                   {pastGrouped[month].map((m) => (
                     <MatchCardWrapper key={m.event_id} match={m} teamId={teamId} />
@@ -569,13 +629,20 @@ function TeamMatchesTab({ teamId, matches }: { teamId: number, matches: any[] })
               </div>
             ))}
           </div>
+          {recent.length > INITIAL && (
+            <ToggleButton
+              expanded={showAllPast}
+              total={recent.length}
+              onClick={() => setShowAllPast((v) => !v)}
+              label="results"
+            />
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// Wrapper to dynamically load MatchCard to avoid top-level import bloat, or we can just import it.
 function MatchCardWrapper({ match, teamId }: { match: any, teamId?: number }) {
   const [MatchCard, setMatchCard] = useState<any>(null);
   useEffect(() => {

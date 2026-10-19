@@ -160,14 +160,47 @@ def team_fixtures(team_id: int):
             cached["cached"] = True
             return cached
 
-    data = bsd_get(f"/teams/{team_id}/fixtures/", params={"limit": 100})
     league_map = get_league_id_map()
 
-    events = []
-    if isinstance(data, dict) and "results" in data:
-        events = data.get("results", [])
-    elif isinstance(data, list):
-        events = data
+    def _events(payload) -> list:
+        if isinstance(payload, dict) and "results" in payload:
+            return payload.get("results") or []
+        if isinstance(payload, list):
+            return payload
+        return []
+
+    # 200 is BSD's documented maximum page size. A full season is ~38
+    # league matches plus cups and Europe, so one page covers it.
+    #
+    # Two targeted calls rather than one unfiltered page: an unfiltered
+    # limit=100 depends entirely on BSD's default ordering, and in
+    # practice came back with almost no future fixtures at all.
+    upcoming_raw = _events(
+        bsd_get(f"/teams/{team_id}/fixtures/", params={"status": "upcoming", "limit": 200})
+    )
+    finished_raw = _events(
+        bsd_get(f"/teams/{team_id}/fixtures/", params={"status": "finished", "limit": 200})
+    )
+
+    events = upcoming_raw + finished_raw
+    if not events:
+        # Either the status filter was rejected or BSD had nothing to
+        # say. Fall back to the original unfiltered call rather than
+        # rendering an empty season.
+        events = _events(bsd_get(f"/teams/{team_id}/fixtures/", params={"limit": 200}))
+
+    # Both calls can return the same match if BSD's status changed
+    # between them, so key by event id.
+    seen = set()
+    deduped = []
+    for ev in events:
+        eid = ev.get("id")
+        if eid is not None and eid in seen:
+            continue
+        if eid is not None:
+            seen.add(eid)
+        deduped.append(ev)
+    events = deduped
 
     recent = []
     upcoming = []
