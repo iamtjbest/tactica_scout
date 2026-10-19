@@ -17,9 +17,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme';
 import {
   getMe,
-  signIn,
-  signUp,
-  clearAuthToken,
   updateLanguage,
   updateFollowedTeams,
   getApiBase,
@@ -27,6 +24,8 @@ import {
   resetApiBase,
   ScoutUser,
 } from '../services/api';
+import { isSignedIn, signOut } from '../services/auth';
+import { useFocusEffect } from '@react-navigation/native';
 
 interface ProfileScreenProps {
   navigation: any;
@@ -36,12 +35,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
   const [user, setUser] = useState<ScoutUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Auth form
-  const [isSignUp, setIsSignUp] = useState(false);
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [authLoading, setAuthLoading] = useState(false);
-  const [authError, setAuthError] = useState('');
 
   // Server URL settings (Render / LAN)
   const [apiUrl, setApiUrl] = useState('');
@@ -54,8 +47,12 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
       const url = await getApiBase();
       setApiUrl(url);
 
-      const me = await getMe();
-      setUser(me.user);
+      if (await isSignedIn()) {
+        const me = await getMe();
+        setUser(me.user);
+      } else {
+        setUser(null);
+      }
     } catch {
       setUser(null);
     } finally {
@@ -63,35 +60,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
     }
   };
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const handleAuth = async () => {
-    if (!username.trim() || !password.trim()) {
-      setAuthError('Please enter both username and password.');
-      return;
-    }
-    setAuthLoading(true);
-    setAuthError('');
-    try {
-      if (isSignUp) {
-        await signUp(username.trim(), password.trim());
-      } else {
-        await signIn(username.trim(), password.trim());
-      }
-      setUsername('');
-      setPassword('');
-      await loadData();
-    } catch (err: any) {
-      setAuthError(err.message || 'Authentication failed');
-    } finally {
-      setAuthLoading(false);
-    }
-  };
+  // Fires on mount and again on every focus. Coming back from
+  // SignIn/Verify/ResetPassword this screen is still mounted
+  // underneath, so a mount-only effect would never re-run.
+  useFocusEffect(
+    React.useCallback(() => {
+      loadData();
+    }, [])
+  );
 
   const handleLogout = async () => {
-    await clearAuthToken();
+    await signOut();
     setUser(null);
   };
 
@@ -167,7 +146,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
               <View style={styles.userRow}>
                 <Ionicons name="person-circle" size={44} color={COLORS.volt} style={{ marginRight: 12 }} />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.usernameText}>{user.username}</Text>
+                  <Text style={styles.usernameText}>{user.display_name || user.email}</Text>
                   <Text style={styles.userStatusText}>Scout Pro Member</Text>
                 </View>
                 <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
@@ -177,56 +156,20 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
             </View>
           ) : (
             <View>
-              <View style={styles.authToggle}>
-                <TouchableOpacity
-                  style={[styles.authTab, !isSignUp && styles.authTabActive]}
-                  onPress={() => setIsSignUp(false)}
-                >
-                  <Text style={[styles.authTabText, !isSignUp && styles.authTabTextActive]}>
-                    Sign In
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.authTab, isSignUp && styles.authTabActive]}
-                  onPress={() => setIsSignUp(true)}
-                >
-                  <Text style={[styles.authTabText, isSignUp && styles.authTabTextActive]}>
-                    Create Account
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              <TextInput
-                style={styles.authInput}
-                placeholder="Username"
-                placeholderTextColor={COLORS.textDim}
-                value={username}
-                onChangeText={setUsername}
-                autoCapitalize="none"
-              />
-              <TextInput
-                style={[styles.authInput, { marginTop: 10 }]}
-                placeholder="Password"
-                placeholderTextColor={COLORS.textDim}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-              />
-
-              {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
-
+              <Text style={styles.signedOutText}>
+                Sign in to follow teams, players and leagues across every device.
+              </Text>
               <TouchableOpacity
                 style={styles.submitBtn}
-                onPress={handleAuth}
-                disabled={authLoading}
+                onPress={() => navigation.navigate('SignIn')}
               >
-                {authLoading ? (
-                  <ActivityIndicator color="#000" />
-                ) : (
-                  <Text style={styles.submitBtnText}>
-                    {isSignUp ? 'Sign Up' : 'Sign In'}
-                  </Text>
-                )}
+                <Text style={styles.submitBtnText}>Sign in</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.secondaryBtn}
+                onPress={() => navigation.navigate('SignUp')}
+              >
+                <Text style={styles.secondaryBtnText}>Create account</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -302,7 +245,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
             style={styles.authInput}
             value={apiUrl}
             onChangeText={setApiUrl}
-            placeholder="https://tactica-scout.onrender.com"
+            placeholder="https://tactica-scout-api.onrender.com"
             placeholderTextColor={COLORS.textDim}
             autoCapitalize="none"
           />
@@ -342,6 +285,21 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
+  signedOutText: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 16,
+  },
+  secondaryBtn: {
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    borderRadius: 10,
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  secondaryBtnText: { color: COLORS.text, fontSize: 14, fontWeight: '700' },
   container: {
     flex: 1,
     backgroundColor: COLORS.bg,

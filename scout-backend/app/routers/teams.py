@@ -3,8 +3,17 @@ from fastapi import APIRouter, HTTPException
 from app.config import bsd_get, cache_read, cache_write, cache_age, get_league_id_map, get_league_country_map, extract_league_name
 
 router = APIRouter()
-TEAM_TTL = 3600  # 1 hour
-FIXTURES_TTL = 1800  # 30 min -- fixtures change more often than a team profile
+# 5 min. Squad availability is refreshed several times a day per BSD's
+# docs, so an hour was stale by design -- and a bad fetch used to stick
+# around for the whole hour.
+TEAM_TTL = 300
+# 2 min. Scores move. Half an hour meant a team page could show a stale
+# result long after the match finished.
+FIXTURES_TTL = 120
+# When a BSD sub-call came back empty we still answer, but we only hold
+# that answer for a minute so the gap heals itself instead of sticking
+# around for the full TTL.
+DEGRADED_TTL = 60
 
 FINISHED_STATUSES = {"finished", "ended", "played", "ft"}
 
@@ -18,9 +27,11 @@ def _parse_date(ev: dict):
 def team_detail(team_id: int):
     cache_key = f"team_detail__v2__{team_id}"
     cached = cache_read(cache_key)
-    if cached and cache_age(cached) < TEAM_TTL:
-        cached["cached"] = True
-        return cached
+    if cached:
+        ttl = DEGRADED_TTL if cached.get("degraded") else TEAM_TTL
+        if cache_age(cached) < ttl:
+            cached["cached"] = True
+            return cached
 
     profile = bsd_get(f"/teams/{team_id}/")
     if profile is None:
@@ -107,6 +118,10 @@ def team_detail(team_id: int):
         "primary_league_name": primary_league_name,
         "position": position,
         "squad": squad,
+        # True when at least one BSD sub-call came back empty. The client
+        # can render "Not available" honestly, and the short TTL above
+        # means we retry in a minute rather than in an hour.
+        "degraded": not (squad and venue_info and manager_info),
         "cached": False,
     }
     cache_write(cache_key, result)
@@ -139,9 +154,11 @@ def team_fixtures(team_id: int):
     chronological) for anything still reading the old shape."""
     cache_key = f"team_fixtures__v2__{team_id}"
     cached = cache_read(cache_key)
-    if cached and cache_age(cached) < FIXTURES_TTL:
-        cached["cached"] = True
-        return cached
+    if cached:
+        ttl = DEGRADED_TTL if cached.get("degraded") else FIXTURES_TTL
+        if cache_age(cached) < ttl:
+            cached["cached"] = True
+            return cached
 
     data = bsd_get(f"/teams/{team_id}/fixtures/", params={"limit": 100})
     league_map = get_league_id_map()
@@ -171,6 +188,10 @@ def team_fixtures(team_id: int):
         "recent": recent,
         "upcoming": upcoming,
         "matches": list(reversed(recent)) + upcoming,
+        # No events at all means BSD gave us nothing, not that the club
+        # has never played. Retry in a minute rather than caching the
+        # emptiness for half an hour.
+        "degraded": not events,
         "cached": False,
     }
     cache_write(cache_key, result)

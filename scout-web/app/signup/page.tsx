@@ -2,11 +2,13 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { signUp } from "@/lib/api";
+import { signUpWithEmail } from "@/lib/auth";
+import PasswordInput from "@/components/PasswordInput";
 
 export default function SignUpPage() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -16,9 +18,10 @@ export default function SignUpPage() {
     setLoading(true);
     setError(null);
     try {
-      const { token } = await signUp(username, password);
-      window.localStorage.setItem("scout_token", token);
-      router.push("/settings");
+      await signUpWithEmail(email, password, { displayName: displayName.trim() || undefined });
+      // No session yet — Supabase has emailed a code. Carry the email
+      // through so /verify doesn't have to ask for it again.
+      router.push(`/verify?email=${encodeURIComponent(email.trim().toLowerCase())}`);
     } catch (err: any) {
       setError(err.message || "Failed to sign up.");
     } finally {
@@ -34,16 +37,37 @@ export default function SignUpPage() {
       </div>
       <form onSubmit={handleSubmit} className="card space-y-4">
         <div>
-          <label className="text-mt text-xs font-semibold uppercase tracking-wide">Username</label>
-          <input className="input-select mt-1" value={username} onChange={(e) => setUsername(e.target.value)} required minLength={3} />
+          <label className="text-mt text-xs font-semibold uppercase tracking-wide">Email</label>
+          <input
+            type="email"
+            autoComplete="email"
+            className="input-select mt-1"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
         </div>
         <div>
-          <label className="text-mt text-xs font-semibold uppercase tracking-wide">Password</label>
-          <input type="password" className="input-select mt-1" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
-          <p className="text-mt text-[11px] mt-1">At least 6 characters.</p>
+          <label className="text-mt text-xs font-semibold uppercase tracking-wide">Name</label>
+          <input
+            className="input-select mt-1"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="Optional"
+          />
         </div>
+        <PasswordInput
+          value={password}
+          onChange={setPassword}
+          autoComplete="new-password"
+          minLength={12}
+        />
         {error && <p className="text-red2 text-sm">{error}</p>}
-        <button type="submit" disabled={loading} className="btn-volt w-full">
+        <button
+          type="submit"
+          disabled={loading || password.length < 12 || !email.trim()}
+          className="btn-volt w-full disabled:opacity-45 disabled:cursor-not-allowed"
+        >
           {loading ? "Creating account..." : "Sign up"}
         </button>
       </form>

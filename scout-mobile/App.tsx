@@ -23,6 +23,11 @@ import { TeamDetailScreen } from './src/screens/TeamDetailScreen';
 import { TeamFixturesScreen } from './src/screens/TeamFixturesScreen';
 import { PlayerDetailScreen } from './src/screens/PlayerDetailScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
+import { SignInScreen } from './src/screens/SignInScreen';
+import { SignUpScreen } from './src/screens/SignUpScreen';
+import { VerifyScreen } from './src/screens/VerifyScreen';
+import { ForgotPasswordScreen } from './src/screens/ForgotPasswordScreen';
+import { ResetPasswordScreen } from './src/screens/ResetPasswordScreen';
 
 // ── Types ─────────────────────────────────────────────────────────────
 export type RootStackParamList = {
@@ -32,6 +37,11 @@ export type RootStackParamList = {
   TeamFixtures: { teamId: number; teamName: string; filter: 'all' | 'upcoming' };
   PlayerDetail: { playerId: number; playerName: string };
   Profile: undefined;
+  SignIn: undefined;
+  SignUp: undefined;
+  Verify: { email: string };
+  ForgotPassword: undefined;
+  ResetPassword: { email: string };
 };
 
 export type MainTabParamList = {
@@ -191,6 +201,35 @@ export default function App() {
             name="Profile"
             component={ProfileScreen}
             options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+          />
+
+          {/* Auth screens. Supabase owns signup, verification codes,
+              sign-in and password resets -- the backend never sees a
+              password. */}
+          <Stack.Screen
+            name="SignIn"
+            component={SignInScreen}
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="SignUp"
+            component={SignUpScreen}
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="Verify"
+            component={VerifyScreen}
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="ForgotPassword"
+            component={ForgotPasswordScreen}
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="ResetPassword"
+            component={ResetPasswordScreen}
+            options={{ animation: 'slide_from_right' }}
           />
         </Stack.Navigator>
 

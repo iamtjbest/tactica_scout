@@ -26,7 +26,9 @@ from fastapi import APIRouter, HTTPException
 from app.config import bsd_get, cache_read, cache_write, cache_age, get_league_id_map, LEAGUE_NAMES
 
 router = APIRouter()
-STANDINGS_TTL = 3600  # an hour — tables don't move outside matchdays
+# 5 min. Tables don't move outside matchdays, true -- but matchday is
+# exactly when people look at them, and that's when an hour is worst.
+STANDINGS_TTL = 300
 
 
 @router.get("/leagues")

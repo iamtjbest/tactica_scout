@@ -169,7 +169,15 @@ def _h2h(event_id: int) -> dict:
         eid = m.get("event_id")
         ev_data = bsd_get(f"/events/{eid}/") if eid else {}
         league_id = ev_data.get("league_id") if isinstance(ev_data, dict) else None
-        league_name = (ev_data.get("league", {}) or {}).get("name") if isinstance(ev_data, dict) else None
+        # BSD's event object has no nested `league` object -- only a
+        # top-level league_id -- so the old ev_data["league"]["name"]
+        # lookup was always None and the competition header never
+        # rendered. Resolve from the cached id->name map instead, same
+        # as everywhere else.
+        league_name = None
+        if league_id is not None:
+            _lm = get_league_id_map()
+            league_name = _lm.get(league_id) or _lm.get(str(league_id))
         
         recent.append({
             "event_id":   eid,

@@ -3,7 +3,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
 const STORAGE_KEY_API_URL = 'tactica_mobile_api_url';
-const STORAGE_KEY_TOKEN = 'scout_token';
 
 // Default fallback depending on platform / env:
 // Android Emulator uses 10.0.2.2 to reach host machine, iOS simulator can use localhost
@@ -230,32 +229,20 @@ export type NewsItem = {
 };
 
 export type ScoutUser = {
-  username: string;
+  id: string;
+  email: string | null;
+  display_name: string | null;
+  role: 'user' | 'admin';
   followed_teams: string[];
   language: string;
 };
 
-// ── Auth Storage Helpers ──────────────────────────────────────────────
-export async function getAuthToken(): Promise<string | null> {
-  try {
-    return await AsyncStorage.getItem(STORAGE_KEY_TOKEN);
-  } catch {
-    return null;
-  }
-}
-
-export async function setAuthToken(token: string): Promise<void> {
-  await AsyncStorage.setItem(STORAGE_KEY_TOKEN, token);
-}
-
-export async function clearAuthToken(): Promise<void> {
-  await AsyncStorage.removeItem(STORAGE_KEY_TOKEN);
-}
-
-async function authHeaders(): Promise<Record<string, string>> {
-  const token = await getAuthToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+// ── Auth ──────────────────────────────────────────────────────────────
+// Sessions live in Supabase (AsyncStorage-backed) and refresh
+// themselves. Nothing stores a token by hand any more -- the old
+// `scout_token` key is gone. See src/services/auth.ts.
+export { isSignedIn, signOut } from './auth';
+import { authHeaders } from './auth';
 
 // ── API Methods ───────────────────────────────────────────────────────
 
@@ -369,37 +356,7 @@ export async function globalSearch(q: string): Promise<any> {
   return res.json();
 }
 
-export async function signUp(username: string, password: string): Promise<{ token: string; user: ScoutUser }> {
-  const base = await getApiBase();
-  const res = await fetch(`${base}/api/auth/signup`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.detail || `Sign up failed: ${res.status}`);
-  }
-  const result = await res.json();
-  if (result.token) await setAuthToken(result.token);
-  return result;
-}
 
-export async function signIn(username: string, password: string): Promise<{ token: string; user: ScoutUser }> {
-  const base = await getApiBase();
-  const res = await fetch(`${base}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.detail || `Sign in failed: ${res.status}`);
-  }
-  const result = await res.json();
-  if (result.token) await setAuthToken(result.token);
-  return result;
-}
 
 export async function getMe(): Promise<{ user: ScoutUser }> {
   const base = await getApiBase();

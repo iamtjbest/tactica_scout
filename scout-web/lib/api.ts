@@ -282,13 +282,20 @@ export async function getNews(): Promise<{ count: number; items: NewsItem[] }> {
 }
 
 // ── Auth / settings ──────────────────────────────────────────────────
-export type ScoutUser = { username: string; followed_teams: string[]; language: string };
+// Signup, sign-in, verification codes and password resets all live in
+// lib/auth.ts and talk to Supabase directly. This backend never sees a
+// password. Everything below just needs a bearer token on the request.
+export type ScoutUser = {
+  id: string;
+  email: string | null;
+  display_name: string | null;
+  role: "user" | "admin";
+  followed_teams: string[];
+  language: string;
+};
 
-function authHeaders(): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  const token = window.localStorage.getItem("scout_token");
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+export { isSignedIn, signOut } from "./auth";
+import { authHeaders } from "./auth";
 
 async function parseErr(res: Response, fallback: string): Promise<string> {
   try {
@@ -299,28 +306,8 @@ async function parseErr(res: Response, fallback: string): Promise<string> {
   }
 }
 
-export async function signUp(username: string, password: string): Promise<{ token: string; user: ScoutUser }> {
-  const res = await fetch(`${API_BASE}/api/auth/signup`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
-  });
-  if (!res.ok) throw new Error(await parseErr(res, `signup failed: ${res.status}`));
-  return res.json();
-}
-
-export async function signIn(username: string, password: string): Promise<{ token: string; user: ScoutUser }> {
-  const res = await fetch(`${API_BASE}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
-  });
-  if (!res.ok) throw new Error(await parseErr(res, `login failed: ${res.status}`));
-  return res.json();
-}
-
 export async function getMe(): Promise<{ user: ScoutUser }> {
-  const res = await fetch(`${API_BASE}/api/auth/me`, { headers: { ...authHeaders() } });
+  const res = await fetch(`${API_BASE}/api/auth/me`, { headers: { ...(await authHeaders()) } });
   if (!res.ok) throw new Error(await parseErr(res, `me failed: ${res.status}`));
   return res.json();
 }
@@ -328,7 +315,7 @@ export async function getMe(): Promise<{ user: ScoutUser }> {
 export async function updateFollowedTeams(teams: string[]): Promise<{ user: ScoutUser }> {
   const res = await fetch(`${API_BASE}/api/me/followed-teams`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify({ teams }),
   });
   if (!res.ok) throw new Error(await parseErr(res, `update followed teams failed: ${res.status}`));
@@ -338,7 +325,7 @@ export async function updateFollowedTeams(teams: string[]): Promise<{ user: Scou
 export async function updateLanguage(language: string): Promise<{ user: ScoutUser }> {
   const res = await fetch(`${API_BASE}/api/me/settings`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify({ language }),
   });
   if (!res.ok) throw new Error(await parseErr(res, `update settings failed: ${res.status}`));
@@ -377,13 +364,24 @@ export type TeamDetail = {
   squad: PlayerSummary[];
 };
 
+// `degraded` is true when a BSD sub-call came back empty, so missing
+// fields mean "we couldn't fetch this", not "this doesn't exist".
 export async function getTeamDetail(teamId: number): Promise<TeamDetail> {
   const res = await fetch(`${API_BASE}/api/teams/${teamId}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`team detail failed: ${res.status}`);
   return res.json();
 }
 
-export async function getTeamFixtures(teamId: number): Promise<{ team_id: number; matches: MatchSummary[] }> {
+export async function getTeamFixtures(teamId: number): Promise<{
+  team_id: number;
+  // The backend already splits these correctly. BSD reports a finished
+  // match as any of finished/ended/played/ft, so never re-filter
+  // `matches` on a single status string here -- use `recent`.
+  recent: MatchSummary[];
+  upcoming: MatchSummary[];
+  matches: MatchSummary[];
+  degraded?: boolean;
+}> {
   const res = await fetch(`${API_BASE}/api/teams/${teamId}/fixtures`, { cache: "no-store" });
   if (!res.ok) throw new Error(`team fixtures failed: ${res.status}`);
   return res.json();

@@ -15,6 +15,10 @@ export default function TeamPage() {
   const [fixtures, setFixtures] = useState<any[]>([]);
   const [standings, setStandings] = useState<any[]>([]);
   const [topStats, setTopStats] = useState<{ scorers: any[], assists: any[] } | null>(null);
+  // null = still loading, [] = loaded and genuinely empty. Without the
+  // distinction the UI can't tell "waiting" from "nothing to show".
+  const [recent, setRecent] = useState<any[] | null>(null);
+  const [topStatsFailed, setTopStatsFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"overview" | "table" | "matches" | "squad">("overview");
@@ -24,15 +28,17 @@ export default function TeamPage() {
     setLoading(true);
     Promise.all([
       getTeamDetail(id),
-      getTeamFixtures(id).catch(() => ({ matches: [] }))
+      getTeamFixtures(id).catch(() => ({ matches: [], recent: [], upcoming: [] }))
     ])
       .then(async ([teamData, fixturesData]) => {
         setTeam(teamData);
         setFixtures(fixturesData.matches || []);
+        setRecent(fixturesData.recent || []);
         
         // Fetch standings and top stats based on primary_league_id
         const leagueIdToUse = teamData.primary_league_id || fixturesData.matches?.find((m: any) => m.status === "notstarted" || m.status === "inprogress")?.league_id;
         
+        if (!leagueIdToUse) setTopStatsFailed(true);
         if (leagueIdToUse) {
            getStandings(leagueIdToUse)
              .then(data => setStandings(data.standings || []))
@@ -40,7 +46,9 @@ export default function TeamPage() {
              
            getLeagueTopStats(leagueIdToUse)
              .then(data => setTopStats(data))
-             .catch(() => {});
+             // Swallowing this used to leave topStats null forever, so
+             // the card showed "Loading..." until the tab was closed.
+             .catch(() => setTopStatsFailed(true));
         }
         
         setError(null);
@@ -219,28 +227,50 @@ export default function TeamPage() {
               {/* Recent Form */}
               <div className="card">
                 <h2 className="section-label mb-4">Recent Form</h2>
-                <div className="flex items-center gap-3">
-                  {(() => {
-                    const pastMatches = [...fixtures].filter(m => m.status === "finished").reverse().slice(0, 5).reverse();
-                    if (pastMatches.length === 0) return <span className="text-mt text-sm">No recent matches.</span>;
-                    return pastMatches.map(m => {
-                      const isHome = m.home_team_id === team.id;
-                      const ourScore = isHome ? m.home_score : m.away_score;
-                      const theirScore = isHome ? m.away_score : m.home_score;
-                      let res = "D"; let color = "bg-mt";
-                      if (ourScore > theirScore) { res = "W"; color = "bg-volt2 text-bg"; }
-                      else if (ourScore < theirScore) { res = "L"; color = "bg-red2 text-white"; }
-                      
-                      return (
-                        <Link key={m.event_id} href={`/match/${m.event_id}`} title={`${m.home_team} ${m.home_score}-${m.away_score} ${m.away_team}`}>
-                          <div className={clsx("w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shadow-lg border border-white/10 hover:scale-110 transition-transform", color)}>
-                            {res}
-                          </div>
-                        </Link>
-                      );
-                    });
-                  })()}
-                </div>
+                {(() => {
+                  if (recent === null) return <span className="text-mt text-sm">Loading...</span>;
+                  const pastMatches = recent.slice(0, 5);
+                  if (pastMatches.length === 0) return <span className="text-mt text-sm">No recent matches.</span>;
+                  return (
+                    <div className="space-y-2">
+                      {pastMatches.map((m: any) => {
+                        const isHome = m.home_team_id === team.id;
+                        const ourScore = isHome ? m.home_score : m.away_score;
+                        const theirScore = isHome ? m.away_score : m.home_score;
+                        const oppName = isHome ? m.away_team : m.home_team;
+                        const oppId = isHome ? m.away_team_id : m.home_team_id;
+                        let res = "D"; let color = "bg-mt text-bg";
+                        if (ourScore > theirScore) { res = "W"; color = "bg-volt2 text-bg"; }
+                        else if (ourScore < theirScore) { res = "L"; color = "bg-red2 text-white"; }
+
+                        return (
+                          <Link
+                            key={m.event_id}
+                            href={`/match/${m.event_id}`}
+                            className="flex items-center gap-3 px-3 py-2 rounded-lg bg-bg/40 border border-bd/50 hover:border-volt2/50 transition-colors"
+                            title={`${m.home_team} ${m.home_score}-${m.away_score} ${m.away_team}`}
+                          >
+                            <span className={clsx("w-6 h-6 shrink-0 rounded-full flex items-center justify-center font-bold text-[11px]", color)}>
+                              {res}
+                            </span>
+                            {oppId ? (
+                              <img
+                                src={`${BSD_IMG_BASE}/img/team/${oppId}/?sor=true&bg=transparent`}
+                                alt=""
+                                className="w-5 h-5 shrink-0 object-contain"
+                              />
+                            ) : <span className="w-5 shrink-0" />}
+                            <span className="flex-1 min-w-0 truncate text-white text-sm">{oppName}</span>
+                            <span className="text-mt text-[11px] shrink-0">{isHome ? "H" : "A"}</span>
+                            <span className="font-mono text-sm text-white shrink-0 tabular-nums">
+                              {ourScore}-{theirScore}
+                            </span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Standings Snapshot */}
@@ -301,7 +331,7 @@ export default function TeamPage() {
                       <div>
                         <p className="text-mt text-xs uppercase tracking-wider font-semibold">Top Scorer</p>
                         <p className="text-white font-medium">
-                          {topStats ? (topStats.scorers.find((s: any) => s.team_id === team.id)?.player_name || "N/A") : "Loading..."}
+                          {topStats ? (topStats.scorers.find((s: any) => s.team_id === team.id)?.player_name || "N/A") : topStatsFailed ? "N/A" : "Loading..."}
                         </p>
                       </div>
                     </div>
@@ -316,7 +346,7 @@ export default function TeamPage() {
                       <div>
                         <p className="text-mt text-xs uppercase tracking-wider font-semibold">Most Assists</p>
                         <p className="text-white font-medium">
-                          {topStats ? (topStats.assists.find((s: any) => s.team_id === team.id)?.player_name || "N/A") : "Loading..."}
+                          {topStats ? (topStats.assists.find((s: any) => s.team_id === team.id)?.player_name || "N/A") : topStatsFailed ? "N/A" : "Loading..."}
                         </p>
                       </div>
                     </div>
@@ -347,15 +377,15 @@ export default function TeamPage() {
                   </div>
                   <div className="flex items-center justify-between border-b border-bd/50 pb-2">
                     <span className="text-mt uppercase text-xs font-semibold tracking-wider">Manager</span>
-                    <span className="text-white font-medium text-right">{team.manager_name || "Unknown"}</span>
+                    <span className="text-white font-medium text-right">{team.manager_name || <span className="text-mt">Not available</span>}</span>
                   </div>
                   <div className="flex items-center justify-between border-b border-bd/50 pb-2">
                     <span className="text-mt uppercase text-xs font-semibold tracking-wider">Stadium</span>
-                    <span className="text-white font-medium text-right">{team.venue || "Unknown"}</span>
+                    <span className="text-white font-medium text-right">{team.venue || <span className="text-mt">Not available</span>}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-mt uppercase text-xs font-semibold tracking-wider">Country</span>
-                    <span className="text-white font-medium text-right">{team.country}</span>
+                    <span className="text-white font-medium text-right">{team.country || <span className="text-mt">Not available</span>}</span>
                   </div>
                 </div>
               </div>

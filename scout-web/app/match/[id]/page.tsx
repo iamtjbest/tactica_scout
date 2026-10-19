@@ -413,8 +413,22 @@ function PlayerToken({ player }: { player: any }) {
   const name   = player.short_name ?? player.name ?? "Unknown";
   const number = player.number ?? player.shirt_number ?? player.jersey_number ?? null;
 
+  // Not every lineup entry carries an id, so fall back to a plain div
+  // rather than rendering a link that goes nowhere.
+  const Wrapper = ({ children }: { children: React.ReactNode }) =>
+    player.id ? (
+      <Link
+        href={`/player/${player.id}`}
+        className="flex flex-col items-center w-14 shrink-0 hover:opacity-80 transition-opacity"
+      >
+        {children}
+      </Link>
+    ) : (
+      <div className="flex flex-col items-center w-14 shrink-0">{children}</div>
+    );
+
   return (
-    <div className="flex flex-col items-center w-14 shrink-0">
+    <Wrapper>
       <div className="relative">
         <PlayerAvatar player={player} size={36} iconSize={18} />
         {number != null && (
@@ -426,7 +440,7 @@ function PlayerToken({ player }: { player: any }) {
       <span className="text-white text-[10px] font-semibold text-center mt-1 leading-tight">
         {name}
       </span>
-    </div>
+    </Wrapper>
   );
 }
 
@@ -435,13 +449,25 @@ function SubRow({ player }: { player: any }) {
   const number   = player.number ?? player.shirt_number ?? player.jersey_number ?? null;
   const position = player.position ?? "";
 
-  return (
-    <div className="flex items-center gap-3 py-1.5">
+  const inner = (
+    <>
       <PlayerAvatar player={player} size={28} iconSize={14} />
       <span className="text-white/90 text-xs flex-1 truncate">{name}</span>
       {number != null && <span className="text-mt text-[10px] font-mono w-6 text-right">#{number}</span>}
       {position && <span className="text-mt text-[10px] font-mono uppercase w-7 text-right">{position}</span>}
-    </div>
+    </>
+  );
+
+  if (!player.id) {
+    return <div className="flex items-center gap-3 py-1.5">{inner}</div>;
+  }
+  return (
+    <Link
+      href={`/player/${player.id}`}
+      className="flex items-center gap-3 py-1.5 -mx-2 px-2 rounded hover:bg-bg2/60 transition-colors"
+    >
+      {inner}
+    </Link>
   );
 }
 

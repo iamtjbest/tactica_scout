@@ -33,7 +33,9 @@ from app.routers.players import _walk_all_stats
 from app.config import cache_read, cache_write, cache_age
 
 router = APIRouter()
-RADAR_TTL = 3600
+# 10 min. Aggregated from a player's per-match log, so it only changes
+# when they play -- but it should reflect a match that just finished.
+RADAR_TTL = 600
 
 
 def _avg(values: list[float]) -> float:

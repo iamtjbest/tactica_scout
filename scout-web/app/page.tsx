@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { getMatchesByDate, getMe, type LeagueMatches, type MatchSummary } from "@/lib/api";
+import { isSignedIn } from "@/lib/auth";
 import MatchCard from "@/components/MatchCard";
 import DateNav from "@/components/DateNav";
 
@@ -80,13 +81,15 @@ export default function HomePage() {
     setLoading(true);
     load(date);
     
-    if (typeof window !== "undefined" && window.localStorage.getItem("scout_token")) {
+    isSignedIn().then((signed) => {
+      if (!signed) {
+        setFollowedTeams([]);
+        return;
+      }
       getMe()
         .then(data => setFollowedTeams(data.user.followed_teams))
         .catch(() => {});
-    } else {
-      setFollowedTeams([]);
-    }
+    });
     
     if (date !== todayISO()) return;
     const interval = setInterval(() => load(date), 30_000);

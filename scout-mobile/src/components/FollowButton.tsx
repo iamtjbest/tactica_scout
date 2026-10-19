@@ -11,7 +11,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme';
-import { getMe, updateFollowedTeams, getAuthToken } from '../services/api';
+import { getMe, updateFollowedTeams } from '../services/api';
+import { isSignedIn } from '../services/auth';
 
 interface FollowButtonProps {
   teamName: string;
@@ -31,9 +32,8 @@ export const FollowButton: React.FC<FollowButtonProps> = ({
     let active = true;
     (async () => {
       try {
-        // Quick local token check first to avoid a round-trip
-        const token = await getAuthToken();
-        if (!token) {
+        // Cheap local session check first, to avoid a round-trip
+        if (!(await isSignedIn())) {
           if (active) setIsAuthenticated(false);
           return;
         }
@@ -43,7 +43,7 @@ export const FollowButton: React.FC<FollowButtonProps> = ({
         const followed = res.user?.followed_teams || [];
         setIsFollowed(followed.includes(teamName));
       } catch {
-        // Token exists but request failed (expired, network error etc.)
+        // Session exists but the request failed (expired, network error etc.)
         if (active) setIsAuthenticated(false);
       }
     })();

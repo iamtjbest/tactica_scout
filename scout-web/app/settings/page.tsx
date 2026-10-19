@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import clsx from "clsx";
 import { getMe, updateFollowedTeams, updateLanguage, type ScoutUser } from "@/lib/api";
+import { isSignedIn, signOut as supabaseSignOut } from "@/lib/auth";
 
 // Language list is a placeholder set -- there's no i18n wiring behind
 // this yet (no translated strings anywhere in the app), this just
@@ -22,25 +23,37 @@ export default function SettingsPage() {
   const [teamInput, setTeamInput] = useState("");
 
   useEffect(() => {
-    if (typeof window === "undefined" || !window.localStorage.getItem("scout_token")) {
-      setSignedOutView(true);
-      setLoading(false);
-      return;
-    }
-    getMe()
-      .then((d) => setUser(d.user))
-      .catch((e) => {
-        // Token's stale/invalid -- drop it rather than looping on a
-        // request that will keep failing.
-        window.localStorage.removeItem("scout_token");
-        setSignedOutView(true);
-        setError(e.message || "Failed to load your account.");
-      })
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    (async () => {
+      if (!(await isSignedIn())) {
+        if (!cancelled) {
+          setSignedOutView(true);
+          setLoading(false);
+        }
+        return;
+      }
+      try {
+        const d = await getMe();
+        if (!cancelled) setUser(d.user);
+      } catch (e: any) {
+        // Session is stale or the backend rejected it -- clear it
+        // rather than looping on a request that will keep failing.
+        await supabaseSignOut();
+        if (!cancelled) {
+          setSignedOutView(true);
+          setError(e.message || "Failed to load your account.");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  function signOut() {
-    window.localStorage.removeItem("scout_token");
+  async function handleSignOut() {
+    await supabaseSignOut();
     setUser(null);
     setSignedOutView(true);
   }
@@ -98,9 +111,11 @@ export default function SettingsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display font-black text-2xl text-white">Settings</h1>
-          <p className="text-mt text-sm mt-1">Signed in as {user.username}</p>
+          <p className="text-mt text-sm mt-1">
+            Signed in as {user.display_name || user.email}
+          </p>
         </div>
-        <button onClick={signOut} className="tab-pill tab-pill-inactive">Sign out</button>
+        <button onClick={handleSignOut} className="tab-pill tab-pill-inactive">Sign out</button>
       </div>
 
       {error && <p className="text-red2 text-sm">{error}</p>}
@@ -117,16 +132,16 @@ export default function SettingsPage() {
             let typeLabel = "Team";
             let name = t;
             let icon = "⚽";
-            
+
             if (parts.length >= 3) {
               const type = parts[0];
               name = parts.slice(2).join(":"); // Name might contain colons
-              
+
               if (type === "team") { typeLabel = "Team"; icon = "🛡️"; }
               if (type === "league") { typeLabel = "League"; icon = "🏆"; }
               if (type === "player") { typeLabel = "Player"; icon = "🏃"; }
             }
-            
+
             return (
             <span key={t} className="tab-pill tab-pill-active flex items-center gap-2">
               <span className="text-[10px] uppercase opacity-70 border-r border-volt2/30 pr-1.5 mr-0.5">{icon} {typeLabel}</span>
