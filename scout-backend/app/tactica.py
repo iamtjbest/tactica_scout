@@ -45,19 +45,30 @@ def _num(v):
     return v if isinstance(v, (int, float)) else None
 
 
-def _resolved_team_id(form_payload: dict | None):
-    """Which BSD team did Tactica actually resolve this name to?
+def _norm(name: str | None) -> str:
+    return "".join(ch for ch in (name or "").lower() if ch.isalnum())
 
-    /api/form takes a team NAME and resolves it via its own BSD search.
-    That search can be ambiguous -- "Manchester United" returns both id
-    17 and id 8624, and reserve/U21 sides share names with first teams.
-    Scout already knows the BSD id of the team on screen, so comparing
-    the two catches a wrong resolution instead of showing one club's
-    rating under another club's name.
+
+def _resolved_to_other_club(form_payload: dict | None, asked_for: str) -> bool:
+    """Did /api/form answer about a different club than we asked about?
+
+    Tactica takes a team NAME and resolves it through its own BSD search.
+    It already strips youth and women's sides before resolving, so the
+    risk is not a U21 team: it's a name landing on a genuinely different
+    club.
+
+    What it does NOT treat as a mismatch is BSD holding two senior
+    records for the same club under the same name ("Manchester United"
+    is both 17 and 8624). Those are duplicates, and refusing the rating
+    over which one got picked would throw away a correct number. So this
+    compares the resolved NAME, not the id.
     """
-    dbg = (form_payload or {}).get("_debug") or {}
-    tid = dbg.get("team_id")
-    return tid if isinstance(tid, int) else None
+    if not isinstance(form_payload, dict):
+        return False
+    resolved = form_payload.get("bsd_name")
+    if not resolved:
+        return False
+    return _norm(resolved) != _norm(asked_for)
 
 
 def _form(team: str) -> dict | None:
@@ -106,12 +117,7 @@ def _predict(my_team: str, opp_team: str, overrides: dict | None = None) -> dict
         return None
 
 
-def get_match_ratings(
-    home_team: str | None,
-    away_team: str | None,
-    home_team_id: int | None = None,
-    away_team_id: int | None = None,
-) -> dict:
+def get_match_ratings(home_team: str | None, away_team: str | None) -> dict:
     """ATK/DEF for both sides plus a win probability for EACH team.
 
     /api/predict is asymmetric: it answers "what are my_team's chances
@@ -137,7 +143,7 @@ def get_match_ratings(
     if not home_team or not away_team:
         return empty
 
-    cache_key = f"tactica_ratings_v4__{home_team.lower()}__{away_team.lower()}"
+    cache_key = f"tactica_ratings_v5__{home_team.lower()}__{away_team.lower()}"
     cached = cache_read(cache_key)
     if cached:
         ttl = DEGRADED_TTL if cached.get("degraded") else RATINGS_TTL
@@ -157,21 +163,22 @@ def get_match_ratings(
     h_att, h_def = _rt(hf)
     a_att, a_def = _rt(af)
 
-    # Drop a rating that belongs to a different club. Showing nothing
-    # beats showing Man United U21's numbers on a Man United fixture.
+    # Drop a rating that belongs to a different club. Tactica already
+    # strips youth and women's sides before resolving, so this is only
+    # about a name landing on a genuinely different senior club.
     mismatch = []
-    if home_team_id is not None:
-        rid = _resolved_team_id(hf)
-        if rid is not None and rid != home_team_id:
-            mismatch.append(f"home name resolved to BSD team {rid}, expected {home_team_id}")
-            h_att = h_def = None
-            hf = None
-    if away_team_id is not None:
-        rid = _resolved_team_id(af)
-        if rid is not None and rid != away_team_id:
-            mismatch.append(f"away name resolved to BSD team {rid}, expected {away_team_id}")
-            a_att = a_def = None
-            af = None
+    if _resolved_to_other_club(hf, home_team):
+        mismatch.append(
+            f"home '{home_team}' resolved to '{(hf or {}).get('bsd_name')}'"
+        )
+        h_att = h_def = None
+        hf = None
+    if _resolved_to_other_club(af, away_team):
+        mismatch.append(
+            f"away '{away_team}' resolved to '{(af or {}).get('bsd_name')}'"
+        )
+        a_att = a_def = None
+        af = None
 
     # 2. Feed them into the model as overrides, once from each side.
     h = _predict(home_team, away_team, {
@@ -238,3 +245,108 @@ def get_match_ratings(
 
     cache_write(cache_key, {"_cached_at": time.time(), **result})
     return result
+
+
+# ---------------------------------------------------------------------
+# Frozen pre-match snapshots
+#
+# get_match_ratings() above always reflects form RIGHT NOW. That is wrong
+# for a match page: MUN vs TOT was rated 56/58 vs 40/42 on the day, and
+# once both teams play again the live numbers move. The row stored here
+# is written once, shortly before kickoff, and is what every later view
+# of that match shows. Next match, new row, newly calculated numbers.
+#
+# The table is created by match_predictions.sql, and a database trigger
+# rejects any UPDATE, so a frozen row cannot be changed even by a bug.
+# ---------------------------------------------------------------------
+
+# Bump when the rating formula or the model changes. Old rows keep the
+# version that produced them.
+FORMULA_VERSION = "v1"
+
+# Freeze only this close to kickoff. Further out, a team may still play
+# another match and the numbers would be stale by kickoff, so earlier
+# views get live numbers marked provisional instead of a frozen row.
+FREEZE_WINDOW_HOURS = float(os.environ.get("FREEZE_WINDOW_HOURS", "6"))
+
+
+def get_frozen_ratings(event_id: int) -> dict | None:
+    """The stored snapshot for this match, or None if there isn't one
+    (or Supabase can't be reached, in which case the caller falls back
+    to computing live rather than failing the Facts tab)."""
+    try:
+        from app.supabase import get_supabase
+        res = (
+            get_supabase()
+            .table("match_predictions")
+            .select("payload, computed_at, formula_version")
+            .eq("event_id", event_id)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+    except Exception as e:
+        print(f"[tactica] frozen lookup failed for {event_id}: {e}")
+        return None
+    if not rows:
+        return None
+    row = rows[0]
+    payload = dict(row.get("payload") or {})
+    payload["frozen"] = True
+    payload["provisional"] = False
+    payload["computed_at"] = row.get("computed_at")
+    payload["formula_version"] = row.get("formula_version")
+    return payload
+
+
+def is_freezable(result: dict) -> bool:
+    """Only a complete, trustworthy result gets frozen for good.
+
+    A degraded result (Tactica asleep, a name that resolved to the wrong
+    club, a baseline rating that isn't live) must never be locked in,
+    because it would then show forever. Those are returned unfrozen and
+    retried on the next view while the match is still in the window.
+    """
+    if not isinstance(result, dict) or result.get("degraded") or result.get("name_mismatch"):
+        return False
+    for side in ("home", "away"):
+        s = result.get(side) or {}
+        if not s.get("live_rating"):
+            return False
+        if None in (s.get("attack"), s.get("defence"), s.get("win_prob")):
+            return False
+    return True
+
+
+def freeze_ratings(event_id: int, home_team: str, away_team: str,
+                   kickoff_iso: str, result: dict) -> dict | None:
+    """Insert the snapshot. Returns the stored payload, or None if it
+    couldn't be saved. If two requests race, the unique key lets exactly
+    one insert win and the other simply reads the winner's row, so both
+    callers end up showing the same numbers."""
+    h, a = result["home"], result["away"]
+    row = {
+        "event_id":            event_id,
+        "home_team":           home_team,
+        "away_team":           away_team,
+        "kickoff_at":          kickoff_iso,
+        "home_attack":         h["attack"],
+        "home_defence":        h["defence"],
+        "away_attack":         a["attack"],
+        "away_defence":        a["defence"],
+        "home_win_prob":       h["win_prob"],
+        "away_win_prob":       a["win_prob"],
+        "draw_prob":           result.get("draw_prob"),
+        "home_best_formation": result.get("best_formation"),
+        "away_best_formation": result.get("away_best_formation"),
+        "payload":             result,
+        "formula_version":     FORMULA_VERSION,
+    }
+    try:
+        from app.supabase import get_supabase
+        get_supabase().table("match_predictions").insert(row).execute()
+    except Exception as e:
+        # Most likely the row already exists (a racing request got there
+        # first). Read it back so both callers agree on one number.
+        print(f"[tactica] freeze insert for {event_id} did not complete: {e}")
+    return get_frozen_ratings(event_id)

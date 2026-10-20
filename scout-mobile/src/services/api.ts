@@ -489,6 +489,20 @@ export type MatchFacts = {
   degraded: boolean;
   /** Non-null when a team name resolved to the wrong club upstream. */
   name_mismatch: string[] | null;
+
+  // ── Frozen pre-match snapshot ──────────────────────────────────────
+  /** True when these are the saved pre-match numbers, read from
+   *  match_predictions and never recalculated. */
+  frozen?: boolean;
+  /** True when the numbers are live but NOT yet saved, because kickoff
+   *  is further out than the freeze window. They can still move. */
+  provisional?: boolean;
+  computed_at?: string | null;
+  formula_version?: string | null;
+  /** Set when there is nothing to show and never will be, e.g.
+   *  "no_prematch_snapshot" for a match that kicked off without one.
+   *  Distinct from `degraded`, which means "try again later". */
+  unavailable_reason?: string | null;
 };
 
 export async function getMatchFacts(eventId: number): Promise<MatchFacts> {

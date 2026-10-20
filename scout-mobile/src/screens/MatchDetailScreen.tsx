@@ -446,14 +446,19 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
                   );
                 }
                 if (!hasRatings && !hasProbs) {
+                  // unavailable_reason is permanent; degraded means "try
+                  // again later". Collapsing them would tell someone to
+                  // retry a match that will never have numbers.
+                  const message =
+                    f.unavailable_reason === 'no_prematch_snapshot'
+                      ? "No pre-match numbers were saved for this match. Ratings calculated now would include this match's own result, so they wouldn't be pre-match numbers."
+                      : f.degraded
+                      ? "Tactica ratings couldn't be loaded right now."
+                      : "Tactica ratings aren't available for this match yet.";
                   return (
                     <>
                       <Text style={styles.sectionTitle}>TACTICA NUMBERS</Text>
-                      <Text style={styles.factsEmpty}>
-                        {f?.degraded
-                          ? "Tactica ratings couldn't be loaded right now."
-                          : "Tactica ratings aren't available for this match yet."}
-                      </Text>
+                      <Text style={styles.factsEmpty}>{message}</Text>
                     </>
                   );
                 }
@@ -479,6 +484,20 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
 
                 return (
                   <>
+                    {/* Which kind of number this is. Provisional can still
+                        move; frozen is what the match was played under. */}
+                    {f.provisional && (
+                      <Text style={[styles.factsEmpty, { marginBottom: 12 }]}>
+                        Provisional. These update until kickoff gets close,
+                        then they're locked in.
+                      </Text>
+                    )}
+                    {f.frozen && (
+                      <Text style={[styles.factsEmpty, { marginBottom: 12 }]}>
+                        Pre-match numbers, locked in before kickoff.
+                      </Text>
+                    )}
+
                     {hasProbs && (
                       <>
                         <Text style={styles.sectionTitle}>WIN PROBABILITY</Text>

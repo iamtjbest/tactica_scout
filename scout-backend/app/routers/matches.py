@@ -45,9 +45,12 @@ Managers/referees/venues, Competition structure):
     empty response.
 """
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException
-from app.tactica import get_match_ratings
+from app.tactica import (
+    get_match_ratings, get_frozen_ratings, is_freezable, freeze_ratings,
+    FREEZE_WINDOW_HOURS,
+)
 from app.config import bsd_get, cache_read, cache_write, cache_age, get_league_id_map, extract_league_name
 
 router = APIRouter()
@@ -297,29 +300,86 @@ def _recent_form(team_id, exclude_event_id: int | None = None, limit: int = 5) -
     return out
 
 
+_FINISHED = {"finished", "ended", "played", "ft"}
+
+
+def _parse_kickoff(raw) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _empty_facts(reason: str) -> dict:
+    """Same shape get_match_ratings returns when it has nothing, so the
+    Facts tab renders "--" exactly as it already does."""
+    side = {"attack": None, "defence": None, "win_prob": None, "live_rating": False}
+    return {
+        "home": dict(side), "away": dict(side),
+        "draw_prob": None, "best_formation": None, "away_best_formation": None,
+        "degraded": True, "name_mismatch": None,
+        "frozen": False, "provisional": False,
+        "unavailable_reason": reason,
+    }
+
+
 @router.get("/matches/{event_id}/facts")
 def match_facts(event_id: int):
-    """Tactica ATK/DEF + win probability for one fixture.
+    """Tactica ATK/DEF + win probability for one fixture, FROZEN.
 
-    Split out of match_detail on purpose: this calls Tactica's backend
-    (two /api/form lookups plus two /api/predict runs) and that service
-    sleeps on Render's free tier. Keeping it off the match-detail path
-    means a cold Tactica costs you the Facts tab, not the whole page.
+    The numbers shown for a match are the ones calculated shortly before
+    kickoff, saved once in Supabase (match_predictions) and never
+    recalculated. Both teams will play again and their live ratings will
+    move; this match keeps the numbers it was played under.
 
-    Next step when this gets slow in the wild: precompute before kickoff
-    and store the row in Supabase, so this endpoint reads instead of
-    fetching. The shape it returns won't change when that happens.
+      1. A stored snapshot exists  -> return it. Nothing is computed.
+      2. No snapshot, match already started or finished -> return empty.
+         Computing now would fold this match's own result into the form
+         ratings, so a "pre-match" number made after the fact is wrong.
+      3. No snapshot, kickoff still ahead -> compute live from Tactica.
+         Inside the freeze window (FREEZE_WINDOW_HOURS before kickoff)
+         and only if the result is complete, save it as the snapshot.
+         Earlier than that, return it marked provisional and don't save,
+         because a team may still play before this match.
+
+    Split out of match_detail on purpose: computing calls Tactica's
+    backend (two /api/form lookups plus two /api/predict runs) and that
+    service sleeps on Render's free tier. Keeping it off the match-detail
+    path means a cold Tactica costs you the Facts tab, not the whole page.
+    Extra keys vs before: frozen, provisional, computed_at,
+    formula_version, unavailable_reason. Existing keys are unchanged.
     """
+    frozen = get_frozen_ratings(event_id)
+    if frozen:
+        return frozen
+
     base = bsd_get(f"/events/{event_id}/")
     if not base:
         raise HTTPException(status_code=404, detail="Match not found")
 
-    return get_match_ratings(
-        base.get("home_team"),
-        base.get("away_team"),
-        base.get("home_team_id"),
-        base.get("away_team_id"),
-    )
+    home_team = base.get("home_team")
+    away_team = base.get("away_team")
+    kickoff   = _parse_kickoff(base.get("event_date"))
+    now       = datetime.now(timezone.utc)
+    status    = str(base.get("status") or "").lower()
+
+    if status in _FINISHED or (kickoff is not None and now >= kickoff):
+        return _empty_facts("no_prematch_snapshot")
+
+    result = get_match_ratings(home_team, away_team)
+
+    in_window = kickoff is not None and (kickoff - now) <= timedelta(hours=FREEZE_WINDOW_HOURS)
+    if in_window and is_freezable(result):
+        stored = freeze_ratings(event_id, home_team, away_team, kickoff.isoformat(), result)
+        if stored:
+            return stored
+
+    result["frozen"] = False
+    result["provisional"] = True
+    return result
 
 
 @router.get("/matches/{event_id}")

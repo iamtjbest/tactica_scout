@@ -891,25 +891,48 @@ function FactsTab({ match }: { match: MatchDetail }) {
     );
   }
 
-  const { home, away, draw_prob, best_formation, degraded, name_mismatch } = facts;
+  const {
+    home, away, draw_prob, best_formation, degraded, name_mismatch,
+    frozen, provisional, unavailable_reason,
+  } = facts;
   const hasRatings = home.attack != null || away.attack != null;
   const hasProbs = home.win_prob != null || away.win_prob != null;
 
   if (!hasRatings && !hasProbs) {
+    // unavailable_reason is permanent, degraded is "try again later".
+    // Collapsing them would tell someone to retry a match that will
+    // never have numbers.
+    const message =
+      unavailable_reason === "no_prematch_snapshot"
+        ? "No pre-match numbers were saved for this match. Ratings calculated now would include this match's own result, so they wouldn't be pre-match numbers."
+        : degraded
+        ? "Tactica ratings couldn't be loaded right now."
+        : "Tactica ratings aren't available for this match yet.";
     return (
       <div className="card">
         <p className="section-label mb-3">Tactica Numbers</p>
-        <p className="text-mt text-sm">
-          {degraded
-            ? "Tactica ratings couldn't be loaded right now."
-            : "Tactica ratings aren't available for this match yet."}
-        </p>
+        <p className="text-mt text-sm">{message}</p>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
+      {/* Say which kind of number this is. A provisional figure can still
+          move before kickoff; a frozen one is what the match was played
+          under and never changes. */}
+      {provisional && (
+        <p className="text-mt2 text-xs">
+          Provisional. These update until kickoff gets close, then they&apos;re
+          locked in.
+        </p>
+      )}
+      {frozen && (
+        <p className="text-mt2 text-xs">
+          Pre-match numbers, locked in before kickoff.
+        </p>
+      )}
+
       {hasProbs && (
         <div className="card">
           <p className="section-label mb-4">Win Probability</p>
