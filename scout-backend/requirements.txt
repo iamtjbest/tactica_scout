@@ -5,3 +5,4 @@ requests>=2.31.0
 python-dotenv>=1.0.1
 supabase>=2.33.0
 pyjwt[crypto]>=2.15.1
+python-multipart>=0.0.9   # FastAPI UploadFile (crest upload)

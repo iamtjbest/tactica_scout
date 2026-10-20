@@ -49,7 +49,7 @@ class ReviewIn(BaseModel):
 
 @router.get("/editor/tournaments/{tournament_id}/proofs")
 def list_proofs(tournament_id: str, user: dict = Depends(require_user)):
-    _owned_tournament(tournament_id, user)
+    _owned_tournament(tournament_id, user, need="owner")
     rows = _rows(
         _db().table("tournament_proofs").select("*")
         .eq("tournament_id", tournament_id).execute()
@@ -61,7 +61,7 @@ def list_proofs(tournament_id: str, user: dict = Depends(require_user)):
 def add_proof(tournament_id: str, body: ProofIn, user: dict = Depends(require_user)):
     """Attach evidence the competition is real: a letter from the
     sports department, a fixture poster, the organising body's page."""
-    t = _owned_tournament(tournament_id, user)
+    t = _owned_tournament(tournament_id, user, need="owner")
     if t["status"] not in {"draft", "rejected"}:
         raise HTTPException(
             status_code=409,
@@ -144,7 +144,7 @@ def _readiness(tournament_id: str) -> dict:
 def readiness(tournament_id: str, user: dict = Depends(require_user)):
     """Checklist for the submit button, so the UI can show what's left
     before the organiser taps it."""
-    _owned_tournament(tournament_id, user)
+    _owned_tournament(tournament_id, user, need="editor")
     return _readiness(tournament_id)
 
 

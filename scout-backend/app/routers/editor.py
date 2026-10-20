@@ -31,6 +31,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.access import require_access
 from app.deps import require_user
 from app.supabase import get_supabase
 
@@ -59,21 +60,20 @@ def _norm_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (name or "").lower())
 
 
-def _owned_tournament(tournament_id: str, user: dict) -> dict:
-    """Load a tournament and prove this user may act on it.
+def _owned_tournament(tournament_id: str, user: dict, need: str = "owner") -> dict:
+    """Load a tournament and prove this user may act on it at `need`.
 
-    404 for a missing one, 403 for someone else's. Admins pass. This is
-    the only authorization gate in the editor, so it is deliberately
-    boring and used everywhere rather than reimplemented per endpoint.
+    A tournament is no longer one person's. Match commissioners get
+    access so two or three concurrent matches can be scored at once,
+    so "is this yours" became "what is your role here" -- see
+    app/access.py for the roles.
+
+    `need` defaults to "owner" deliberately. Every call site that
+    existed before this change keeps owner-level protection, and the
+    few that should be looser were opened one at a time rather than
+    by flipping a default and hoping.
     """
-    t = _one(
-        _db().table("tournaments").select("*").eq("id", tournament_id).limit(1).execute()
-    )
-    if not t:
-        raise HTTPException(status_code=404, detail="Tournament not found")
-    if t["owner_id"] != user["id"] and user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Not your tournament")
-    return t
+    return require_access(tournament_id, user, need=need)
 
 
 # Statuses where the organiser may still change the tournament's shape.
@@ -162,12 +162,26 @@ class PlayerIn(BaseModel):
 @router.get("/editor/tournaments")
 def list_my_tournaments(user: dict = Depends(require_user)):
     """Every tournament this organiser owns, newest first."""
+    # Everything this user can act on, not just what they own: a
+    # commissioner invited to someone else's tournament has to see it
+    # here or they can't reach it at all.
+    memberships = _rows(
+        _db().table("tournament_members").select("tournament_id, role")
+        .eq("user_id", user["id"]).execute()
+    )
+    role_by_id = {m["tournament_id"]: m["role"] for m in memberships}
+    ids = list(role_by_id)
+    if not ids:
+        return {"count": 0, "tournaments": []}
+
     rows = _rows(
         _db().table("tournaments").select("*")
-        .eq("owner_id", user["id"])
+        .in_("id", ids)
         .order("created_at", desc=True)
         .execute()
     )
+    for r in rows:
+        r["_role"] = role_by_id.get(r["id"], "editor")
     return {"count": len(rows), "tournaments": rows}
 
 
@@ -220,7 +234,7 @@ def create_tournament(body: TournamentIn, user: dict = Depends(require_user)):
 def get_tournament(tournament_id: str, user: dict = Depends(require_user)):
     """The tournament plus everything hanging off it, in one call, so
     the editor's main screen doesn't need five round trips."""
-    t = _owned_tournament(tournament_id, user)
+    t = _owned_tournament(tournament_id, user, need="editor")
 
     teams = _rows(
         _db().table("tournament_teams")
@@ -345,7 +359,7 @@ def _find_or_create_club(body: TeamIn, user: dict) -> str:
 
 @router.post("/editor/tournaments/{tournament_id}/teams", status_code=201)
 def add_team(tournament_id: str, body: TeamIn, user: dict = Depends(require_user)):
-    t = _owned_tournament(tournament_id, user)
+    t = _owned_tournament(tournament_id, user, need="owner")
     _require_editable(t)
 
     club_id = _find_or_create_club(body, user)
@@ -373,7 +387,7 @@ def remove_team(tournament_id: str, team_id: str, user: dict = Depends(require_u
     """Removing a team cascades to its player registrations, so it is
     refused once fixtures exist -- a fixture references the team row and
     would be orphaned, and a played result must not vanish."""
-    t = _owned_tournament(tournament_id, user)
+    t = _owned_tournament(tournament_id, user, need="owner")
     _require_editable(t)
 
     played = _rows(
@@ -405,6 +419,14 @@ def search_players(q: str = Query(..., min_length=2), limit: int = 20,
         .or_(f"first_name.ilike.%{q}%,last_name.ilike.%{q}%")
         .limit(limit).execute()
     )
+    # Birth YEAR only, not the full date. This endpoint is open to any
+    # signed-in account, and it would otherwise hand out the exact
+    # date of birth of every student ever registered to a squad. The
+    # year is all the UI needs to tell two players with the same name
+    # apart, which is the only reason it was here.
+    for r in rows:
+        dob = r.pop("dob", None)
+        r["birth_year"] = int(str(dob)[:4]) if dob else None
     return {"count": len(rows), "players": rows}
 
 
@@ -422,7 +444,7 @@ def register_player(team_id: str, body: PlayerIn, user: dict = Depends(require_u
     )
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
-    t = _owned_tournament(team["tournament_id"], user)
+    t = _owned_tournament(team["tournament_id"], user, need="owner")
     _require_editable(t)
 
     if body.player_id:
@@ -505,7 +527,7 @@ def list_squad(team_id: str, user: dict = Depends(require_user)):
     )
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
-    _owned_tournament(team["tournament_id"], user)
+    _owned_tournament(team["tournament_id"], user, need="editor")
 
     rows = _rows(
         _db().table("player_registrations")
@@ -524,7 +546,7 @@ def unregister_player(team_id: str, registration_id: str,
     )
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
-    t = _owned_tournament(team["tournament_id"], user)
+    t = _owned_tournament(team["tournament_id"], user, need="owner")
     _require_editable(t)
 
     _db().table("player_registrations").delete() \
