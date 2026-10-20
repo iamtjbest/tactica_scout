@@ -23,7 +23,7 @@ branches on that shape: a grouped response returns "groups":
 """
 import time
 from fastapi import APIRouter, HTTPException
-from app.config import bsd_get, cache_read, cache_write, cache_age, get_league_id_map, LEAGUE_NAMES
+from app.config import bsd_get, cache_read, cache_write, cache_age, get_league_id_map, LEAGUE_NAMES, debug_field
 
 router = APIRouter()
 # 5 min. Tables don't move outside matchdays, true -- but matchday is
@@ -124,7 +124,7 @@ def standings(league_id: int):
             "league":        league_name,
             "standings":     None,
             "groups":        groups,
-            "_debug_sample": sample,
+            "_debug_sample": debug_field(sample),
             "cached":        False,
         }
         cache_write(cache_key, result)
@@ -137,7 +137,7 @@ def standings(league_id: int):
         "league":        league_name,
         "standings":     [_row(r) for r in rows_raw],
         "groups":        None,
-        "_debug_sample": rows_raw[0] if rows_raw else None,
+        "_debug_sample": debug_field(rows_raw[0] if rows_raw else None),
         "cached":        False,
     }
     cache_write(cache_key, result)

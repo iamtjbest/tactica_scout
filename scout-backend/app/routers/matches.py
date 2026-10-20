@@ -51,7 +51,7 @@ from app.tactica import (
     get_match_ratings, get_frozen_ratings, is_freezable, freeze_ratings,
     FREEZE_WINDOW_HOURS,
 )
-from app.config import bsd_get, cache_read, cache_write, cache_age, get_league_id_map, extract_league_name
+from app.config import bsd_get, cache_read, cache_write, cache_age, get_league_id_map, extract_league_name, debug_field
 
 router = APIRouter()
 MATCH_TTL = 60  # seconds for live/upcoming matches; finished matches could cache much longer
@@ -138,7 +138,7 @@ def matches_by_date(date: str):
         "date":       date,
         "count":      len(events),
         "leagues":    leagues_list,
-        "_debug_sample_event": events[0] if events else None,
+        "_debug_sample_event": debug_field(events[0] if events else None),
         "cached":     False,
     }
     cache_write(cache_key, result)
@@ -444,8 +444,8 @@ def match_detail(event_id: int):
         # hostage for a tab most people never open. The Facts tab calls
         # /api/matches/{id}/facts itself and shows its own loading state.
         "facts_url": f"/api/matches/{event_id}/facts",
-        "_debug_base_keys": list(base.keys()),
-        "_debug_incidents_sample": incidents[0] if incidents else None,
+        "_debug_base_keys": debug_field(list(base.keys())),
+        "_debug_incidents_sample": debug_field(incidents[0] if incidents else None),
         "cached": False,
     }
     cache_write(cache_key, result)

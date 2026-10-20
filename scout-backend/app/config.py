@@ -17,6 +17,19 @@ BSD_KEY     = os.environ.get("BSD_API_KEY", "")
 BSD_BASE    = "https://sports.bzzoiro.com/api/v2"
 BSD_HEADERS = {"Authorization": f"Token {BSD_KEY}"}
 
+# Raw BSD payload samples on API responses. These exist so unconfirmed
+# field names (incident minute/player/side, league shapes) can be read
+# off a live response. They are OFF by default: on a public endpoint
+# they leak whole untrimmed upstream objects and bloat every payload.
+# Set SCOUT_DEBUG=1 in the environment to turn them back on.
+DEBUG_PAYLOADS = os.environ.get("SCOUT_DEBUG") == "1"
+
+
+def debug_field(value):
+    """Returns the sample when debugging is on, otherwise None so the
+    key stays in the shape but carries nothing."""
+    return value if DEBUG_PAYLOADS else None
+
 # ── League ID → name — EMERGENCY FALLBACK ONLY ────────────────────────────
 # Corrected 2026-10-08 against a real /leagues/ dump (90 leagues, no
 # country filter needed, one call). The OLD numbers here were wrong —
