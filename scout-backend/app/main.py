@@ -28,7 +28,10 @@ Endpoints:
 import os
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import live, matches, players, compare, leagues, news, me, teams, search, admin
+from app.routers import (
+    live, matches, players, compare, leagues, news, me, teams, search, admin,
+    editor, editor_fixtures, editor_review, tournaments_public, billing,
+)
 
 app = FastAPI(
     title="Scout by Tactica API",
@@ -59,6 +62,11 @@ app.include_router(me.router,       prefix="/api")
 app.include_router(teams.router,    prefix="/api")
 app.include_router(search.router,   prefix="/api")
 app.include_router(admin.router,    prefix="/api")
+app.include_router(editor.router,            prefix="/api")
+app.include_router(editor_fixtures.router,   prefix="/api")
+app.include_router(editor_review.router,     prefix="/api")
+app.include_router(tournaments_public.router, prefix="/api")
+app.include_router(billing.router,           prefix="/api")
 
 
 @app.get("/api/health")
