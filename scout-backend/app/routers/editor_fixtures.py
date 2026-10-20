@@ -570,7 +570,7 @@ def editor_standings(tournament_id: str, user: dict = Depends(require_user)):
     # Imported here, not at module load: tournaments_public imports
     # helpers from app.routers.editor, and a top-level import would make
     # the two modules depend on each other's import order.
-    from app.routers.tournaments_public import _standings, _team_lookup
+    from app.routers.tournaments_public import _standings, _team_lookup, _points
 
     t = _owned_tournament(tournament_id, user, need="editor")
     teams = _team_lookup(tournament_id)
@@ -587,11 +587,14 @@ def editor_standings(tournament_id: str, user: dict = Depends(require_user)):
                 g: _standings(
                     tournament_id,
                     {k: v for k, v in teams.items() if v.get("group_name") == g},
-                    fixtures, t.get("tiebreakers"),
+                    fixtures, t.get("tiebreakers"), t.get("points_rules"),
                 ) for g in groups
             },
+            "points_rules": _points(t.get("points_rules")),
         }
     return {
         "grouped": False,
-        "standings": _standings(tournament_id, teams, fixtures, t.get("tiebreakers")),
+        "standings": _standings(tournament_id, teams, fixtures,
+                                t.get("tiebreakers"), t.get("points_rules")),
+        "points_rules": _points(t.get("points_rules")),
     }

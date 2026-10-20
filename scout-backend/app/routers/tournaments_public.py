@@ -33,6 +33,34 @@ FINISHED = {"ft"}
 
 DEFAULT_TIEBREAKERS = ["goal_difference", "goals_scored", "head_to_head"]
 
+# Used when a tournament predates the points_rules column, or has it
+# empty. Three for a win is the near-universal modern default, and it is
+# what every existing table was already calculated with, so falling back
+# to it changes nothing for anyone.
+DEFAULT_POINTS = {"win": 3, "draw": 1, "loss": 0}
+
+
+def _points(rules: dict | None) -> dict:
+    """Whole, sane points values, whatever is in the column.
+
+    A table is the thing an organiser gets shouted at about, so a
+    malformed value falls back to the standard rather than producing
+    a nonsense column or a 500 in the middle of a matchday.
+    """
+    r = rules or {}
+    out = {}
+    for k in ("win", "draw", "loss"):
+        try:
+            v = int(r[k])
+        except (KeyError, TypeError, ValueError):
+            return dict(DEFAULT_POINTS)
+        if not 0 <= v <= 10:
+            return dict(DEFAULT_POINTS)
+        out[k] = v
+    if not (out["win"] >= out["draw"] >= out["loss"]):
+        return dict(DEFAULT_POINTS)
+    return out
+
 
 @router.get("/tournaments")
 def list_public_tournaments(country: str | None = None, level: str | None = None):
@@ -82,14 +110,19 @@ def _blank_row(team: dict) -> dict:
 
 
 def _standings(tournament_id: str, teams: dict[str, dict],
-               fixtures: list[dict], tiebreakers: list[str]) -> list[dict]:
+               fixtures: list[dict], tiebreakers: list[str],
+               points_rules: dict | None = None) -> list[dict]:
     """League table from finished fixtures only.
 
-    Three points for a win. A match that is live, postponed or has a
-    missing score contributes nothing: half a result is not a result,
-    and counting a live 1-0 as final makes the table jump around while
-    people are looking at it.
+    Points come from the competition's own rules rather than a constant:
+    3-1-0 is near-universal but plenty of school and five-a-side
+    competitions run 2-1-0, and a hard-coded table makes those unusable.
+
+    A match that is live, postponed or has a missing score contributes
+    nothing: half a result is not a result, and counting a live 1-0 as
+    final makes the table jump around while people are looking at it.
     """
+    pts = _points(points_rules)
     table = {tid: _blank_row(t) for tid, t in teams.items()}
 
     ordered = sorted(fixtures, key=lambda f: f.get("kickoff_at") or "")
@@ -107,11 +140,11 @@ def _standings(tournament_id: str, teams: dict[str, dict],
             row["goals_for"] += gf
             row["goals_against"] += ga
             if gf > ga:
-                row["won"] += 1; row["points"] += 3; row["form"].append("W")
+                row["won"] += 1;   row["points"] += pts["win"];  row["form"].append("W")
             elif gf == ga:
-                row["drawn"] += 1; row["points"] += 1; row["form"].append("D")
+                row["drawn"] += 1; row["points"] += pts["draw"]; row["form"].append("D")
             else:
-                row["lost"] += 1; row["form"].append("L")
+                row["lost"] += 1;  row["points"] += pts["loss"]; row["form"].append("L")
 
     for row in table.values():
         row["goal_difference"] = row["goals_for"] - row["goals_against"]
@@ -197,14 +230,15 @@ def public_tournament(tournament_id: str):
             g: _standings(
                 tournament_id,
                 {k: v for k, v in teams.items() if v.get("group_name") == g},
-                fixtures_raw, t.get("tiebreakers"),
+                fixtures_raw, t.get("tiebreakers"), t.get("points_rules"),
             )
             for g in groups
         }
         standings = None
     else:
         tables = None
-        standings = _standings(tournament_id, teams, fixtures_raw, t.get("tiebreakers"))
+        standings = _standings(tournament_id, teams, fixtures_raw,
+                               t.get("tiebreakers"), t.get("points_rules"))
 
     result = {
         "_cached_at":  time.time(),
@@ -215,6 +249,7 @@ def public_tournament(tournament_id: str):
         "group_tables": tables,
         # Which tiebreakers actually ran. head_to_head is in the schema
         # default but is not implemented, so it will be absent here.
+        "points_rules": _points(t.get("points_rules")),
         "tiebreakers_applied": [
             x for x in (t.get("tiebreakers") or DEFAULT_TIEBREAKERS)
             if x in {"goal_difference", "goals_scored", "goals_for", "wins"}

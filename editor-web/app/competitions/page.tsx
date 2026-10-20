@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import Guard from "@/components/Guard";
 import StatusPill from "@/components/StatusPill";
+import Crest from "@/components/Crest";
+import clsx from "clsx";
 import CreateWizard from "@/components/CreateWizard";
 import { listTournaments, addProof, type Tournament } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
@@ -40,6 +42,22 @@ function Competitions() {
   const [creating, setCreating] = useState(false);
   const [email, setEmail] = useState("");
   const [q, setQ] = useState("");
+  // Tiles or list, remembered per browser. It is a view preference, not
+  // data: losing it costs one click, so localStorage is the right home
+  // and a failed read must not break the page.
+  const [view, setView] = useState<"tiles" | "list">("list");
+
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem("scout-editor-view");
+      if (v === "tiles" || v === "list") setView(v);
+    } catch { /* private window, blocked storage: the default is fine */ }
+  }, []);
+
+  const pickView = (v: "tiles" | "list") => {
+    setView(v);
+    try { localStorage.setItem("scout-editor-view", v); } catch { /* ignore */ }
+  };
 
   const load = useCallback(() => {
     listTournaments()
@@ -133,9 +151,24 @@ function Competitions() {
         </div>
       )}
 
-      {rows !== null && rows.length > 3 && (
-        <input className="input-select" value={q} onChange={(e) => setQ(e.target.value)}
-               placeholder="Search competitions" />
+      {rows !== null && rows.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <input className="input-select flex-1 min-w-[220px]" value={q}
+                 onChange={(e) => setQ(e.target.value)}
+                 placeholder="Search competitions" />
+          <div className="flex items-center border border-bd rounded-lg overflow-hidden">
+            {(["tiles", "list"] as const).map((v) => (
+              <button key={v} onClick={() => pickView(v)}
+                      aria-pressed={view === v}
+                      className={clsx(
+                        "px-3 py-2 text-xs font-semibold capitalize transition-colors",
+                        view === v ? "bg-volt/10 text-volt" : "text-mt hover:text-white"
+                      )}>
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* An empty account is not an error. Same treatment as a full one:
@@ -163,7 +196,13 @@ function Competitions() {
               <span className="font-mono text-[11px] text-mt2">{group.length}</span>
             </div>
             <p className="text-mt text-xs -mt-1 mb-3">{note}</p>
-            {group.map((t) => <Row key={t.id} t={t} />)}
+            {view === "tiles" ? (
+              <div className="grid sm:grid-cols-2 gap-3">
+                {group.map((t) => <Tile key={t.id} t={t} />)}
+              </div>
+            ) : (
+              group.map((t) => <Row key={t.id} t={t} />)
+            )}
           </section>
         );
       })}
@@ -175,12 +214,42 @@ function Competitions() {
   );
 }
 
+function Tile({ t }: { t: Tournament }) {
+  const role = (t as any)._role;
+  return (
+    <Link href={`/t/${t.id}`}
+          className="card block hover:border-volt/40 transition-colors h-full">
+      <div className="flex items-start gap-3">
+        <Crest url={t.crest_url} name={t.name} size={40} />
+        <div className="min-w-0 flex-1">
+          <p className="text-white font-semibold truncate">{t.name}</p>
+          <p className="text-mt text-xs mt-1 truncate">{t.organizing_body}</p>
+        </div>
+        <StatusPill status={t.status} />
+      </div>
+      <p className="text-mt text-xs mt-3">
+        {t.country} • {t.format.replace("_", " + ")}
+        {role && role !== "owner" ? `  •  you're an ${role}` : ""}
+      </p>
+      <p className="text-mt2 text-xs mt-1 font-mono">
+        {t.start_date} to {t.end_date}
+      </p>
+      {t.status === "rejected" && t.rejection_reason && (
+        <p className="text-red2 text-xs mt-3 border-t border-bd pt-3 line-clamp-2">
+          {t.rejection_reason}
+        </p>
+      )}
+    </Link>
+  );
+}
+
 function Row({ t }: { t: Tournament }) {
   const role = (t as any)._role;
   return (
     <Link href={`/t/${t.id}`} className="card block hover:border-volt/40 transition-colors">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+      <div className="flex items-start gap-3">
+        <Crest url={t.crest_url} name={t.name} size={32} />
+        <div className="min-w-0 flex-1">
           <p className="text-white font-semibold truncate">{t.name}</p>
           <p className="text-mt text-xs mt-1">
             {t.organizing_body} • {t.country} • {t.format.replace("_", " + ")}

@@ -151,8 +151,21 @@ class TournamentPatch(BaseModel):
     contact_email: EmailStr | None = None
     contact2_name: str | None = None
     contact2_phone: str | None = None
+    # country was missing here, so an organiser editing it on the Info
+    # screen got a 200 and no change: pydantic drops undeclared fields,
+    # so the value never reached the update.
+    country: str | None = Field(default=None, min_length=2, max_length=80)
     tiebreakers: list[str] | None = None
     discipline_rules: dict[str, Any] | None = None
+
+    # What a result is worth. Three points for a win is near-universal
+    # but not universal, and a school competition running 2-1-0 cannot
+    # use a hard-coded table.
+    points_rules: dict[str, Any] | None = None
+
+    # The competition's own logo. Set by the upload endpoint rather than
+    # typed, but patchable so it can be cleared.
+    crest_url: str | None = None
 
 
 class TeamIn(BaseModel):
@@ -314,6 +327,34 @@ def update_tournament(tournament_id: str, body: TournamentPatch,
             patch[k] = patch[k].isoformat()
     if not patch:
         return t
+
+    if "points_rules" in patch:
+        pr = patch["points_rules"]
+        try:
+            win, draw, loss = int(pr["win"]), int(pr["draw"]), int(pr["loss"])
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail="points_rules needs whole numbers for win, draw and loss.",
+            )
+        if not all(0 <= v <= 10 for v in (win, draw, loss)):
+            raise HTTPException(status_code=400, detail="Points must be between 0 and 10.")
+        if not (win >= draw >= loss):
+            raise HTTPException(
+                status_code=400,
+                detail="A win can't be worth less than a draw, or a draw less than a loss.",
+            )
+        patch["points_rules"] = {"win": win, "draw": draw, "loss": loss}
+
+    if "tiebreakers" in patch:
+        allowed = {"goal_difference", "goals_scored", "goals_for", "wins", "head_to_head"}
+        bad = [x for x in patch["tiebreakers"] if x not in allowed]
+        if bad:
+            raise HTTPException(
+                status_code=400, detail=f"Unknown tiebreaker(s): {', '.join(bad)}",
+            )
+        if len(set(patch["tiebreakers"])) != len(patch["tiebreakers"]):
+            raise HTTPException(status_code=400, detail="A tiebreaker is listed twice.")
 
     start = patch.get("start_date", t["start_date"])
     end   = patch.get("end_date", t["end_date"])

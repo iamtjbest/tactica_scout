@@ -6,15 +6,45 @@ import { useFocusEffect } from "@react-navigation/native";
 import { COLORS } from "../theme";
 import Crest from "../components/Crest";
 import {
-  getTournament, getReadiness, submitForReview, getStandings, sortRounds,
-  type Tournament, type TeamRow, type Fixture, type Readiness, type StandingRow,
+  getTournament, getReadiness, submitForReview, sortRounds,
+  type Tournament, type TeamRow, type Fixture, type Readiness,
 } from "../services/api";
+import { LockedNote } from "../sections/kit";
+import { Venues, Structure, Suspensions } from "../sections/Structure";
+import {
+  Standings, Teams, Players, Info, Regulations, ProofSection, Collaborators,
+} from "../sections/Manage";
 
 /**
- * Read-mostly on mobile, by design. Setting a tournament up is heavy
- * typing and belongs on the web editor; what you need on a phone is to
- * see the fixtures and get into the live screen in one tap.
+ * The competition workspace, with the same sections as the web editor:
+ * Run (matches, standings, brackets), Build (teams, players, venues,
+ * format) and Settings (info, regulations, suspensions, proof,
+ * collaborators).
+ *
+ * On a phone the web sidebar becomes a horizontal strip of pills, kept
+ * in the same order and grouping so the two apps teach the same shape.
+ * Matches opens first, because that is what someone standing at a pitch
+ * came for.
  */
+
+type Section =
+  | "matches" | "standings" | "teams" | "players" | "venues"
+  | "structure" | "info" | "regulations" | "suspensions"
+  | "proof" | "collaborators";
+
+const SECTIONS: { id: Section; label: string; group: string }[] = [
+  { id: "matches",       label: "Matches",       group: "Run" },
+  { id: "standings",     label: "Standings",     group: "Run" },
+  { id: "teams",         label: "Teams",         group: "Build" },
+  { id: "players",       label: "Players",       group: "Build" },
+  { id: "venues",        label: "Venues",        group: "Build" },
+  { id: "structure",     label: "Format",        group: "Build" },
+  { id: "info",          label: "Info",          group: "Settings" },
+  { id: "regulations",   label: "Regulations",   group: "Settings" },
+  { id: "suspensions",   label: "Suspensions",   group: "Settings" },
+  { id: "proof",         label: "Proof",         group: "Settings" },
+  { id: "collaborators", label: "Collaborators", group: "Settings" },
+];
 export default function TournamentDetailScreen({ route, navigation }: any) {
   const { id, name } = route.params;
   const [t, setT] = useState<Tournament | null>(null);
@@ -24,6 +54,7 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [section, setSection] = useState<Section>("matches");
 
   const load = useCallback(() => {
     getTournament(id)
@@ -56,7 +87,12 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
   if (error && !t) return <Text style={s.error}>{error}</Text>;
   if (!t) return <Text style={s.muted}>Loading...</Text>;
 
-  const editable = t.status === "draft" || t.status === "rejected";
+  // Mirrors FROZEN_STATUSES on the backend and the web editor: review is
+  // the only thing that locks a competition, and it unlocks whichever way
+  // the decision goes.
+  const role = (t as any)._role ?? "owner";
+  const editable = t.status !== "pending" && (role === "owner" || role === "editor");
+  const isOwner = role === "owner";
 
   return (
     <ScrollView
@@ -74,7 +110,9 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
         </View>
       ) : null}
 
-      {editable ? (
+      <LockedNote status={t.status} />
+
+      {isOwner && (t.status === "draft" || t.status === "rejected") ? (
         <View style={s.card}>
           <Text style={s.label}>BEFORE IT CAN GO LIVE</Text>
           {ready?.ready ? (
@@ -96,51 +134,100 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
 
       {error ? <Text style={s.error}>{error}</Text> : null}
 
-      <Text style={s.label}>FIXTURES ({fixtures.length})</Text>
-      {fixtures.length === 0 ? (
-        <Text style={s.muted}>
-          No fixtures yet. Generate them, or enter your own draw, in the web editor.
-        </Text>
-      ) : (
-        // Grouped by round or group, same ordering rule as the web
-        // editor. A flat list of 30 league fixtures is unusable on a
-        // phone, and the round is what tells you where you are.
-        groupFixtures(fixtures).map(([heading, list]) => (
-          <View key={heading} style={{ gap: 8 }}>
-            <Text style={s.round}>{heading}</Text>
-            {list.map((fx) => {
-              const h = info(fx.home_team_id), a = info(fx.away_team_id);
-              return (
-                <TouchableOpacity
-                  key={fx.id} style={s.card}
-                  onPress={() => navigation.navigate("Live", {
-                    tournamentId: id, fixtureId: fx.id,
+      {/* The web sidebar, flattened. Same order and grouping so the two
+          apps teach the same shape. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ gap: 6, paddingVertical: 4 }}
+        style={{ marginHorizontal: -16, paddingHorizontal: 16 }}
+      >
+        {SECTIONS.map((x) => {
+          const on = x.id === section;
+          return (
+            <TouchableOpacity key={x.id} onPress={() => setSection(x.id)}
+                              style={[s.pill, on && s.pillOn]}>
+              <Text style={[s.pillText, on && s.pillTextOn]}>{x.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      <View style={{ gap: 10 }}>
+        {section === "matches" ? (
+          <>
+            <Text style={s.label}>FIXTURES ({fixtures.length})</Text>
+            {fixtures.length === 0 ? (
+              <Text style={s.muted}>
+                No fixtures yet. Generate them, or enter your own draw, in the
+                web editor.
+              </Text>
+            ) : (
+              // Grouped by round or group, same ordering rule as the web
+              // editor. A flat list of 30 league fixtures is unusable on a
+              // phone, and the round is what tells you where you are.
+              groupFixtures(fixtures).map(([heading, list]) => (
+                <View key={heading} style={{ gap: 8 }}>
+                  <Text style={s.round}>{heading}</Text>
+                  {list.map((fx) => {
+                    const h = info(fx.home_team_id), a = info(fx.away_team_id);
+                    return (
+                      <TouchableOpacity
+                        key={fx.id} style={s.card}
+                        onPress={() => navigation.navigate("Live", {
+                          tournamentId: id, fixtureId: fx.id,
+                        })}
+                      >
+                        <View style={s.rowTop}>
+                          <View style={s.teamsLine}>
+                            <Crest url={h.crest} name={h.name} size={18} />
+                            <Text style={s.title} numberOfLines={1}>{h.name}</Text>
+                            <Text style={s.vs}>v</Text>
+                            <Crest url={a.crest} name={a.name} size={18} />
+                            <Text style={s.title} numberOfLines={1}>{a.name}</Text>
+                          </View>
+                          <Text style={s.score}>
+                            {fx.home_score ?? "-"}:{fx.away_score ?? "-"}
+                          </Text>
+                        </View>
+                        <Text style={s.mono}>
+                          {new Date(fx.kickoff_at).toLocaleString("en-GB", {
+                            day: "numeric", month: "short",
+                            hour: "2-digit", minute: "2-digit",
+                          })}
+                          {"  \u2022  "}{String(fx.status).toUpperCase()}
+                        </Text>
+                      </TouchableOpacity>
+                    );
                   })}
-                >
-                  <View style={s.rowTop}>
-                    <View style={s.teamsLine}>
-                      <Crest url={h.crest} name={h.name} size={18} />
-                      <Text style={s.title} numberOfLines={1}>{h.name}</Text>
-                      <Text style={s.vs}>v</Text>
-                      <Crest url={a.crest} name={a.name} size={18} />
-                      <Text style={s.title} numberOfLines={1}>{a.name}</Text>
-                    </View>
-                    <Text style={s.score}>
-                      {fx.home_score ?? "-"}:{fx.away_score ?? "-"}
-                    </Text>
-                  </View>
-                  <Text style={s.mono}>
-                    {new Date(fx.kickoff_at).toLocaleString("en-GB", {
-                      day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
-                    })}
-                    {"  •  "}{String(fx.status).toUpperCase()}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        ))
-      )}
+                </View>
+              ))
+            )}
+          </>
+        ) : null}
+
+        {section === "standings" ? <Standings tid={id} /> : null}
+        {section === "teams" ? <Teams teams={teams} /> : null}
+        {section === "players" ? <Players teams={teams} /> : null}
+        {section === "venues" ? <Venues tid={id} editable={editable && isOwner} /> : null}
+        {section === "structure" ? (
+          <Structure tid={id} editable={editable && isOwner} onChanged={load} />
+        ) : null}
+        {section === "info" ? (
+          <Info t={t} editable={editable && isOwner} onChanged={load} />
+        ) : null}
+        {section === "regulations" ? (
+          <Regulations t={t} editable={editable && isOwner} onChanged={load} />
+        ) : null}
+        {section === "suspensions" ? (
+          <Suspensions tid={id} teams={teams} editable={editable} />
+        ) : null}
+        {section === "proof" ? (
+          <ProofSection tid={id}
+                        editable={isOwner && (t.status === "draft" || t.status === "rejected")} />
+        ) : null}
+        {section === "collaborators" ? <Collaborators tid={id} isOwner={isOwner} /> : null}
+      </View>
     </ScrollView>
   );
 }
@@ -182,4 +269,11 @@ const s = StyleSheet.create({
     alignItems: "center", marginTop: 12,
   },
   btnText: { color: COLORS.bg, fontWeight: "800", fontSize: 14 },
+  pill: {
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999,
+    borderWidth: 1, borderColor: COLORS.cardBorder, backgroundColor: COLORS.card,
+  },
+  pillOn: { borderColor: COLORS.cardBorderActive, backgroundColor: COLORS.voltMuted },
+  pillText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: "600" },
+  pillTextOn: { color: COLORS.volt, fontWeight: "800" },
 });

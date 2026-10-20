@@ -42,6 +42,19 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
 export type TournamentStatus =
   | "draft" | "pending" | "approved" | "rejected" | "unpublished";
 
+export type PointsRules = { win: number; draw: number; loss: number };
+
+/** Every tiebreaker the backend will accept, in the order they are
+ *  offered. `implemented: false` ones are stored and shown but are not
+ *  applied when sorting yet, and the UI says so rather than implying
+ *  they run. */
+export const TIEBREAKERS: { id: string; label: string; implemented: boolean }[] = [
+  { id: "goal_difference", label: "Goal difference", implemented: true },
+  { id: "goals_scored",    label: "Goals scored",    implemented: true },
+  { id: "wins",            label: "Wins",            implemented: true },
+  { id: "head_to_head",    label: "Head to head",    implemented: false },
+];
+
 export type Tournament = {
   id: string;
   name: string;
@@ -55,6 +68,10 @@ export type Tournament = {
   organizing_body: string;
   organizer_phone: string;
   status: TournamentStatus;
+  crest_url: string | null;
+  tiebreakers: string[] | null;
+  points_rules: PointsRules | null;
+  discipline_rules: { yellows_to_suspension?: number; red_card_ban_matches?: number } | null;
   rejection_reason: string | null;
   submitted_at: string | null;
   created_at: string;
@@ -273,6 +290,25 @@ export async function uploadCrest(clubId: string, file: File) {
 export const removeCrest = (clubId: string) =>
   req<{ club: Club }>(`/api/editor/clubs/${clubId}/crest`, { method: "DELETE" });
 
+/** The competition's own logo. Same multipart dance as a club crest. */
+export async function uploadTournamentCrest(tid: string, file: File) {
+  const { authHeaders } = await import("./auth");
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/api/editor/tournaments/${tid}/crest`, {
+    method: "POST",
+    headers: { ...(await authHeaders()) },
+    body: form,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as any)?.detail || `Upload failed (${res.status})`);
+  return body as { crest_url: string };
+}
+
+export const removeTournamentCrest = (tid: string) =>
+  req<{ tournament: Tournament }>(`/api/editor/tournaments/${tid}/crest`,
+    { method: "DELETE" });
+
 export const bulkFixtures = (
   tid: string,
   fixtures: Record<string, unknown>[],
@@ -398,3 +434,91 @@ export const requestAccess = (tid: string, message?: string, role_requested: TRo
     `/api/editor/tournaments/${tid}/request-access`,
     { method: "POST", body: JSON.stringify({ message, role_requested }) }
   );
+
+// ── venues, structure, suspensions ────────────────────────────────────
+
+export type Venue = {
+  id: string; tournament_id: string; name: string;
+  address: string | null; city: string | null; capacity: number | null;
+};
+
+export type SubCompKind = "league" | "group" | "knockout" | "playoff";
+
+export type SubCompetition = {
+  id: string; tournament_id: string; name: string;
+  kind: SubCompKind; sort_order: number;
+  teams: TeamRow[];
+};
+
+export type Suspension = {
+  id: string; tournament_id: string; tournament_team_id: string;
+  player_id: string; matches: number; start_date: string;
+  reason: string | null; active: boolean;
+  players: { id: string; first_name: string; last_name: string } | null;
+  tournament_teams: { id: string; clubs: Club | null } | null;
+};
+
+export const SUB_KINDS: { id: SubCompKind; label: string; blurb: string }[] = [
+  { id: "group",    label: "Group",    blurb: "A mini league that feeds a knockout." },
+  { id: "league",   label: "League",   blurb: "One table, everyone plays everyone." },
+  { id: "knockout", label: "Knockout", blurb: "A single-elimination bracket." },
+  { id: "playoff",  label: "Playoff",  blurb: "A deciding stage after the league." },
+];
+
+export const listVenues = (tid: string) =>
+  req<{ count: number; venues: Venue[] }>(`/api/editor/tournaments/${tid}/venues`);
+
+export const addVenue = (tid: string, body: Record<string, unknown>) =>
+  req<Venue>(`/api/editor/tournaments/${tid}/venues`, {
+    method: "POST", body: JSON.stringify(body),
+  });
+
+export const updateVenue = (tid: string, venueId: string, body: Record<string, unknown>) =>
+  req<Venue>(`/api/editor/tournaments/${tid}/venues/${venueId}`, {
+    method: "PATCH", body: JSON.stringify(body),
+  });
+
+export const deleteVenue = (tid: string, venueId: string) =>
+  req<void>(`/api/editor/tournaments/${tid}/venues/${venueId}`, { method: "DELETE" });
+
+export const listSubCompetitions = (tid: string) =>
+  req<{ count: number; sub_competitions: SubCompetition[]; unassigned: TeamRow[] }>(
+    `/api/editor/tournaments/${tid}/sub-competitions`);
+
+export const addSubCompetition = (tid: string, body: Record<string, unknown>) =>
+  req<SubCompetition>(`/api/editor/tournaments/${tid}/sub-competitions`, {
+    method: "POST", body: JSON.stringify(body),
+  });
+
+export const updateSubCompetition = (tid: string, subId: string, body: Record<string, unknown>) =>
+  req<SubCompetition>(`/api/editor/tournaments/${tid}/sub-competitions/${subId}`, {
+    method: "PATCH", body: JSON.stringify(body),
+  });
+
+export const deleteSubCompetition = (tid: string, subId: string) =>
+  req<void>(`/api/editor/tournaments/${tid}/sub-competitions/${subId}`, { method: "DELETE" });
+
+export const assignTeams = (tid: string, subId: string, teamIds: string[]) =>
+  req<{ assigned: number }>(`/api/editor/tournaments/${tid}/sub-competitions/${subId}/teams`, {
+    method: "POST", body: JSON.stringify({ team_ids: teamIds }),
+  });
+
+export const unassignTeam = (tid: string, teamId: string) =>
+  req<TeamRow>(`/api/editor/tournaments/${tid}/teams/${teamId}/sub-competition`,
+    { method: "DELETE" });
+
+export const listSuspensions = (tid: string, includeServed = false) =>
+  req<{ count: number; suspensions: Suspension[] }>(
+    `/api/editor/tournaments/${tid}/suspensions?include_served=${includeServed}`);
+
+export const addSuspension = (tid: string, body: Record<string, unknown>) =>
+  req<Suspension>(`/api/editor/tournaments/${tid}/suspensions`, {
+    method: "POST", body: JSON.stringify(body),
+  });
+
+export const markServed = (tid: string, sid: string) =>
+  req<Suspension>(`/api/editor/tournaments/${tid}/suspensions/${sid}/served`,
+    { method: "POST" });
+
+export const deleteSuspension = (tid: string, sid: string) =>
+  req<void>(`/api/editor/tournaments/${tid}/suspensions/${sid}`, { method: "DELETE" });

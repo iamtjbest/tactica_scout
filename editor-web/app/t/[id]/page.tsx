@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import clsx from "clsx";
 import Guard from "@/components/Guard";
@@ -11,6 +11,12 @@ import StandingsTable from "@/components/StandingsTable";
 import AccessTab from "@/components/AccessTab";
 import {
   getTournament, getReadiness, submitForReview, unpublish, updateTournament,
+  deleteTournament, uploadTournamentCrest, removeTournamentCrest, TIEBREAKERS,
+  listVenues, addVenue, updateVenue, deleteVenue,
+  listSubCompetitions, addSubCompetition, updateSubCompetition,
+  deleteSubCompetition, assignTeams, unassignTeam, SUB_KINDS,
+  listSuspensions, addSuspension, markServed, deleteSuspension, listSquad as squadOf,
+  type Venue, type SubCompetition, type SubCompKind, type Suspension,
   searchClubs, addTeam, removeTeam,
   generateFixtures, clearFixtures, setScore,
   addProof, deleteProof,
@@ -38,8 +44,8 @@ import {
  */
 type Section =
   | "matches" | "standings" | "brackets"
-  | "teams" | "players" | "structure"
-  | "info" | "proof" | "collaborators";
+  | "teams" | "players" | "venues" | "structure"
+  | "info" | "regulations" | "suspensions" | "proof" | "collaborators";
 
 const NAV: { group: string; items: { id: Section; label: string; icon: () => JSX.Element }[] }[] = [
   {
@@ -55,6 +61,7 @@ const NAV: { group: string; items: { id: Section; label: string; icon: () => JSX
     items: [
       { id: "teams",     label: "Teams",             icon: IconTeams },
       { id: "players",   label: "Players",           icon: IconPlayers },
+      { id: "venues",    label: "Venues",            icon: IconVenues },
       { id: "structure", label: "Format & structure", icon: IconStructure },
     ],
   },
@@ -62,6 +69,8 @@ const NAV: { group: string; items: { id: Section; label: string; icon: () => JSX
     group: "Settings",
     items: [
       { id: "info",          label: "Info",          icon: IconInfo },
+      { id: "regulations",   label: "Regulations",   icon: IconRules },
+      { id: "suspensions",   label: "Suspensions",   icon: IconBan },
       { id: "proof",         label: "Proof",         icon: IconProof },
       { id: "collaborators", label: "Collaborators", icon: IconPeople },
     ],
@@ -70,8 +79,10 @@ const NAV: { group: string; items: { id: Section; label: string; icon: () => JSX
 
 const TITLES: Record<Section, string> = {
   matches: "Matches", standings: "Standings", brackets: "Brackets",
-  teams: "Teams", players: "Players", structure: "Format & structure",
-  info: "Info", proof: "Proof", collaborators: "Collaborators",
+  teams: "Teams", players: "Players", venues: "Venues",
+  structure: "Format & structure", suspensions: "Suspensions",
+  info: "Info", regulations: "Regulations",
+  proof: "Proof", collaborators: "Collaborators",
 };
 
 export default function Page() {
@@ -211,11 +222,22 @@ function Detail() {
         {section === "players" && (
           <PlayersSection teams={data.teams} editable={editable} />
         )}
+        {section === "venues" && (
+          <VenuesSection tid={id} editable={editable && role === "owner"} />
+        )}
         {section === "structure" && (
-          <StructureSection t={t} teams={data.teams} fixtures={data.fixtures} />
+          <StructureSection tid={id} t={t} teams={data.teams} fixtures={data.fixtures}
+                            editable={editable && role === "owner"} onChanged={load} />
+        )}
+        {section === "suspensions" && (
+          <SuspensionsSection tid={id} teams={data.teams} editable={editable} />
         )}
         {section === "info" && (
           <InfoSection t={t} editable={editable && role === "owner"} onChanged={load} />
+        )}
+        {section === "regulations" && (
+          <RegulationsSection t={t} editable={editable && role === "owner"}
+                              onChanged={load} />
         )}
         {section === "proof" && (
           <ProofTab tid={id} proofs={data.proofs} editable={proofEditable} onChanged={load} />
@@ -235,8 +257,11 @@ const BLURBS: Record<Section, string> = {
   brackets:      "The knockout draw, round by round.",
   teams:         "Every team taking part.",
   players:       "Every registered player, by team.",
-  structure:     "The shape of the competition and how ties are separated.",
-  info:          "Name, organiser, country and dates.",
+  venues:        "The grounds your matches are played at.",
+  structure:     "The named parts this competition is divided into.",
+  suspensions:   "Players serving a ban, and what they were banned for.",
+  info:          "Name, logo, organiser, country and dates.",
+  regulations:   "What a result is worth, and how level teams are separated.",
   proof:         "Evidence this competition is real. We read this before approving.",
   collaborators: "The people who can edit this competition.",
 };
@@ -979,7 +1004,7 @@ function CompetitionNav({
   return (
     <div className="px-3 py-5">
       <div className="flex items-center gap-3 px-2 mb-4">
-        <Crest url={(t as any).crest_url} name={t.name} size={34} />
+        <Crest url={t.crest_url} name={t.name} size={34} />
         <div className="min-w-0">
           <p className="text-white font-semibold text-sm truncate">{t.name}</p>
           <p className="text-mt text-xs truncate">{t.organizing_body}</p>
@@ -1068,6 +1093,8 @@ function BracketsSection({ fixtures, teams }: { fixtures: Fixture[]; teams: Team
    twelve team rows is not a way to work. */
 function PlayersSection({ teams, editable }: { teams: TeamRow[]; editable: boolean }) {
   const [open, setOpen] = useState<string | null>(teams[0]?.id ?? null);
+  const [q, setQ] = useState("");
+  const [only, setOnly] = useState<string>("");
 
   if (!teams.length) {
     return (
@@ -1080,9 +1107,35 @@ function PlayersSection({ teams, editable }: { teams: TeamRow[]; editable: boole
     );
   }
 
+  const term = q.trim().toLowerCase();
+  const shown = teams.filter((tm) => {
+    if (only && tm.id !== only) return false;
+    if (!term) return true;
+    return (tm.clubs?.name ?? "").toLowerCase().includes(term);
+  });
+
   return (
     <div className="space-y-2">
-      {teams.map((tm) => (
+      {teams.length > 3 && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          <input className="input-select flex-1 min-w-[200px]" value={q}
+                 onChange={(e) => setQ(e.target.value)}
+                 placeholder="Search teams" />
+          <select className="input-select w-auto" value={only}
+                  onChange={(e) => setOnly(e.target.value)}>
+            <option value="">All teams</option>
+            {teams.map((tm) => (
+              <option key={tm.id} value={tm.id}>{tm.clubs?.name ?? "Unknown"}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {shown.length === 0 && (
+        <p className="text-mt text-sm">No team matches that.</p>
+      )}
+
+      {shown.map((tm) => (
         <div key={tm.id} className="card p-0 overflow-hidden">
           <button
             onClick={() => setOpen(open === tm.id ? null : tm.id)}
@@ -1113,8 +1166,9 @@ function PlayersSection({ teams, editable }: { teams: TeamRow[]; editable: boole
 }
 
 /* ── format & structure ─────────────────────────────────────────── */
-function StructureSection({ t, teams, fixtures }: {
-  t: Tournament; teams: TeamRow[]; fixtures: Fixture[];
+function StructureSection({ tid, t, teams, fixtures, editable, onChanged }: {
+  tid: string; t: Tournament; teams: TeamRow[]; fixtures: Fixture[];
+  editable: boolean; onChanged: () => void;
 }) {
   const groups = Array.from(
     new Set(teams.map((x) => x.group_name).filter(Boolean))
@@ -1123,20 +1177,6 @@ function StructureSection({ t, teams, fixtures }: {
   const rounds = sortRounds(
     Array.from(new Set(fixtures.map((f) => f.round).filter(Boolean))) as string[]
   );
-
-  // head_to_head is in the schema's default list but is not implemented
-  // on the backend, so it is marked rather than silently listed as if
-  // it runs. A three-way tie needs a mini table among the tied teams,
-  // and the pairwise shortcut gives the wrong answer.
-  const tiebreakers: string[] = (t as any).tiebreakers || [];
-  const LABEL: Record<string, string> = {
-    goal_difference: "Goal difference",
-    goals_scored: "Goals scored",
-    goals_for: "Goals scored",
-    wins: "Wins",
-    head_to_head: "Head to head",
-  };
-  const IMPLEMENTED = new Set(["goal_difference", "goals_scored", "goals_for", "wins"]);
 
   return (
     <div className="space-y-4">
@@ -1164,31 +1204,13 @@ function StructureSection({ t, teams, fixtures }: {
         </div>
       )}
 
-      <div className="card">
-        <p className="section-label mb-3">Separating level teams</p>
-        {tiebreakers.length === 0 ? (
-          <p className="text-mt text-sm">
-            Goal difference, then goals scored.
-          </p>
-        ) : (
-          <ol className="space-y-2">
-            {tiebreakers.map((x, i) => (
-              <li key={x} className="flex items-center gap-3 text-sm">
-                <span className="font-mono text-[11px] text-mt2 w-4">{i + 1}</span>
-                <span className="text-white">{LABEL[x] || x}</span>
-                {!IMPLEMENTED.has(x) && (
-                  <span className="font-mono text-[10px] text-amber">not applied yet</span>
-                )}
-              </li>
-            ))}
-          </ol>
-        )}
-      </div>
+      <SubCompetitions tid={tid} editable={editable} onChanged={onChanged} />
 
       <p className="text-mt2 text-xs">
         The format is fixed once the competition is created, because changing
         it would invalidate fixtures that already exist. Clear the fixtures
-        under Matches to redraw them.
+        under Matches to redraw them. Points and tiebreakers are under
+        Regulations.
       </p>
     </div>
   );
@@ -1262,7 +1284,10 @@ function InfoSection({ t, editable, onChanged }: {
   }
 
   return (
-    <form onSubmit={save} className="card space-y-4 max-w-2xl">
+    <div className="space-y-4 max-w-2xl">
+      <TournamentLogo t={t} onChanged={onChanged} />
+
+    <form onSubmit={save} className="card space-y-4">
       <div className="grid sm:grid-cols-2 gap-4">
         <Input label="Name" value={f.name} onChange={set("name")} required />
         <Input label="Organising body" value={f.organizing_body}
@@ -1291,6 +1316,132 @@ function InfoSection({ t, editable, onChanged }: {
         {busy ? "Saving..." : "Save changes"}
       </button>
     </form>
+
+      <DangerZone t={t} />
+    </div>
+  );
+}
+
+/* ── competition logo ───────────────────────────────────────────── */
+function TournamentLogo({ t, onChanged }: { t: Tournament; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const pick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBusy(true); setError(null);
+    try { await uploadTournamentCrest(t.id, file); onChanged(); }
+    catch (err: any) { setError(err.message); }
+    finally { setBusy(false); e.target.value = ""; }
+  };
+
+  const clear = async () => {
+    setBusy(true); setError(null);
+    try { await removeTournamentCrest(t.id); onChanged(); }
+    catch (err: any) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="card">
+      <p className="section-label mb-4">Competition logo</p>
+      <div className="flex items-center gap-4">
+        <Crest url={t.crest_url} name={t.name} size={56} />
+        <div className="min-w-0">
+          <label className="inline-block">
+            <span className="border border-bd2 text-white text-sm font-semibold
+                             px-4 py-2 rounded-lg cursor-pointer inline-block
+                             hover:border-volt hover:text-volt transition-colors">
+              {busy ? "Uploading..." : t.crest_url ? "Replace" : "Add logo"}
+            </span>
+            <input type="file" accept="image/*" className="hidden"
+                   disabled={busy} onChange={pick} />
+          </label>
+          {t.crest_url && (
+            <button type="button" onClick={clear} disabled={busy}
+                    className="text-mt hover:text-red2 text-sm font-semibold ml-3">
+              Remove
+            </button>
+          )}
+          <p className="text-mt2 text-xs mt-2">
+            PNG, JPG, GIF or WebP, under 1 MB. It renders small, so a tight
+            square crop reads best.
+          </p>
+        </div>
+      </div>
+      {error && <p className="text-red2 text-sm font-semibold mt-3">{error}</p>}
+    </div>
+  );
+}
+
+/* ── danger zone ────────────────────────────────────────────────────
+   Deleting takes the teams, fixtures and every result with it, so it
+   asks the organiser to type the name. A confirm dialog is one careless
+   click; typing the name is not something you do by accident. */
+function DangerZone({ t }: { t: Tournament }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const matches = typed.trim() === t.name.trim();
+
+  const go = async () => {
+    if (!matches) return;
+    setBusy(true); setError(null);
+    try {
+      await deleteTournament(t.id);
+      router.replace("/competitions");
+    } catch (e: any) {
+      setError(e.message); setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card border-red2/30">
+      <p className="font-mono text-[11px] font-bold tracking-[0.22em] uppercase
+                    text-red2 mb-3">
+        Danger zone
+      </p>
+      <p className="text-white text-sm font-semibold">Delete this competition</p>
+      <p className="text-mt text-sm mt-1">
+        Takes the teams, the fixtures and every result with it. Nothing about
+        this can be undone.
+      </p>
+
+      {!open ? (
+        <button onClick={() => setOpen(true)}
+                className="mt-4 border border-red2/40 text-red2 font-semibold text-sm
+                           px-4 py-2 rounded-lg hover:bg-red2 hover:text-bg
+                           transition-colors">
+          Delete competition
+        </button>
+      ) : (
+        <div className="mt-4 space-y-3">
+          <label className="block">
+            <span className="text-mt text-xs">
+              Type <span className="text-white font-semibold">{t.name}</span> to confirm
+            </span>
+            <input className="input-select mt-1.5" value={typed} autoFocus
+                   onChange={(e) => setTyped(e.target.value)} />
+          </label>
+          {error && <p className="text-red2 text-sm font-semibold">{error}</p>}
+          <div className="flex items-center gap-3">
+            <button onClick={go} disabled={!matches || busy}
+                    className="bg-red2 text-bg font-bold text-sm px-4 py-2 rounded-lg
+                               disabled:opacity-30 disabled:cursor-not-allowed">
+              {busy ? "Deleting..." : "Delete for good"}
+            </button>
+            <button onClick={() => { setOpen(false); setTyped(""); setError(null); }}
+                    className="text-mt hover:text-white text-sm font-semibold">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1330,6 +1481,15 @@ function IconPlayers() {
 function IconStructure() {
   return <svg {...ico}><path d="M12 3l9 5-9 5-9-5 9-5Z" /><path d="M3 13l9 5 9-5" /></svg>;
 }
+function IconVenues() {
+  return <svg {...ico}><path d="M3 20h18M5 20V9l7-5 7 5v11" /><path d="M9 20v-6h6v6" /></svg>;
+}
+function IconBan() {
+  return <svg {...ico}><circle cx="12" cy="12" r="9" /><path d="M5.6 5.6l12.8 12.8" /></svg>;
+}
+function IconRules() {
+  return <svg {...ico}><path d="M4 5h16M4 10h10M4 15h16M4 20h10" /></svg>;
+}
 function IconInfo() {
   return <svg {...ico}><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>;
 }
@@ -1338,4 +1498,651 @@ function IconProof() {
 }
 function IconPeople() {
   return <svg {...ico}><circle cx="9" cy="8" r="3" /><path d="M3 19c0-3 2.7-5 6-5s6 2 6 5" /><path d="M16 6a3 3 0 0 1 0 6M18 19c0-2-.8-3.6-2-4.5" /></svg>;
+}
+
+/* ── regulations ────────────────────────────────────────────────────
+   What a result is worth, and the order level teams are separated in.
+   Both are stored per competition, so neither is a constant anywhere in
+   the standings calculation. */
+function RegulationsSection({ t, editable, onChanged }: {
+  t: Tournament; editable: boolean; onChanged: () => void;
+}) {
+  const [pts, setPts] = useState({
+    win:  t.points_rules?.win  ?? 3,
+    draw: t.points_rules?.draw ?? 1,
+    loss: t.points_rules?.loss ?? 0,
+  });
+
+  // Selected keeps its order, because the order IS the rule. Anything
+  // not selected sits in the available list.
+  const [selected, setSelected] = useState<string[]>(
+    (t.tiebreakers || []).filter((x) => TIEBREAKERS.some((o) => o.id === x))
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const available = TIEBREAKERS.filter((o) => !selected.includes(o.id));
+  const labelOf = (id: string) => TIEBREAKERS.find((o) => o.id === id)?.label ?? id;
+  const isLive = (id: string) => TIEBREAKERS.find((o) => o.id === id)?.implemented ?? false;
+
+  const move = (i: number, by: number) => {
+    const next = [...selected];
+    const j = i + by;
+    if (j < 0 || j >= next.length) return;
+    [next[i], next[j]] = [next[j], next[i]];
+    setSelected(next); setSaved(false);
+  };
+
+  const num = (k: keyof typeof pts) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value === "" ? 0 : Number(e.target.value);
+    setPts({ ...pts, [k]: Number.isFinite(v) ? v : 0 });
+    setSaved(false);
+  };
+
+  // Checked here as well as on the server, so the organiser is told
+  // before the round trip rather than after it.
+  const localProblem =
+    pts.win < pts.draw ? "A win can't be worth less than a draw."
+    : pts.draw < pts.loss ? "A draw can't be worth less than a loss."
+    : [pts.win, pts.draw, pts.loss].some((v) => v < 0 || v > 10)
+      ? "Points must be between 0 and 10."
+      : null;
+
+  const save = async () => {
+    if (localProblem) { setError(localProblem); return; }
+    setBusy(true); setError(null); setSaved(false);
+    try {
+      await updateTournament(t.id, { points_rules: pts, tiebreakers: selected });
+      setSaved(true);
+      onChanged();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4 max-w-2xl">
+      {/* points */}
+      <div className="card">
+        <p className="section-label mb-1">Points system</p>
+        <p className="text-mt text-xs mb-4">
+          Applied to every result as the table is built. Change it and the
+          table recalculates, including matches already played.
+        </p>
+        <div className="flex flex-wrap gap-4">
+          {([["win", "Win"], ["draw", "Draw"], ["loss", "Loss"]] as const).map(([k, label]) => (
+            <label key={k} className="block">
+              {/* block, not inline: a w-24 input stays on the same line as
+                  an inline label and the pair reads as one run of text. */}
+              <span className="block text-mt text-xs uppercase tracking-wide">{label}</span>
+              <input
+                type="number" min={0} max={10} disabled={!editable}
+                value={pts[k]} onChange={num(k)}
+                className="input-select mt-1.5 w-24 disabled:opacity-50"
+              />
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* tiebreakers */}
+      <div className="card">
+        <p className="section-label mb-1">Tiebreakers</p>
+        <p className="text-mt text-xs mb-4">
+          When teams are level on points, these are applied in order, top
+          first.
+        </p>
+
+        {selected.length === 0 ? (
+          <p className="text-mt text-sm mb-4">
+            None chosen. Teams level on points are ordered by name.
+          </p>
+        ) : (
+          <ol className="space-y-2 mb-4">
+            {selected.map((id, i) => (
+              <li key={id}
+                  className="flex items-center gap-3 bg-sur2 border border-bd
+                             rounded-lg px-3 py-2">
+                <span className="font-mono text-[11px] text-mt2 w-4">{i + 1}</span>
+                <span className="text-white text-sm flex-1">{labelOf(id)}</span>
+                {!isLive(id) && (
+                  <span className="font-mono text-[10px] text-amber">not applied yet</span>
+                )}
+                {editable && (
+                  <span className="flex items-center gap-1">
+                    <button type="button" onClick={() => move(i, -1)} disabled={i === 0}
+                            aria-label={`Move ${labelOf(id)} up`}
+                            className="text-mt hover:text-white disabled:opacity-25 px-1">
+                      ↑
+                    </button>
+                    <button type="button" onClick={() => move(i, 1)}
+                            disabled={i === selected.length - 1}
+                            aria-label={`Move ${labelOf(id)} down`}
+                            className="text-mt hover:text-white disabled:opacity-25 px-1">
+                      ↓
+                    </button>
+                    <button type="button"
+                            onClick={() => { setSelected(selected.filter((x) => x !== id)); setSaved(false); }}
+                            aria-label={`Remove ${labelOf(id)}`}
+                            className="text-mt hover:text-red2 px-1">
+                      ×
+                    </button>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ol>
+        )}
+
+        {editable && available.length > 0 && (
+          <>
+            <p className="text-mt text-xs mb-2">Available</p>
+            <div className="flex flex-wrap gap-2">
+              {available.map((o) => (
+                <button
+                  key={o.id} type="button"
+                  onClick={() => { setSelected([...selected, o.id]); setSaved(false); }}
+                  className="border border-bd text-mt hover:text-volt hover:border-volt/40
+                             rounded-lg px-3 py-1.5 text-xs transition-colors"
+                >
+                  + {o.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        <p className="text-mt2 text-xs mt-4">
+          Head to head is stored but not applied yet. Doing it properly means
+          building a mini table among only the tied teams, and the pairwise
+          shortcut gives the wrong answer for a three-way tie, so it is left
+          out rather than approximated.
+        </p>
+      </div>
+
+      {(localProblem || error) && (
+        <p className="text-red2 text-sm font-semibold">{localProblem || error}</p>
+      )}
+      {saved && !error && !localProblem && (
+        <p className="text-grn text-sm font-semibold">Saved. The table has recalculated.</p>
+      )}
+
+      {editable ? (
+        <button className="btn-volt" disabled={busy || Boolean(localProblem)} onClick={save}>
+          {busy ? "Saving..." : "Save regulations"}
+        </button>
+      ) : (
+        <p className="text-mt2 text-xs">
+          {t.status === "pending"
+            ? "Locked while we review it."
+            : "Only the owner can change these."}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* ── venues ─────────────────────────────────────────────────────────
+   Per competition, not global: the same pitch is "Main Bowl" to one
+   organiser and "ABU Sports Complex Pitch 1" to another, and a shared
+   list would have them renaming each other's grounds. */
+function VenuesSection({ tid, editable }: { tid: string; editable: boolean }) {
+  const [rows, setRows] = useState<Venue[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const blank = { name: "", city: "", address: "", capacity: "" };
+  const [f, setF] = useState(blank);
+
+  const load = useCallback(() => {
+    listVenues(tid).then((d) => { setRows(d.venues); setError(null); })
+      .catch((e) => setError(e.message));
+  }, [tid]);
+  useEffect(() => { load(); }, [load]);
+
+  const body = () => ({
+    name: f.name.trim(),
+    city: f.city.trim() || null,
+    address: f.address.trim() || null,
+    capacity: f.capacity.trim() === "" ? null : Number(f.capacity),
+  });
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!f.name.trim()) return;
+    setBusy(true); setError(null);
+    try {
+      if (editing) await updateVenue(tid, editing, body());
+      else await addVenue(tid, body());
+      setF(blank); setEditing(null); load();
+    } catch (err: any) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+
+  const edit = (v: Venue) => {
+    setEditing(v.id);
+    setF({
+      name: v.name, city: v.city || "", address: v.address || "",
+      capacity: v.capacity == null ? "" : String(v.capacity),
+    });
+  };
+
+  const remove = async (v: Venue) => {
+    setBusy(true); setError(null);
+    try { await deleteVenue(tid, v.id); load(); }
+    catch (err: any) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+
+  if (rows === null && !error) return <p className="text-mt text-sm">Loading...</p>;
+
+  return (
+    <div className="space-y-4 max-w-3xl">
+      {error && <p className="text-red2 text-sm font-semibold">{error}</p>}
+
+      {rows && rows.length === 0 && (
+        <div className="card">
+          <p className="text-white font-semibold">No venues yet</p>
+          <p className="text-mt text-sm mt-1">
+            Add the grounds your matches are played at, then pick one per
+            fixture instead of typing it every time.
+          </p>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {(rows || []).map((v) => (
+          <div key={v.id} className="card flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-white font-semibold truncate">{v.name}</p>
+              <p className="text-mt text-xs mt-1">
+                {[v.city, v.address].filter(Boolean).join(" • ") || "No address"}
+                {v.capacity != null && ` • holds ${v.capacity.toLocaleString()}`}
+              </p>
+            </div>
+            {editable && (
+              <div className="flex items-center gap-3 shrink-0">
+                <button onClick={() => edit(v)}
+                        className="text-mt hover:text-volt text-sm font-semibold">
+                  Edit
+                </button>
+                <button onClick={() => remove(v)} disabled={busy}
+                        className="text-mt hover:text-red2 text-sm font-semibold">
+                  Remove
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {editable && (
+        <form onSubmit={submit} className="card space-y-3">
+          <p className="section-label">{editing ? "Edit venue" : "Add a venue"}</p>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <Input label="Name" value={f.name} required
+                   onChange={(e) => setF({ ...f, name: e.target.value })} />
+            <Input label="City" value={f.city}
+                   onChange={(e) => setF({ ...f, city: e.target.value })} />
+            <Input label="Address" value={f.address}
+                   onChange={(e) => setF({ ...f, address: e.target.value })} />
+            <Input label="Capacity" type="number" min={0} value={f.capacity}
+                   onChange={(e) => setF({ ...f, capacity: e.target.value })} />
+          </div>
+          <div className="flex items-center gap-3">
+            <button className="btn-volt" disabled={busy || !f.name.trim()}>
+              {busy ? "Saving..." : editing ? "Save venue" : "Add venue"}
+            </button>
+            {editing && (
+              <button type="button" onClick={() => { setEditing(null); setF(blank); }}
+                      className="text-mt hover:text-white text-sm font-semibold">
+                Cancel
+              </button>
+            )}
+          </div>
+        </form>
+      )}
+
+      <p className="text-mt2 text-xs">
+        Removing a venue leaves the name on fixtures already played there.
+        Deleting a ground should not erase where matches happened.
+      </p>
+    </div>
+  );
+}
+
+/* ── sub-competitions ───────────────────────────────────────────────
+   The named parts a competition divides into. The backend keeps
+   tournament_teams.group_name equal to the part's name, because that
+   column is what standings and fixture generation read. */
+function SubCompetitions({ tid, editable, onChanged }: {
+  tid: string; editable: boolean; onChanged: () => void;
+}) {
+  const [subs, setSubs] = useState<SubCompetition[] | null>(null);
+  const [loose, setLoose] = useState<TeamRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState<SubCompKind>("group");
+  const [target, setTarget] = useState<string>("");
+
+  const load = useCallback(() => {
+    listSubCompetitions(tid)
+      .then((d) => { setSubs(d.sub_competitions); setLoose(d.unassigned); setError(null); })
+      .catch((e) => setError(e.message));
+  }, [tid]);
+  useEffect(() => { load(); }, [load]);
+
+  const run = async (fn: () => Promise<unknown>) => {
+    setBusy(true); setError(null);
+    try { await fn(); load(); onChanged(); }
+    catch (e: any) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
+  if (subs === null && !error) return <p className="text-mt text-sm">Loading...</p>;
+
+  return (
+    <div className="card space-y-4">
+      <div>
+        <p className="section-label mb-1">Parts of this competition</p>
+        <p className="text-mt text-xs">
+          Groups, a league phase, a knockout. A team in a part appears in that
+          part&apos;s table.
+        </p>
+      </div>
+
+      {error && <p className="text-red2 text-sm font-semibold">{error}</p>}
+
+      <div className="space-y-2">
+        {(subs || []).map((sc) => (
+          <div key={sc.id} className="bg-sur2 border border-bd rounded-lg p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-white text-sm font-semibold truncate">{sc.name}</p>
+                <p className="text-mt text-xs mt-0.5 capitalize">
+                  {sc.kind} • {sc.teams.length} {sc.teams.length === 1 ? "team" : "teams"}
+                </p>
+              </div>
+              {editable && (
+                <button disabled={busy}
+                        onClick={() => run(() => deleteSubCompetition(tid, sc.id))}
+                        className="text-mt hover:text-red2 text-xs font-semibold shrink-0">
+                  Remove
+                </button>
+              )}
+            </div>
+
+            {sc.teams.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-3">
+                {sc.teams.map((tm) => (
+                  <span key={tm.id}
+                        className="inline-flex items-center gap-1.5 bg-sur border border-bd
+                                   rounded-md px-2 py-1 text-xs text-mt">
+                    {tm.clubs?.name ?? "Unknown"}
+                    {editable && (
+                      <button disabled={busy}
+                              onClick={() => run(() => unassignTeam(tid, tm.id))}
+                              aria-label={`Remove ${tm.clubs?.name} from ${sc.name}`}
+                              className="hover:text-red2">
+                        ×
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {loose.length > 0 && (
+        <div className="border-t border-bd pt-4">
+          <p className="text-mt text-xs mb-2">
+            Not placed yet ({loose.length}). These sit outside every table until
+            they are put somewhere.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {loose.map((tm) => (
+              <span key={tm.id}
+                    className="bg-sur2 border border-amber/30 rounded-md px-2 py-1
+                               text-xs text-amber">
+                {tm.clubs?.name ?? "Unknown"}
+              </span>
+            ))}
+          </div>
+
+          {editable && (subs || []).length > 0 && (
+            <div className="flex flex-wrap items-end gap-2 mt-3">
+              <label className="block">
+                <span className="block text-mt text-xs uppercase tracking-wide">Place all in</span>
+                <select className="input-select mt-1.5 w-auto" value={target}
+                        onChange={(e) => setTarget(e.target.value)}>
+                  <option value="">Choose...</option>
+                  {(subs || []).map((sc) => (
+                    <option key={sc.id} value={sc.id}>{sc.name}</option>
+                  ))}
+                </select>
+              </label>
+              <button disabled={busy || !target}
+                      onClick={() => run(() => assignTeams(tid, target, loose.map((x) => x.id)))}
+                      className="btn-volt text-[13px] px-4 py-2 disabled:opacity-40">
+                Place {loose.length}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {editable && (
+        <form className="border-t border-bd pt-4 flex flex-wrap items-end gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!name.trim()) return;
+                run(async () => {
+                  await addSubCompetition(tid, {
+                    name: name.trim(), kind, sort_order: (subs || []).length,
+                  });
+                  setName("");
+                });
+              }}>
+          <label className="block flex-1 min-w-[160px]">
+            <span className="block text-mt text-xs uppercase tracking-wide">Name</span>
+            <input className="input-select mt-1.5" value={name} placeholder="Group A"
+                   onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="block text-mt text-xs uppercase tracking-wide">Kind</span>
+            <select className="input-select mt-1.5 w-auto" value={kind}
+                    onChange={(e) => setKind(e.target.value as SubCompKind)}>
+              {SUB_KINDS.map((k) => (
+                <option key={k.id} value={k.id}>{k.label}</option>
+              ))}
+            </select>
+          </label>
+          <button className="btn-volt text-[13px] px-4 py-2"
+                  disabled={busy || !name.trim()}>
+            Add
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+/* ── suspensions ────────────────────────────────────────────────────
+   A ban is a record with a start date, not a countdown: a countdown has
+   to be decremented by something, and nothing reliably runs between
+   matches. The organiser closes it out when it is served. */
+function SuspensionsSection({ tid, teams, editable }: {
+  tid: string; teams: TeamRow[]; editable: boolean;
+}) {
+  const [rows, setRows] = useState<Suspension[] | null>(null);
+  const [served, setServed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  const [teamId, setTeamId] = useState("");
+  const [squad, setSquad] = useState<any[]>([]);
+  const [playerId, setPlayerId] = useState("");
+  const [matches, setMatches] = useState("1");
+  const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [reason, setReason] = useState("");
+
+  const load = useCallback(() => {
+    listSuspensions(tid, served)
+      .then((d) => { setRows(d.suspensions); setError(null); })
+      .catch((e) => setError(e.message));
+  }, [tid, served]);
+  useEffect(() => { load(); }, [load]);
+
+  // The player list follows the team, because a ban is always against a
+  // player registered to that team in this competition.
+  useEffect(() => {
+    if (!teamId) { setSquad([]); setPlayerId(""); return; }
+    squadOf(teamId).then((d: any) => setSquad(d.squad || [])).catch(() => setSquad([]));
+  }, [teamId]);
+
+  const run = async (fn: () => Promise<unknown>) => {
+    setBusy(true); setError(null);
+    try { await fn(); load(); }
+    catch (e: any) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!teamId || !playerId) return;
+    run(async () => {
+      await addSuspension(tid, {
+        tournament_team_id: teamId, player_id: playerId,
+        matches: Number(matches) || 1, start_date: startDate,
+        reason: reason.trim() || null,
+      });
+      setOpen(false); setTeamId(""); setPlayerId(""); setMatches("1"); setReason("");
+    });
+  };
+
+  if (rows === null && !error) return <p className="text-mt text-sm">Loading...</p>;
+
+  return (
+    <div className="space-y-4 max-w-3xl">
+      <div className="flex items-center justify-between gap-4">
+        <label className="flex items-center gap-2 text-mt text-sm">
+          <input type="checkbox" checked={served}
+                 onChange={(e) => setServed(e.target.checked)} />
+          Include bans already served
+        </label>
+        {editable && !open && (
+          <button className="btn-volt text-[13px] px-4 py-2" onClick={() => setOpen(true)}>
+            Add suspension
+          </button>
+        )}
+      </div>
+
+      {error && <p className="text-red2 text-sm font-semibold">{error}</p>}
+
+      {editable && open && (
+        <form onSubmit={submit} className="card space-y-3">
+          <p className="section-label">Add suspension</p>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <label className="block">
+              <span className="block text-mt text-xs uppercase tracking-wide">Team</span>
+              <select className="input-select mt-1.5" value={teamId} required
+                      onChange={(e) => setTeamId(e.target.value)}>
+                <option value="">Choose a team</option>
+                {teams.map((tm) => (
+                  <option key={tm.id} value={tm.id}>{tm.clubs?.name ?? "Unknown"}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="block text-mt text-xs uppercase tracking-wide">Player</span>
+              <select className="input-select mt-1.5" value={playerId} required
+                      disabled={!teamId} onChange={(e) => setPlayerId(e.target.value)}>
+                <option value="">
+                  {!teamId ? "Pick a team first"
+                    : squad.length ? "Choose a player" : "Nobody registered yet"}
+                </option>
+                {squad.map((r: any) => (
+                  <option key={r.players?.id ?? r.id} value={r.players?.id ?? ""}>
+                    {r.jersey_number ? `#${r.jersey_number} ` : ""}
+                    {r.players?.first_name} {r.players?.last_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Input label="Matches" type="number" min={1} max={50} value={matches}
+                   onChange={(e) => setMatches(e.target.value)} />
+            <Input label="Starts" type="date" value={startDate}
+                   onChange={(e) => setStartDate(e.target.value)} />
+          </div>
+          <Input label="Reason" value={reason} placeholder="Violent conduct, 78'"
+                 onChange={(e) => setReason(e.target.value)} />
+          <div className="flex items-center gap-3">
+            <button className="btn-volt" disabled={busy || !teamId || !playerId}>
+              {busy ? "Saving..." : "Add suspension"}
+            </button>
+            <button type="button" onClick={() => setOpen(false)}
+                    className="text-mt hover:text-white text-sm font-semibold">
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {rows && rows.length === 0 && (
+        <div className="card">
+          <p className="text-white font-semibold">Nobody suspended</p>
+          <p className="text-mt text-sm mt-1">
+            Bans logged here show against the player for the rest of the
+            competition.
+          </p>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {(rows || []).map((sp) => (
+          <div key={sp.id} className="card flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className={clsx("font-semibold truncate",
+                                 sp.active ? "text-white" : "text-mt line-through")}>
+                {sp.players?.first_name} {sp.players?.last_name}
+              </p>
+              <p className="text-mt text-xs mt-1">
+                {sp.tournament_teams?.clubs?.name ?? "Unknown team"} •{" "}
+                {sp.matches} {sp.matches === 1 ? "match" : "matches"} • from{" "}
+                <span className="font-mono">{sp.start_date}</span>
+              </p>
+              {sp.reason && <p className="text-mt text-sm mt-2">{sp.reason}</p>}
+            </div>
+            {editable && (
+              <div className="flex items-center gap-3 shrink-0">
+                {sp.active && (
+                  <button disabled={busy} onClick={() => run(() => markServed(tid, sp.id))}
+                          className="text-mt hover:text-grn text-sm font-semibold">
+                    Mark served
+                  </button>
+                )}
+                <button disabled={busy} onClick={() => run(() => deleteSuspension(tid, sp.id))}
+                        className="text-mt hover:text-red2 text-sm font-semibold">
+                  Delete
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <p className="text-mt2 text-xs">
+        Nothing expires a ban automatically. Mark it served when it has been,
+        which keeps the disciplinary record of the competition intact rather
+        than deleting it.
+      </p>
+    </div>
+  );
 }

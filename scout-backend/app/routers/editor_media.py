@@ -53,6 +53,24 @@ def _sniff(data: bytes) -> str | None:
     return None
 
 
+def _validated(data: bytes) -> str:
+    """Size- and type-check an upload, or raise with a usable message."""
+    if not data:
+        raise HTTPException(status_code=400, detail="That file is empty")
+    if len(data) > MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image must be under {MAX_BYTES // 1000} KB. That one is "
+                   f"{len(data) // 1000} KB.",
+        )
+    kind = _sniff(data)
+    if kind not in ALLOWED:
+        raise HTTPException(
+            status_code=400,
+            detail="That isn't an image we can use. PNG, JPG, GIF or WebP.",
+        )
+    return kind
+
 def _ensure_bucket():
     """Create the bucket on first use so a fresh environment works
     without a manual step. Harmless if it already exists."""
@@ -115,21 +133,7 @@ async def upload_crest(club_id: str, file: UploadFile = File(...),
         )
 
     data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="That file is empty")
-    if len(data) > MAX_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Crest must be under {MAX_BYTES // 1000} KB. That one is "
-                   f"{len(data) // 1000} KB.",
-        )
-
-    kind = _sniff(data)
-    if kind not in ALLOWED:
-        raise HTTPException(
-            status_code=400,
-            detail="That isn't an image we can use. PNG, JPG, GIF or WebP.",
-        )
+    kind = _validated(data)
 
     _ensure_bucket()
 
@@ -178,3 +182,58 @@ def remove_crest(club_id: str, user: dict = Depends(require_user)):
         _db().table("clubs").update({"crest_url": None}).eq("id", club_id).execute()
     )
     return {"club": updated}
+
+# ── competition logo ─────────────────────────────────────────────────
+
+@router.post("/editor/tournaments/{tournament_id}/crest")
+async def upload_tournament_crest(tournament_id: str, file: UploadFile = File(...),
+                                  user: dict = Depends(require_user)):
+    """The competition's own logo.
+
+    Owner only, and gated on the same review freeze as everything else:
+    the logo is part of what an admin looked at, so it cannot change
+    while the decision is outstanding.
+    """
+    from app.routers.editor import _owned_tournament, _require_editable
+
+    t = _owned_tournament(tournament_id, user, need="owner")
+    _require_editable(t)
+
+    data = await file.read()
+    kind = _validated(data)
+
+    _ensure_bucket()
+    path = f"tournaments/{tournament_id}/{uuid.uuid4().hex}.{EXT[kind]}"
+    try:
+        _db().storage.from_(BUCKET).upload(
+            path, data, {"content-type": f"image/{kind}", "upsert": "false"}
+        )
+        public_url = _db().storage.from_(BUCKET).get_public_url(path)
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not store the logo ({type(e).__name__}). Check the "
+                   f"'{BUCKET}' bucket exists and is public.",
+        )
+
+    updated = _one(
+        _db().table("tournaments").update({"crest_url": public_url})
+        .eq("id", tournament_id).execute()
+    )
+    return {"tournament": updated, "crest_url": public_url}
+
+
+@router.delete("/editor/tournaments/{tournament_id}/crest", status_code=200)
+def remove_tournament_crest(tournament_id: str, user: dict = Depends(require_user)):
+    """Clear the logo. The stored object is left in place for the same
+    reason a club's is: an orphaned file is a smaller problem than an
+    image vanishing from a published competition."""
+    from app.routers.editor import _owned_tournament, _require_editable
+
+    t = _owned_tournament(tournament_id, user, need="owner")
+    _require_editable(t)
+    updated = _one(
+        _db().table("tournaments").update({"crest_url": None})
+        .eq("id", tournament_id).execute()
+    )
+    return {"tournament": updated}
