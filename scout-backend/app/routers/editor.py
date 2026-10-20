@@ -76,19 +76,29 @@ def _owned_tournament(tournament_id: str, user: dict, need: str = "owner") -> di
     return require_access(tournament_id, user, need=need)
 
 
-# Statuses where the organiser may still change the tournament's shape.
-# Once it's with us for review, or live, adding teams would change what
-# was reviewed, so structural edits stop.
-EDITABLE_STATUSES = {"draft", "rejected"}
+# Review is the only thing that freezes a tournament.
+#
+# While it sits in 'pending' an admin is reading it, and a reviewer must
+# not be looking at a moving target: teams appearing and fixtures
+# changing halfway through a decision is how you approve one thing and
+# publish another. The freeze lifts the moment the decision lands,
+# whichever way it went.
+#
+# Everything else stays editable, approved included. A live competition
+# is exactly the one an organiser most needs to correct -- a club pulls
+# out, a name was spelled wrong, a fixture moves -- and locking it would
+# strand them with a wrong table in front of an audience.
+FROZEN_STATUSES = {"pending"}
 
 
 def _require_editable(t: dict):
-    if t["status"] not in EDITABLE_STATUSES:
+    if t["status"] in FROZEN_STATUSES:
         raise HTTPException(
             status_code=409,
             detail=(
-                f"This tournament is '{t['status']}'. Teams and players can only "
-                "be changed while it is a draft or after it was rejected."
+                "This competition is with us for review, so it's locked until "
+                "we've made a decision. You'll be able to edit it again as soon "
+                "as it's approved, or if we send it back."
             ),
         )
 

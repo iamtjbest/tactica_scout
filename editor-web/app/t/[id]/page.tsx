@@ -10,7 +10,7 @@ import Bracket from "@/components/Bracket";
 import StandingsTable from "@/components/StandingsTable";
 import AccessTab from "@/components/AccessTab";
 import {
-  getTournament, getReadiness, submitForReview, unpublish,
+  getTournament, getReadiness, submitForReview, unpublish, updateTournament,
   searchClubs, addTeam, removeTeam,
   generateFixtures, clearFixtures, setScore,
   addProof, deleteProof,
@@ -20,7 +20,59 @@ import {
   type StandingRow,
 } from "@/lib/api";
 
-type Tab = "teams" | "fixtures" | "table" | "proof" | "access";
+/**
+ * The competition workspace is organised the way Torneo organises
+ * theirs, because that grouping is right: what you do during the
+ * competition, what you set up before it, and what you configure once.
+ *
+ * RUN      Matches, Standings, Brackets
+ * BUILD    Teams, Players, Format & structure
+ * SETTINGS Info, Proof, Collaborators
+ *
+ * Torneo also has Venues, Regulations and Suspensions. Those are not
+ * here because nothing in our schema backs them yet: there is no
+ * venues table (a fixture carries a free-text venue), no regulations
+ * document, and no disciplinary record. Drawing the menu items would
+ * promise screens that cannot save anything, so they arrive when the
+ * tables do.
+ */
+type Section =
+  | "matches" | "standings" | "brackets"
+  | "teams" | "players" | "structure"
+  | "info" | "proof" | "collaborators";
+
+const NAV: { group: string; items: { id: Section; label: string; icon: () => JSX.Element }[] }[] = [
+  {
+    group: "Run",
+    items: [
+      { id: "matches",   label: "Matches",   icon: IconMatches },
+      { id: "standings", label: "Standings", icon: IconStandings },
+      { id: "brackets",  label: "Brackets",  icon: IconBrackets },
+    ],
+  },
+  {
+    group: "Build",
+    items: [
+      { id: "teams",     label: "Teams",             icon: IconTeams },
+      { id: "players",   label: "Players",           icon: IconPlayers },
+      { id: "structure", label: "Format & structure", icon: IconStructure },
+    ],
+  },
+  {
+    group: "Settings",
+    items: [
+      { id: "info",          label: "Info",          icon: IconInfo },
+      { id: "proof",         label: "Proof",         icon: IconProof },
+      { id: "collaborators", label: "Collaborators", icon: IconPeople },
+    ],
+  },
+];
+
+const TITLES: Record<Section, string> = {
+  matches: "Matches", standings: "Standings", brackets: "Brackets",
+  teams: "Teams", players: "Players", structure: "Format & structure",
+  info: "Info", proof: "Proof", collaborators: "Collaborators",
+};
 
 export default function Page() {
   return <Guard><Detail /></Guard>;
@@ -32,7 +84,8 @@ function Detail() {
     tournament: Tournament; teams: TeamRow[]; proofs: Proof[]; fixtures: Fixture[];
   } | null>(null);
   const [ready, setReady] = useState<Readiness | null>(null);
-  const [tab, setTab] = useState<Tab>("teams");
+  const [section, setSection] = useState<Section>("matches");
+  const [navOpen, setNavOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -51,74 +104,148 @@ function Detail() {
   // The backend attaches the caller's role. A scorer sees the same
   // screens but the controls they can't use aren't drawn.
   const role = (t as any)._role ?? "owner";
-  // Mirrors EDITABLE_STATUSES on the backend. Hiding the controls is a
-  // courtesy; the server refuses the write regardless.
+  // Mirrors FROZEN_STATUSES on the backend: review is the only thing
+  // that locks a competition, and it unlocks again whichever way the
+  // decision goes. Hiding the controls is a courtesy; the server
+  // refuses the write regardless.
   const editable =
-    (t.status === "draft" || t.status === "rejected") &&
-    (role === "owner" || role === "editor");
+    t.status !== "pending" && (role === "owner" || role === "editor");
+
+  // Proof is narrower. It is the evidence a decision was made on, so it
+  // is only editable while that decision is still outstanding -- which
+  // matches add_proof/delete_proof in editor_review.py. Drawing proof
+  // controls on an approved competition would offer a button the server
+  // rejects.
+  const proofEditable =
+    (t.status === "draft" || t.status === "rejected") && role === "owner";
+
+  const counts: Partial<Record<Section, number>> = {
+    matches: data.fixtures.length,
+    teams:   data.teams.length,
+    proof:   data.proofs.length,
+  };
+
+  const nav = (
+    <CompetitionNav
+      t={t} ready={ready} role={role} editable={editable} counts={counts}
+      active={section}
+      onPick={(x) => { setSection(x); setNavOpen(false); }}
+      onChanged={load}
+    />
+  );
 
   return (
-    <div className="max-w-screen-lg mx-auto px-4 py-6 space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="font-display font-black text-2xl text-white truncate">{t.name}</h1>
-          <p className="text-mt text-sm mt-1">
-            {t.organizing_body} • {t.level} • {t.format.replace("_", " + ")}
-          </p>
-        </div>
-        <StatusPill status={t.status} />
+    <div className="lg:flex lg:items-start">
+      {/* ── competition menu ───────────────────────────────── */}
+      <div className="hidden lg:block w-64 shrink-0 border-r border-bd min-h-screen">
+        {nav}
       </div>
 
-      {t.status === "rejected" && t.rejection_reason && (
-        <div className="card border-red2/40">
-          <p className="section-label mb-2">Changes needed</p>
-          <p className="text-white text-sm">{t.rejection_reason}</p>
-          <p className="text-mt text-xs mt-2">Fix these and submit again.</p>
-        </div>
-      )}
-
-      {role === "owner" && (
-        <SubmitBar t={t} ready={ready} editable={editable} onChanged={load} />
-      )}
-      {role !== "owner" && (
-        <p className="text-mt2 text-xs">
-          You&apos;re a {role} on this tournament.
-          {role === "scorer" && " You can update scores and log match events."}
-        </p>
-      )}
-
-      <div className="flex gap-2">
-        {(["teams", "fixtures", "table", "proof", "access"] as Tab[]).map((x) => (
-          <button key={x} onClick={() => setTab(x)}
-            className={clsx("tab-pill", tab === x ? "tab-pill-active" : "tab-pill-inactive")}>
-            {x === "proof" ? "Proof" : x[0].toUpperCase() + x.slice(1)}
-            {x !== "table" && x !== "access" && (
-              <span className="ml-1.5 text-mt2">
-                {x === "teams" ? data.teams.length
-                  : x === "fixtures" ? data.fixtures.length
-                  : data.proofs.length}
-              </span>
-            )}
-          </button>
-        ))}
+      {/* phone: the same menu behind a disclosure, so the content
+          still starts at the top of the screen */}
+      <div className="lg:hidden border-b border-bd">
+        <button
+          onClick={() => setNavOpen((v) => !v)}
+          aria-expanded={navOpen}
+          className="w-full px-4 py-3 flex items-center justify-between text-left"
+        >
+          <span className="min-w-0">
+            <span className="block text-white font-semibold truncate">{t.name}</span>
+            <span className="block text-mt text-xs">{TITLES[section]}</span>
+          </span>
+          <span className={clsx("text-mt transition-transform", navOpen && "rotate-180")}>
+            ▾
+          </span>
+        </button>
+        {navOpen && <div className="border-t border-bd">{nav}</div>}
       </div>
 
-      {tab === "teams" && (
-        <TeamsTab tid={id} teams={data.teams} editable={editable} onChanged={load} />
-      )}
-      {tab === "fixtures" && (
-        <FixturesTab tid={id} teams={data.teams} fixtures={data.fixtures}
-                     format={t.format} editable={editable} onChanged={load} />
-      )}
-      {tab === "table" && <TableTab tid={id} />}
-      {tab === "access" && <AccessTab tid={id} isOwner={role === "owner"} />}
-      {tab === "proof" && (
-        <ProofTab tid={id} proofs={data.proofs} editable={editable} onChanged={load} />
-      )}
+      {/* ── content ────────────────────────────────────────── */}
+      <div className="flex-1 min-w-0 px-4 sm:px-6 py-6">
+        <nav className="text-xs text-mt mb-5" aria-label="Breadcrumb">
+          <Link href="/competitions" className="hover:text-white transition-colors">
+            My competitions
+          </Link>
+          <span className="mx-1.5 text-mt2">/</span>
+          <span className="text-mt">{t.name}</span>
+          <span className="mx-1.5 text-mt2">/</span>
+          <span className="text-white font-semibold">{TITLES[section]}</span>
+        </nav>
+
+        {t.status === "rejected" && t.rejection_reason && (
+          <div className="card border-red2/40 mb-6">
+            <p className="section-label mb-2">Changes needed</p>
+            <p className="text-white text-sm">{t.rejection_reason}</p>
+            <p className="text-mt text-xs mt-2">Fix these and submit again.</p>
+          </div>
+        )}
+
+        {t.status === "pending" && (
+          <div className="card border-cyan/30 mb-6">
+            <p className="text-white text-sm">Locked while we review it.</p>
+            <p className="text-mt text-xs mt-1">
+              What gets reviewed is what gets published, so nothing can change
+              until we decide. It unlocks either way.
+            </p>
+          </div>
+        )}
+
+        <header className="mb-5">
+          <h1 className="font-display font-black text-2xl text-white">
+            {TITLES[section]}
+          </h1>
+          <p className="text-mt text-sm mt-1">{BLURBS[section]}</p>
+        </header>
+
+        {section === "matches" && (
+          <FixturesTab tid={id} teams={data.teams} fixtures={data.fixtures}
+                       format={t.format} editable={editable} onChanged={load} />
+        )}
+        {section === "standings" && <TableTab tid={id} />}
+        {section === "brackets" && (
+          <BracketsSection fixtures={data.fixtures} teams={data.teams} />
+        )}
+        {section === "teams" && (
+          <TeamsTab tid={id} teams={data.teams} editable={editable} onChanged={load} />
+        )}
+        {section === "players" && (
+          <PlayersSection teams={data.teams} editable={editable} />
+        )}
+        {section === "structure" && (
+          <StructureSection t={t} teams={data.teams} fixtures={data.fixtures} />
+        )}
+        {section === "info" && (
+          <InfoSection t={t} editable={editable && role === "owner"} onChanged={load} />
+        )}
+        {section === "proof" && (
+          <ProofTab tid={id} proofs={data.proofs} editable={proofEditable} onChanged={load} />
+        )}
+        {section === "collaborators" && (
+          <AccessTab tid={id} isOwner={role === "owner"} />
+        )}
+      </div>
     </div>
   );
 }
 
+/** One line under each section heading, so a screen is never just a title. */
+const BLURBS: Record<Section, string> = {
+  matches:       "The full schedule and results for this competition.",
+  standings:     "Worked out from finished matches every time this loads.",
+  brackets:      "The knockout draw, round by round.",
+  teams:         "Every team taking part.",
+  players:       "Every registered player, by team.",
+  structure:     "The shape of the competition and how ties are separated.",
+  info:          "Name, organiser, country and dates.",
+  proof:         "Evidence this competition is real. We read this before approving.",
+  collaborators: "The people who can edit this competition.",
+};
+
+/* ── publish state ───────────────────────────────────────────────────
+   Lives at the top of the competition menu, so it is a narrow column,
+   not a full-width bar. Everything here stacks and the button is full
+   width; the earlier side-by-side version burst out of the menu and
+   sat on top of the page heading. */
 function SubmitBar({ t, ready, editable, onChanged }: {
   t: Tournament; ready: Readiness | null; editable: boolean; onChanged: () => void;
 }) {
@@ -134,11 +261,10 @@ function SubmitBar({ t, ready, editable, onChanged }: {
 
   if (t.status === "pending") {
     return (
-      <div className="card">
-        <p className="text-white text-sm">Submitted and waiting on review.</p>
-        <p className="text-mt text-xs mt-1">
-          Teams and fixtures are locked while we look at it, so what gets
-          reviewed is what gets published.
+      <div className="card py-3">
+        <StatusPill status={t.status} />
+        <p className="text-mt text-xs mt-2 leading-relaxed">
+          With us for review. Locked until we decide.
         </p>
       </div>
     );
@@ -146,42 +272,58 @@ function SubmitBar({ t, ready, editable, onChanged }: {
 
   if (t.status === "approved") {
     return (
-      <div className="card flex items-center justify-between gap-4">
-        <div>
-          <p className="text-white text-sm">Live on Scout.</p>
-          <p className="text-mt text-xs mt-1">Fans can follow it and see the table.</p>
-        </div>
-        <button className="text-mt hover:text-red2 text-sm font-semibold"
+      <div className="card py-3">
+        <StatusPill status={t.status} />
+        <p className="text-mt text-xs mt-2 leading-relaxed">
+          Fans can follow it on Scout.
+        </p>
+        <button className="text-mt hover:text-red2 text-xs font-semibold mt-2"
                 disabled={busy} onClick={() => act(() => unpublish(t.id))}>
-          Unpublish
+          {busy ? "Working..." : "Unpublish"}
         </button>
+        {error && <p className="text-red2 text-xs font-semibold mt-2">{error}</p>}
       </div>
     );
   }
 
-  if (!editable) return null;
+  if (!editable) {
+    return (
+      <div className="card py-3">
+        <StatusPill status={t.status} />
+      </div>
+    );
+  }
 
   return (
-    <div className="card space-y-3">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="section-label mb-2">Before it can go live</p>
-          {ready?.ready ? (
-            <p className="text-grn text-sm">Everything's in place.</p>
-          ) : (
-            <ul className="space-y-1">
-              {ready?.missing.map((m) => (
-                <li key={m} className="text-mt text-sm">Still needs {m}</li>
-              ))}
-            </ul>
-          )}
+    <div className="card py-3">
+      <StatusPill status={t.status} />
+
+      {ready?.ready ? (
+        <p className="text-grn text-xs mt-2.5">Ready to submit.</p>
+      ) : (
+        <div className="mt-2.5">
+          <p className="text-mt text-xs mb-1.5">Still needs</p>
+          <ul className="space-y-1">
+            {(ready?.missing || []).map((m) => (
+              <li key={m} className="text-mt text-xs leading-snug flex gap-1.5">
+                <span className="text-mt2">•</span>
+                <span>{m}</span>
+              </li>
+            ))}
+          </ul>
         </div>
-        <button className="btn-volt shrink-0" disabled={busy || !ready?.ready}
-                onClick={() => act(() => submitForReview(t.id))}>
-          {busy ? "Sending..." : "Submit for review"}
-        </button>
-      </div>
-      {error && <p className="text-red2 text-sm font-semibold">{error}</p>}
+      )}
+
+      <button
+        className="btn-volt w-full mt-3 text-[13px] px-3 py-2
+                   disabled:opacity-40 disabled:cursor-not-allowed"
+        disabled={busy || !ready?.ready}
+        onClick={() => act(() => submitForReview(t.id))}
+      >
+        {busy ? "Sending..." : "Submit for review"}
+      </button>
+
+      {error && <p className="text-red2 text-xs font-semibold mt-2">{error}</p>}
     </div>
   );
 }
@@ -815,4 +957,385 @@ function CrestUpload({ club, onChanged }: {
       {error && <p className="text-red2 text-[10px] mt-1 max-w-[120px]">{error}</p>}
     </div>
   );
+}
+
+/* ── competition menu ───────────────────────────────────────────────
+   Crest and name, the publish state and its one action, then the three
+   groups. The state sits at the top rather than buried in a tab,
+   because "is this live yet" is the question an organiser has every
+   time they open the page. */
+function CompetitionNav({
+  t, ready, role, editable, counts, active, onPick, onChanged,
+}: {
+  t: Tournament;
+  ready: Readiness | null;
+  role: string;
+  editable: boolean;
+  counts: Partial<Record<Section, number>>;
+  active: Section;
+  onPick: (s: Section) => void;
+  onChanged: () => void;
+}) {
+  return (
+    <div className="px-3 py-5">
+      <div className="flex items-center gap-3 px-2 mb-4">
+        <Crest url={(t as any).crest_url} name={t.name} size={34} />
+        <div className="min-w-0">
+          <p className="text-white font-semibold text-sm truncate">{t.name}</p>
+          <p className="text-mt text-xs truncate">{t.organizing_body}</p>
+        </div>
+      </div>
+
+      <div className="mb-5">
+        {role === "owner" ? (
+          <SubmitBar t={t} ready={ready} editable={editable} onChanged={onChanged} />
+        ) : (
+          <div className="card py-3">
+            <StatusPill status={t.status} />
+            <p className="text-mt text-xs mt-2 leading-relaxed">
+              You&apos;re an {role} here. You can update matches and scores.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {NAV.map(({ group, items }) => (
+        <div key={group} className="mb-5">
+          <p className="font-mono text-[10px] font-bold tracking-[0.2em] uppercase
+                        text-mt2 px-3 mb-2">
+            {group}
+          </p>
+          <nav className="space-y-0.5">
+            {items.map(({ id, label, icon: Icon }) => {
+              const n = counts[id];
+              return (
+                <button
+                  key={id}
+                  onClick={() => onPick(id)}
+                  aria-current={active === id ? "page" : undefined}
+                  className={clsx(
+                    "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-left",
+                    "transition-colors",
+                    active === id
+                      ? "bg-volt/10 text-volt"
+                      : "text-mt hover:text-white hover:bg-sur2"
+                  )}
+                >
+                  <Icon />
+                  <span className="flex-1 truncate">{label}</span>
+                  {typeof n === "number" && n > 0 && (
+                    <span className="font-mono text-[10px] text-mt2">{n}</span>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── brackets ───────────────────────────────────────────────────── */
+function BracketsSection({ fixtures, teams }: { fixtures: Fixture[]; teams: TeamRow[] }) {
+  const teamMap: Record<string, { name: string; crest_url: string | null }> = {};
+  for (const tm of teams) {
+    teamMap[tm.id] = {
+      name: tm.clubs?.name ?? "Unknown",
+      crest_url: tm.clubs?.crest_url ?? null,
+    };
+  }
+
+  // A league has no bracket. Saying so is better than an empty frame
+  // that looks like something failed to load.
+  if (!fixtures.length) {
+    return (
+      <div className="card">
+        <p className="text-white font-semibold">No fixtures yet</p>
+        <p className="text-mt text-sm mt-1">
+          Generate or upload the fixtures first, under Matches.
+        </p>
+      </div>
+    );
+  }
+
+  return <div className="card overflow-x-auto"><Bracket fixtures={fixtures} teams={teamMap} /></div>;
+}
+
+/* ── players ────────────────────────────────────────────────────────
+   Every squad in one place. Torneo has this as its own screen and it
+   is right: once there are twelve teams, finding one player by opening
+   twelve team rows is not a way to work. */
+function PlayersSection({ teams, editable }: { teams: TeamRow[]; editable: boolean }) {
+  const [open, setOpen] = useState<string | null>(teams[0]?.id ?? null);
+
+  if (!teams.length) {
+    return (
+      <div className="card">
+        <p className="text-white font-semibold">No teams yet</p>
+        <p className="text-mt text-sm mt-1">
+          Players are registered to a team, so add the teams first.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {teams.map((tm) => (
+        <div key={tm.id} className="card p-0 overflow-hidden">
+          <button
+            onClick={() => setOpen(open === tm.id ? null : tm.id)}
+            aria-expanded={open === tm.id}
+            className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-sur2
+                       transition-colors"
+          >
+            <Crest url={tm.clubs?.crest_url} name={tm.clubs?.name} size={24} />
+            <span className="text-white text-sm font-semibold flex-1 truncate">
+              {tm.clubs?.name ?? "Unknown"}
+            </span>
+            {tm.group_name && (
+              <span className="font-mono text-[10px] text-mt2">Group {tm.group_name}</span>
+            )}
+            <span className={clsx("text-mt transition-transform", open === tm.id && "rotate-180")}>
+              ▾
+            </span>
+          </button>
+          {open === tm.id && (
+            <div className="px-4 pb-4 border-t border-bd pt-4">
+              <Squad teamId={tm.id} editable={editable} />
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── format & structure ─────────────────────────────────────────── */
+function StructureSection({ t, teams, fixtures }: {
+  t: Tournament; teams: TeamRow[]; fixtures: Fixture[];
+}) {
+  const groups = Array.from(
+    new Set(teams.map((x) => x.group_name).filter(Boolean))
+  ).sort() as string[];
+
+  const rounds = sortRounds(
+    Array.from(new Set(fixtures.map((f) => f.round).filter(Boolean))) as string[]
+  );
+
+  // head_to_head is in the schema's default list but is not implemented
+  // on the backend, so it is marked rather than silently listed as if
+  // it runs. A three-way tie needs a mini table among the tied teams,
+  // and the pairwise shortcut gives the wrong answer.
+  const tiebreakers: string[] = (t as any).tiebreakers || [];
+  const LABEL: Record<string, string> = {
+    goal_difference: "Goal difference",
+    goals_scored: "Goals scored",
+    goals_for: "Goals scored",
+    wins: "Wins",
+    head_to_head: "Head to head",
+  };
+  const IMPLEMENTED = new Set(["goal_difference", "goals_scored", "goals_for", "wins"]);
+
+  return (
+    <div className="space-y-4">
+      <div className="card">
+        <p className="section-label mb-4">Shape</p>
+        <dl className="grid sm:grid-cols-2 gap-x-8 gap-y-4 text-sm">
+          <Field label="Format" value={t.format.replace("_", " + ")} />
+          <Field label="Teams" value={String(teams.length)} />
+          <Field label="Groups" value={groups.length ? groups.join(", ") : "None"} />
+          <Field label="Fixtures" value={String(fixtures.length)} />
+        </dl>
+      </div>
+
+      {rounds.length > 0 && (
+        <div className="card">
+          <p className="section-label mb-3">Rounds</p>
+          <div className="flex flex-wrap gap-2">
+            {rounds.map((r) => (
+              <span key={r} className="bg-sur2 border border-bd rounded-lg px-3 py-1.5
+                                       text-mt text-xs">
+                {r}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <p className="section-label mb-3">Separating level teams</p>
+        {tiebreakers.length === 0 ? (
+          <p className="text-mt text-sm">
+            Goal difference, then goals scored.
+          </p>
+        ) : (
+          <ol className="space-y-2">
+            {tiebreakers.map((x, i) => (
+              <li key={x} className="flex items-center gap-3 text-sm">
+                <span className="font-mono text-[11px] text-mt2 w-4">{i + 1}</span>
+                <span className="text-white">{LABEL[x] || x}</span>
+                {!IMPLEMENTED.has(x) && (
+                  <span className="font-mono text-[10px] text-amber">not applied yet</span>
+                )}
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+
+      <p className="text-mt2 text-xs">
+        The format is fixed once the competition is created, because changing
+        it would invalidate fixtures that already exist. Clear the fixtures
+        under Matches to redraw them.
+      </p>
+    </div>
+  );
+}
+
+function Field({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-mt text-xs uppercase tracking-wide">{label}</dt>
+      <dd className="text-white mt-1">{value}</dd>
+    </div>
+  );
+}
+
+/* ── info ───────────────────────────────────────────────────────────
+   The competition's own details, editable in place. Torneo splits this
+   into General and Season tabs; with our smaller field set one form is
+   clearer than two. */
+function InfoSection({ t, editable, onChanged }: {
+  t: Tournament; editable: boolean; onChanged: () => void;
+}) {
+  const [f, setF] = useState({
+    name: t.name,
+    organizing_body: t.organizing_body || "",
+    country: t.country || "",
+    contact_email: t.contact_email || "",
+    organizer_phone: t.organizer_phone || "",
+    start_date: t.start_date || "",
+    end_date: t.end_date || "",
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setF({ ...f, [k]: e.target.value }); setSaved(false);
+  };
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setError(null); setSaved(false);
+    try {
+      await updateTournament(t.id, f);
+      setSaved(true);
+      onChanged();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!editable) {
+    return (
+      <div className="card">
+        <dl className="grid sm:grid-cols-2 gap-x-8 gap-y-4 text-sm">
+          <Field label="Name" value={t.name} />
+          <Field label="Organising body" value={t.organizing_body || "—"} />
+          <Field label="Country" value={t.country || "—"} />
+          <Field label="Level" value={t.level} />
+          <Field label="Starts" value={t.start_date} />
+          <Field label="Ends" value={t.end_date} />
+        </dl>
+        <p className="text-mt2 text-xs mt-5">
+          {t.status === "pending"
+            ? "Locked while we review it."
+            : "Only the owner can change these."}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={save} className="card space-y-4 max-w-2xl">
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Input label="Name" value={f.name} onChange={set("name")} required />
+        <Input label="Organising body" value={f.organizing_body}
+               onChange={set("organizing_body")} required />
+        <Input label="Country" value={f.country} onChange={set("country")} required />
+        <Input label="Contact email" type="email" value={f.contact_email}
+               onChange={set("contact_email")} required />
+        <Input label="Contact phone" value={f.organizer_phone}
+               onChange={set("organizer_phone")} />
+        <div />
+        <Input label="Starts" type="date" value={f.start_date}
+               onChange={set("start_date")} required />
+        <Input label="Ends" type="date" value={f.end_date}
+               onChange={set("end_date")} required />
+      </div>
+
+      <p className="text-mt2 text-xs">
+        Level and format are fixed after creation. Both change what has
+        already been generated or reviewed.
+      </p>
+
+      {error && <p className="text-red2 text-sm font-semibold">{error}</p>}
+      {saved && !error && <p className="text-grn text-sm font-semibold">Saved.</p>}
+
+      <button className="btn-volt" disabled={busy}>
+        {busy ? "Saving..." : "Save changes"}
+      </button>
+    </form>
+  );
+}
+
+function Input({ label, ...rest }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <label className="block">
+      <span className="text-mt text-xs uppercase tracking-wide">{label}</span>
+      <input {...rest} className="input-select mt-1.5" />
+    </label>
+  );
+}
+
+/* ── menu icons ─────────────────────────────────────────────────────
+   Inline rather than an icon package: nine glyphs are not worth a
+   dependency the organiser downloads on mobile data. */
+const ico = {
+  width: 15, height: 15, viewBox: "0 0 24 24", fill: "none",
+  stroke: "currentColor", strokeWidth: 2,
+  strokeLinecap: "round" as const, strokeLinejoin: "round" as const,
+  className: "shrink-0",
+};
+function IconMatches() {
+  return <svg {...ico}><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg>;
+}
+function IconStandings() {
+  return <svg {...ico}><path d="M4 6h16M4 12h16M4 18h10" /></svg>;
+}
+function IconBrackets() {
+  return <svg {...ico}><path d="M4 5h5v5H4zM4 14h5v5H4zM15 9h5v6h-5zM9 7.5h3v9h3" /></svg>;
+}
+function IconTeams() {
+  return <svg {...ico}><path d="M12 3l7 3v5c0 4-3 7.5-7 9-4-1.5-7-5-7-9V6l7-3Z" /></svg>;
+}
+function IconPlayers() {
+  return <svg {...ico}><circle cx="12" cy="8" r="3.5" /><path d="M5 20c0-3.3 3.1-6 7-6s7 2.7 7 6" /></svg>;
+}
+function IconStructure() {
+  return <svg {...ico}><path d="M12 3l9 5-9 5-9-5 9-5Z" /><path d="M3 13l9 5 9-5" /></svg>;
+}
+function IconInfo() {
+  return <svg {...ico}><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>;
+}
+function IconProof() {
+  return <svg {...ico}><path d="M6 3h8l4 4v14H6zM14 3v4h4" /><path d="M9 13l2 2 4-4" /></svg>;
+}
+function IconPeople() {
+  return <svg {...ico}><circle cx="9" cy="8" r="3" /><path d="M3 19c0-3 2.7-5 6-5s6 2 6 5" /><path d="M16 6a3 3 0 0 1 0 6M18 19c0-2-.8-3.6-2-4.5" /></svg>;
 }

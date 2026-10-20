@@ -13,8 +13,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <Chrome />
-        {children}
+        {/* Chrome decides between the public (bare) pages and the
+            signed-in shell, and wraps the content either way. */}
+        <Chrome>{children}</Chrome>
       </body>
     </html>
   );
