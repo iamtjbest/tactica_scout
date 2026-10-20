@@ -209,7 +209,7 @@ function Detail() {
         </header>
 
         {section === "matches" && (
-          <FixturesTab tid={id} teams={data.teams} fixtures={data.fixtures}
+          <FixturesTab tid={id} t={t} teams={data.teams} fixtures={data.fixtures}
                        format={t.format} editable={editable} onChanged={load} />
         )}
         {section === "standings" && <TableTab tid={id} />}
@@ -525,10 +525,14 @@ function Squad({ teamId, editable }: { teamId: string; editable: boolean }) {
 }
 
 // ── fixtures ──────────────────────────────────────────────────────────
-function FixturesTab({ tid, teams, fixtures, format, editable, onChanged }: {
-  tid: string; teams: TeamRow[]; fixtures: Fixture[];
+function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
+  tid: string; t: Tournament; teams: TeamRow[]; fixtures: Fixture[];
   format: string; editable: boolean; onChanged: () => void;
 }) {
+  const [filterSub, setFilterSub] = useState("");
+  const [filterRound, setFilterRound] = useState("");
+  const [filterTeam, setFilterTeam] = useState("");
+  const [view, setView] = useState<"list" | "calendar">("list");
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -564,8 +568,63 @@ function FixturesTab({ tid, teams, fixtures, format, editable, onChanged }: {
 
   const isKnockout = format === "knockout";
 
+  // Filters are applied once and everything below reads the result, so
+  // the bracket, the round list and the calendar can never disagree
+  // about what is being shown.
+  const shown = fixtures.filter((fx) => {
+    if (filterSub && (fx.group_name || "") !== filterSub) return false;
+    if (filterRound && (fx.round || "") !== filterRound) return false;
+    if (filterTeam && fx.home_team_id !== filterTeam && fx.away_team_id !== filterTeam) return false;
+    return true;
+  });
+
+  const subs = Array.from(new Set(fixtures.map((f) => f.group_name).filter(Boolean))) as string[];
+  const rounds = sortRounds(
+    Array.from(new Set(fixtures.map((f) => f.round).filter(Boolean))) as string[]
+  );
+  const filtering = Boolean(filterSub || filterRound || filterTeam);
+
   return (
     <div className="space-y-4">
+      <SeasonStrip t={t} fixtures={fixtures} />
+
+      {fixtures.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          {subs.length > 0 && (
+            <select className="input-select w-auto" value={filterSub}
+                    onChange={(e) => setFilterSub(e.target.value)}>
+              <option value="">All sub-competitions</option>
+              {subs.map((g) => <option key={g} value={g}>Group {g}</option>)}
+            </select>
+          )}
+          {rounds.length > 0 && (
+            <select className="input-select w-auto" value={filterRound}
+                    onChange={(e) => setFilterRound(e.target.value)}>
+              <option value="">All rounds</option>
+              {rounds.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          )}
+          <select className="input-select w-auto" value={filterTeam}
+                  onChange={(e) => setFilterTeam(e.target.value)}>
+            <option value="">All teams</option>
+            {teams.map((tm) => (
+              <option key={tm.id} value={tm.id}>{tm.clubs?.name ?? "Unknown"}</option>
+            ))}
+          </select>
+
+          <div className="ml-auto flex items-center border border-bd rounded-lg overflow-hidden">
+            {(["list", "calendar"] as const).map((v) => (
+              <button key={v} onClick={() => setView(v)} aria-pressed={view === v}
+                      className={clsx(
+                        "px-3 py-2 text-xs font-semibold capitalize transition-colors",
+                        view === v ? "bg-volt/10 text-volt" : "text-mt hover:text-white")}>
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {editable && fixtures.length === 0 && (
         <>
           <div className="flex gap-2">
@@ -642,11 +701,163 @@ function FixturesTab({ tid, teams, fixtures, format, editable, onChanged }: {
       {/* A knockout reads as a bracket; everything else reads as
           matchdays. Same data, different shape, because a list of 30
           league fixtures with no grouping is unusable. */}
-      {fixtures.length > 0 && (
-        isKnockout
-          ? <Bracket fixtures={fixtures} teams={teamMap} />
-          : <ByRound fixtures={fixtures} tid={tid} info={info} />
+      {fixtures.length > 0 && shown.length > 0 && (
+        view === "calendar"
+          ? <Calendar fixtures={shown} tid={tid} info={info} />
+          : isKnockout
+            ? <Bracket fixtures={shown} teams={teamMap} />
+            : <ByRound fixtures={shown} tid={tid} info={info} />
       )}
+
+      {fixtures.length > 0 && shown.length === 0 && (
+        <div className="card text-center py-10">
+          <p className="text-white font-semibold">Nothing matches those filters</p>
+          <button onClick={() => { setFilterSub(""); setFilterRound(""); setFilterTeam(""); }}
+                  className="text-volt text-sm font-semibold mt-2 hover:underline">
+            Clear filters
+          </button>
+        </div>
+      )}
+
+      {fixtures.length === 0 && !editable && (
+        <EmptyMatches />
+      )}
+      {fixtures.length === 0 && editable && filtering === false && null}
+    </div>
+  );
+}
+
+/* ── season strip ───────────────────────────────────────────────────
+   How far through the competition is, and whether it is finished.
+   Worked out from the dates and the fixtures rather than stored: a
+   stored "progress" column goes stale the moment a score is corrected
+   or a match is postponed, and correcting scores is the single most
+   common thing an organiser does. */
+function SeasonStrip({ t, fixtures }: { t: Tournament; fixtures: Fixture[] }) {
+  const start = new Date(t.start_date).getTime();
+  const end = new Date(t.end_date).getTime();
+  const now = Date.now();
+  const byTime = end > start
+    ? Math.min(100, Math.max(0, ((now - start) / (end - start)) * 100))
+    : 0;
+
+  const played = fixtures.filter((f) => String(f.status).toLowerCase() === "ft").length;
+  const byPlayed = fixtures.length ? (played / fixtures.length) * 100 : 0;
+
+  // Once there are fixtures, how many have been played is the honest
+  // measure. Before then, all we know is the calendar.
+  const pct = Math.round(fixtures.length ? byPlayed : byTime);
+  const ended = fixtures.length > 0 && played === fixtures.length;
+
+  const fmt = (d: string) =>
+    new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+
+  return (
+    <div className="space-y-3">
+      <div className="card">
+        <div className="flex items-center justify-between gap-4 mb-2">
+          <p className="section-label">Season progress</p>
+          <p className="font-mono text-xs text-white">{pct}%</p>
+        </div>
+        <div className="h-1.5 rounded-full bg-sur2 overflow-hidden">
+          <div className={clsx("h-full rounded-full transition-all",
+                               ended ? "bg-grn" : "bg-volt")}
+               style={{ width: `${pct}%` }} />
+        </div>
+        <div className="flex items-center justify-between mt-2">
+          <p className="font-mono text-[11px] text-mt2">{fmt(t.start_date)}</p>
+          <p className="font-mono text-[11px] text-mt2">{fmt(t.end_date)}</p>
+        </div>
+      </div>
+
+      {ended && (
+        <div className="card border-grn/35 bg-grn/[0.04] flex items-center gap-3">
+          <span className="text-grn text-lg leading-none">✓</span>
+          <p className="text-white text-sm">
+            <span className="font-semibold">{t.name}</span> has ended — all{" "}
+            {fixtures.length} matches played.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmptyMatches() {
+  return (
+    <div className="card text-center py-14">
+      <div className="w-12 h-12 rounded-xl bg-sur2 mx-auto flex items-center justify-center mb-4">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8A9BA8"
+             strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="5" width="18" height="16" rx="2" />
+          <path d="M3 10h18M8 3v4M16 3v4" />
+        </svg>
+      </div>
+      <p className="text-white font-semibold">No matches yet</p>
+      <p className="text-mt text-sm mt-1 max-w-sm mx-auto">
+        Matches appear here once the schedule is set.
+      </p>
+    </div>
+  );
+}
+
+/* ── calendar ───────────────────────────────────────────────────────
+   The same fixtures by day rather than by round. Useful when the
+   question is "what is on Saturday" rather than "who plays in the
+   semi-final". */
+function Calendar({ fixtures, tid, info }: {
+  fixtures: Fixture[]; tid: string;
+  info: (id: string) => { name: string; crest_url: string | null };
+}) {
+  const byDay: Record<string, Fixture[]> = {};
+  for (const fx of fixtures) {
+    const key = (fx.kickoff_at || "").slice(0, 10) || "Unscheduled";
+    (byDay[key] ||= []).push(fx);
+  }
+  const days = Object.keys(byDay).sort();
+
+  return (
+    <div className="space-y-5">
+      {days.map((d) => (
+        <div key={d} className="space-y-2">
+          <p className="section-label">
+            {d === "Unscheduled"
+              ? "Unscheduled"
+              : new Date(d).toLocaleDateString("en-GB", {
+                  weekday: "long", day: "numeric", month: "long",
+                })}
+          </p>
+          {byDay[d]
+            .slice()
+            .sort((a, b) => (a.kickoff_at || "").localeCompare(b.kickoff_at || ""))
+            .map((fx) => {
+              const h = info(fx.home_team_id), a = info(fx.away_team_id);
+              return (
+                <Link key={fx.id} href={`/t/${tid}/live/${fx.id}`}
+                      className="card block hover:border-volt/40 transition-colors">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-mono text-[11px] text-mt w-11 shrink-0">
+                        {fx.kickoff_at
+                          ? new Date(fx.kickoff_at).toLocaleTimeString("en-GB",
+                              { hour: "2-digit", minute: "2-digit" })
+                          : "--:--"}
+                      </span>
+                      <Crest url={h.crest_url} name={h.name} size={18} />
+                      <span className="text-white text-sm truncate">{h.name}</span>
+                      <span className="text-mt2 text-xs">v</span>
+                      <Crest url={a.crest_url} name={a.name} size={18} />
+                      <span className="text-white text-sm truncate">{a.name}</span>
+                    </div>
+                    <span className="font-display font-black text-white shrink-0">
+                      {fx.home_score ?? "–"}:{fx.away_score ?? "–"}
+                    </span>
+                  </div>
+                </Link>
+              );
+            })}
+        </div>
+      ))}
     </div>
   );
 }

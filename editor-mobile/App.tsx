@@ -13,6 +13,9 @@ import TournamentDetailScreen from "./src/screens/TournamentDetailScreen";
 import LiveScreen from "./src/screens/LiveScreen";
 import BillingScreen from "./src/screens/BillingScreen";
 import JoinScreen from "./src/screens/JoinScreen";
+import DashboardScreen from "./src/screens/DashboardScreen";
+import InboxScreen from "./src/screens/InboxScreen";
+import SettingsScreen from "./src/screens/SettingsScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -48,7 +51,7 @@ export default function App() {
     <NavigationContainer theme={theme}>
       <StatusBar style="light" />
       <Stack.Navigator
-        initialRouteName={signedIn ? "Tournaments" : "SignIn"}
+        initialRouteName={signedIn ? "Dashboard" : "SignIn"}
         screenOptions={{
           headerStyle: { backgroundColor: COLORS.card },
           headerTintColor: COLORS.text,
@@ -58,8 +61,16 @@ export default function App() {
       >
         <Stack.Screen name="SignIn" component={SignInScreen}
                       options={{ title: "Sign in", headerShown: false }} />
+        {/* The four tab destinations. They carry their own TabBar, so
+            the header is just a title. */}
+        <Stack.Screen name="Dashboard" component={DashboardScreen}
+                      options={{ title: "Dashboard" }} />
         <Stack.Screen name="Tournaments" component={TournamentsScreen}
-                      options={{ title: "Your tournaments" }} />
+                      options={{ title: "My competitions" }} />
+        <Stack.Screen name="Inbox" component={InboxScreen}
+                      options={{ title: "Inbox" }} />
+        <Stack.Screen name="Settings" component={SettingsScreen}
+                      options={{ title: "Settings" }} />
         <Stack.Screen name="TournamentDetail" component={TournamentDetailScreen}
                       options={{ title: "Tournament" }} />
         <Stack.Screen name="Live" component={LiveScreen}

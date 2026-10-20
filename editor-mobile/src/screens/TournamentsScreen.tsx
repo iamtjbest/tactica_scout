@@ -4,6 +4,7 @@ import {
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { COLORS } from "../theme";
+import TabBar from "../components/TabBar";
 import { listTournaments, type Tournament, type TournamentStatus } from "../services/api";
 
 const TONE: Record<TournamentStatus, { bg: string; fg: string; label: string }> = {
@@ -32,14 +33,7 @@ export default function TournamentsScreen({ navigation }: any) {
 
   return (
     <View style={s.wrap}>
-      <View style={s.topLinks}>
-        <TouchableOpacity onPress={() => navigation.navigate("Join")}>
-          <Text style={s.billingText}>Join with a code</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate("Billing")}>
-          <Text style={s.billingText}>Billing</Text>
-        </TouchableOpacity>
-      </View>
+
 
       {error ? <Text style={s.error}>{error}</Text> : null}
 
@@ -93,17 +87,13 @@ export default function TournamentsScreen({ navigation }: any) {
         }}
         contentContainerStyle={{ padding: 16, gap: 10 }}
       />
+      <TabBar active="Tournaments" navigation={navigation} />
     </View>
   );
 }
 
 const s = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: COLORS.bg },
-  topLinks: {
-    flexDirection: "row", justifyContent: "space-between",
-    paddingHorizontal: 16, paddingTop: 14,
-  },
-  billingText: { color: COLORS.volt, fontSize: 13, fontWeight: "700" },
   card: {
     backgroundColor: COLORS.card, borderRadius: 12, padding: 14,
     borderWidth: 1, borderColor: COLORS.cardBorder,

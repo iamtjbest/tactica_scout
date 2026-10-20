@@ -430,3 +430,38 @@ export const decideRequest = (tid: string, reqId: string, approve: boolean) =>
 
 export const removeMember = (tid: string, memberId: string) =>
   req<void>(`/api/editor/tournaments/${tid}/members/${memberId}`, { method: "DELETE" });
+
+// ── dashboard & inbox ─────────────────────────────────────────────────
+
+export type DashFixture = {
+  id: string; tournament_id: string; tournament_name: string | null;
+  round: string | null; group_name: string | null;
+  kickoff_at: string; venue: string | null; status: string;
+  home_score: number | null; away_score: number | null;
+  home: { name: string; crest_url: string | null };
+  away: { name: string; crest_url: string | null };
+};
+
+export type Dashboard = {
+  counts: Record<string, number>;
+  total: number;
+  live: DashFixture[];
+  upcoming: DashFixture[];
+  recent: DashFixture[];
+  needs_attention: {
+    tournament_id: string; name: string; kind: string; detail: string;
+  }[];
+  open_requests: number;
+};
+
+export type InboxData = {
+  requests: (AccessRequest & { tournament_name: string | null })[];
+  decisions: {
+    tournament_id: string; tournament_name: string;
+    status: string; reviewed_at: string | null; reason: string | null;
+  }[];
+  unread: number;
+};
+
+export const getDashboard = () => req<Dashboard>("/api/editor/dashboard");
+export const getInbox = () => req<InboxData>("/api/editor/inbox");

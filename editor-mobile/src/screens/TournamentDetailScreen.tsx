@@ -10,6 +10,7 @@ import {
   type Tournament, type TeamRow, type Fixture, type Readiness,
 } from "../services/api";
 import { LockedNote } from "../sections/kit";
+import { SeasonStrip, MatchFilters, EmptyMatches } from "../sections/Season";
 import { Venues, Structure, Suspensions } from "../sections/Structure";
 import {
   Standings, Teams, Players, Info, Regulations, ProofSection, Collaborators,
@@ -55,6 +56,9 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [section, setSection] = useState<Section>("matches");
+  const [fSub, setFSub] = useState("");
+  const [fRound, setFRound] = useState("");
+  const [fTeam, setFTeam] = useState("");
 
   const load = useCallback(() => {
     getTournament(id)
@@ -71,6 +75,13 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
   React.useLayoutEffect(() => {
     navigation.setOptions({ title: name || "Tournament" });
   }, [navigation, name]);
+
+  const shownFixtures = fixtures.filter((fx) => {
+    if (fSub && (fx.group_name || "") !== fSub) return false;
+    if (fRound && (fx.round || "") !== fRound) return false;
+    if (fTeam && fx.home_team_id !== fTeam && fx.away_team_id !== fTeam) return false;
+    return true;
+  });
 
   const info = (tid: string) => {
     const t = teams.find((x) => x.id === tid);
@@ -156,17 +167,21 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
       <View style={{ gap: 10 }}>
         {section === "matches" ? (
           <>
-            <Text style={s.label}>FIXTURES ({fixtures.length})</Text>
+            <SeasonStrip t={t} fixtures={fixtures} />
+            <MatchFilters
+              fixtures={fixtures} teams={teams}
+              sub={fSub} round={fRound} team={fTeam}
+              onSub={setFSub} onRound={setFRound} onTeam={setFTeam}
+            />
             {fixtures.length === 0 ? (
-              <Text style={s.muted}>
-                No fixtures yet. Generate them, or enter your own draw, in the
-                web editor.
-              </Text>
+              <EmptyMatches />
+            ) : shownFixtures.length === 0 ? (
+              <Text style={s.muted}>Nothing matches those filters.</Text>
             ) : (
               // Grouped by round or group, same ordering rule as the web
               // editor. A flat list of 30 league fixtures is unusable on a
               // phone, and the round is what tells you where you are.
-              groupFixtures(fixtures).map(([heading, list]) => (
+              groupFixtures(shownFixtures).map(([heading, list]) => (
                 <View key={heading} style={{ gap: 8 }}>
                   <Text style={s.round}>{heading}</Text>
                   {list.map((fx) => {

@@ -26,7 +26,7 @@ export default function SignIn() {
     setBusy(true); setError(null);
     try {
       await signInWithEmail(email.trim(), password);
-      router.replace("/competitions");
+      router.replace("/dashboard");
     } catch (err: any) {
       setError(err.message || "Could not sign in.");
     } finally {
