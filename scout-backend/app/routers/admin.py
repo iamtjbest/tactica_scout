@@ -32,7 +32,7 @@ from app.routers.matches import _extract_events, _parse_kickoff
 router = APIRouter()
 
 # BSD league ids, confirmed in app/config.py LEAGUE_NAMES (live /leagues/ dump).
-TOP5_LEAGUE_IDS = {1, 3, 4, 5, 6}  # PL, La Liga, Serie A, Bundesliga, Ligue 1
+TOP5_LEAGUE_IDS = {1, 3, 4, 5, 6, 7, 8}  # PL, La Liga, Serie A, Bundesliga, Ligue 1, UEFA Champions League, UEFA Europa League
 
 
 def _check_key(provided: str | None):
