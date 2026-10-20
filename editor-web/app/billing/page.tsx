@@ -50,7 +50,7 @@ function BillingView() {
   if (!b) return <p className="text-mt text-sm">Loading...</p>;
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-screen-lg mx-auto px-4 py-6 space-y-6">
       <div>
         <h1 className="font-display font-black text-2xl text-white">Billing</h1>
         <p className="text-mt text-sm mt-1">

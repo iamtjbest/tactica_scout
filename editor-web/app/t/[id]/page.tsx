@@ -58,7 +58,7 @@ function Detail() {
     (role === "owner" || role === "editor");
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-screen-lg mx-auto px-4 py-6 space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="font-display font-black text-2xl text-white truncate">{t.name}</h1>

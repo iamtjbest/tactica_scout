@@ -45,7 +45,7 @@ function Join() {
 
   if (done) {
     return (
-      <div className="max-w-sm mx-auto mt-16 text-center">
+      <div className="max-w-sm mx-auto px-4 mt-24 text-center">
         <p className="font-display font-black text-2xl text-white">You&apos;re in</p>
         <p className="text-mt text-sm mt-2">
           {done.name} — you joined as a {done.role}.
@@ -55,7 +55,7 @@ function Join() {
   }
 
   return (
-    <div className="max-w-sm mx-auto mt-14">
+    <div className="max-w-sm mx-auto px-4 mt-20">
       <h1 className="font-display font-black text-2xl text-white">Join a tournament</h1>
       <p className="text-mt text-sm mt-1">
         Enter the code the organiser gave you.

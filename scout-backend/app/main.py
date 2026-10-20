@@ -43,9 +43,17 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        # Scout
         "https://scout.tactica.com.ng",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        # Scout Editor. It runs on 3001 so it can sit alongside Scout in
+        # dev; leaving it out of this list is why the editor reported
+        # "Failed to fetch" -- a CORS rejection looks identical to a
+        # dead network from the browser's side.
+        "https://editor.tactica.com.ng",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
     ],
     allow_origin_regex=r"https://.*\.vercel\.app",  # preview deployments
     allow_credentials=True,

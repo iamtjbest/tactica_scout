@@ -25,11 +25,11 @@ shape of everything below:
 So "add a team" is really "find or create a global club, then enter it".
 """
 import re
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from app.access import require_access
 from app.deps import require_user
@@ -95,17 +95,33 @@ def _require_editable(t: dict):
 
 # ── models ────────────────────────────────────────────────────────────
 
+# A tournament can't be submitted for review the day before it starts:
+# we have to read the proof, and an organiser has to be able to fix
+# whatever we send back. Two weeks is the floor.
+MIN_LEAD_DAYS = 14
+
+
 class TournamentIn(BaseModel):
+    """Everything is required except the second contact.
+
+    This is for anyone running a competition anywhere, so country is
+    asked rather than assumed, and `level` describes the competition
+    (university, amateur, professional...) rather than one university's
+    internal structure.
+    """
     name: str = Field(min_length=3, max_length=120)
-    level: str                      # department | faculty | src | open
-    gender: str = "male"            # male | female | mixed
+    level: str
+    gender: str = Field(default="male")
     age_category: str | None = None
-    country: str = "Nigeria"
+    country: str = Field(min_length=2, max_length=80)
     start_date: date
     end_date: date
     format: str                     # league | knockout | groups_knockout
     organizing_body: str = Field(min_length=2, max_length=160)
+    # Full international format, because +234 is not the only country
+    # code this will ever see.
     organizer_phone: str = Field(min_length=7, max_length=32)
+    contact_email: EmailStr
     contact2_name: str | None = None
     contact2_phone: str | None = None
     tiebreakers: list[str] | None = None
@@ -122,6 +138,7 @@ class TournamentPatch(BaseModel):
     format: str | None = None
     organizing_body: str | None = None
     organizer_phone: str | None = None
+    contact_email: EmailStr | None = None
     contact2_name: str | None = None
     contact2_phone: str | None = None
     tiebreakers: list[str] | None = None
@@ -191,7 +208,18 @@ def create_tournament(body: TournamentIn, user: dict = Depends(require_user)):
     approval gates publishing, not creation, so an organiser can build
     the whole thing before anyone looks at it."""
     if body.end_date < body.start_date:
-        raise HTTPException(status_code=400, detail="end_date is before start_date")
+        raise HTTPException(status_code=400, detail="The end date is before the start date.")
+
+    earliest = date.today() + timedelta(days=MIN_LEAD_DAYS)
+    if body.start_date < earliest:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"The start date must be at least {MIN_LEAD_DAYS} days away, so there's "
+                f"time to review it and for you to fix anything we send back. "
+                f"Earliest you can start is {earliest.isoformat()}."
+            ),
+        )
 
     row = {
         "owner_id":        user["id"],
@@ -205,6 +233,7 @@ def create_tournament(body: TournamentIn, user: dict = Depends(require_user)):
         "format":          body.format,
         "organizing_body": body.organizing_body.strip(),
         "organizer_phone": body.organizer_phone.strip(),
+        "contact_email":   str(body.contact_email).strip().lower(),
         "contact2_name":   body.contact2_name,
         "contact2_phone":  body.contact2_phone,
         "status":          "draft",

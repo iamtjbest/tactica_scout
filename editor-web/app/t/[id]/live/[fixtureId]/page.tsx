@@ -93,7 +93,7 @@ function Live() {
     implied && (implied.home !== home || implied.away !== away);
 
   return (
-    <div className="space-y-5">
+    <div className="max-w-screen-lg mx-auto px-4 py-6 space-y-5">
       <Link href={`/t/${id}`} className="text-mt text-sm hover:text-white">
         &larr; Back to tournament
       </Link>

@@ -48,6 +48,7 @@ export type Tournament = {
   level: string;
   gender: string;
   country: string;
+  contact_email: string | null;
   start_date: string;
   end_date: string;
   format: "league" | "knockout" | "groups_knockout";
