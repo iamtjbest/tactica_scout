@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import clsx from "clsx";
 import Guard from "@/components/Guard";
+import TeamSheet from "@/components/TeamSheet";
 import {
   getTournament, setScore, listEvents, addEvent, deleteEvent,
   listSquad, type Fixture, type TeamRow, type MatchEvent,
@@ -40,6 +41,11 @@ function Live() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [minute, setMinute] = useState("");
+  // Score and events first: that is what someone standing at the pitch
+  // needs in the second after a goal. The team sheet is filled in
+  // before kickoff, so it sits behind a tab rather than above the
+  // scoreboard.
+  const [pane, setPane] = useState<"match" | "sheet">("match");
 
   const load = useCallback(() => {
     getTournament(id).then((d) => {
@@ -98,6 +104,26 @@ function Live() {
         &larr; Back to tournament
       </Link>
 
+      <div className="flex gap-2">
+        {([["match", "Score & events"], ["sheet", "Team sheet"]] as const).map(([k, label]) => (
+          <button key={k} onClick={() => setPane(k)}
+                  className={clsx("tab-pill",
+                    pane === k ? "tab-pill-active" : "tab-pill-inactive")}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {pane === "sheet" && (
+        <TeamSheet
+          fixtureId={fixtureId}
+          homeName={name(fx.home_team_id)}
+          awayName={name(fx.away_team_id)}
+        />
+      )}
+
+      {pane === "match" && (
+      <>
       {/* scoreboard */}
       <div className="card">
         <div className="grid grid-cols-3 items-center gap-2">
@@ -204,6 +230,8 @@ function Live() {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

@@ -133,16 +133,116 @@ def matches_by_date(date: str):
     leagues_list = [{"league_id": k[0], "league": k[1], "matches": v} for k, v in by_league.items()]
     leagues_list.sort(key=lambda x: (league_order.get(x["league"], 999), x["league"]))
 
+    # Local competitions go at the top. Someone browsing Scout in Zaria
+    # cares more that their faculty is playing than that Everton are,
+    # and the big leagues are one scroll away either way.
+    local = _local_leagues(date)
+    leagues_list = local + leagues_list
+
     result = {
         "_cached_at": time.time(),
         "date":       date,
-        "count":      len(events),
+        "count":      len(events) + sum(len(g["matches"]) for g in local),
         "leagues":    leagues_list,
         "_debug_sample_event": debug_field(events[0] if events else None),
         "cached":     False,
     }
     cache_write(cache_key, result)
     return result
+
+
+def _local_leagues(date: str) -> list[dict]:
+    """Approved local competitions with fixtures on this date, shaped
+    exactly like a BSD league group.
+
+    A competition run in Scout Editor is not a second-class thing in
+    Scout: it sits in the same list as the Premier League, grouped the
+    same way, because to the student whose faculty is playing it IS the
+    competition that matters.
+
+    `event_id` is the fixture uuid and `source` marks the group, so the
+    client routes a tap to the local match page rather than a BSD one.
+    Everything else matches the BSD shape field for field, so the
+    existing match card renders it with no special case.
+    """
+    # Imported here rather than at module load: tournaments_public
+    # imports helpers from app.routers.editor, and a top-level import
+    # would couple the two modules' import order.
+    from app.routers.editor import _db, _rows
+
+    try:
+        start = f"{date}T00:00:00"
+        end = f"{date}T23:59:59.999"
+        fixtures = _rows(
+            _db().table("fixtures")
+            .select("id, tournament_id, kickoff_at, status, round, group_name, "
+                    "home_team_id, away_team_id, home_score, away_score")
+            .gte("kickoff_at", start).lte("kickoff_at", end)
+            .order("kickoff_at").execute()
+        )
+        if not fixtures:
+            return []
+
+        t_ids = sorted({f["tournament_id"] for f in fixtures})
+        tournaments = {
+            t["id"]: t
+            for t in _rows(
+                _db().table("tournaments").select("id, name, status")
+                .in_("id", t_ids).eq("status", "approved").execute()
+            )
+        }
+        if not tournaments:
+            return []
+
+        teams = {
+            r["id"]: (r.get("clubs") or {})
+            for r in _rows(
+                _db().table("tournament_teams")
+                .select("id, tournament_id, clubs(id, name, crest_url)")
+                .in_("tournament_id", list(tournaments)).execute()
+            )
+        }
+
+        by_t: dict[str, list] = {}
+        for fx in fixtures:
+            t = tournaments.get(fx["tournament_id"])
+            if not t:
+                continue          # draft or rejected: not public
+            home = teams.get(fx["home_team_id"], {})
+            away = teams.get(fx["away_team_id"], {})
+            by_t.setdefault(fx["tournament_id"], []).append({
+                "event_id":     fx["id"],
+                "home_team":    home.get("name") or "Unknown",
+                "home_team_id": fx["home_team_id"],
+                "home_crest":   home.get("crest_url"),
+                "away_team":    away.get("name") or "Unknown",
+                "away_team_id": fx["away_team_id"],
+                "away_crest":   away.get("crest_url"),
+                "home_score":   fx.get("home_score"),
+                "away_score":   fx.get("away_score"),
+                "minute":       0,
+                "status":       fx.get("status") or "scheduled",
+                "kickoff":      fx.get("kickoff_at") or "",
+                # What tells the client this is a local fixture.
+                "source":        "local",
+                "tournament_id": fx["tournament_id"],
+            })
+
+        return [
+            {
+                "league_id": None,
+                "league": tournaments[tid]["name"],
+                "source": "local",
+                "tournament_id": tid,
+                "matches": rows,
+            }
+            for tid, rows in by_t.items()
+        ]
+    except Exception:
+        # A local-competition failure must never take down the main
+        # livescore list. Scout's core job is BSD fixtures; these are an
+        # addition, so they drop out silently rather than 500 the page.
+        return []
 
 
 def _lookup_name(resource: str, obj_id) -> str | None:

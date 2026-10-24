@@ -49,7 +49,15 @@ export function teamLogoUrl(teamId: number | null | undefined): string | null {
 
 // ── Types ─────────────────────────────────────────────────────────────
 export type MatchSummary = {
-  event_id: number | null;
+  /** BSD event id (number) or, for a local competition, the fixture
+   *  uuid (string). `source` says which. */
+  event_id: number | string | null;
+  /** "local" for a competition run in Scout Editor; absent for BSD. */
+  source?: 'local';
+  /** Set only when source is "local", for routing to its match page. */
+  tournament_id?: string;
+  home_crest?: string | null;
+  away_crest?: string | null;
   home_team: string;
   home_team_id?: number | null;
   away_team: string;
@@ -67,6 +75,11 @@ export type LeagueMatches = {
   league_id?: number | null;
   league: string;
   matches: MatchSummary[];
+  /** "local" marks a competition run in Scout Editor. It groups in the
+   *  feed exactly like a BSD league; this only changes where a tap
+   *  goes. */
+  source?: 'local';
+  tournament_id?: string;
 };
 
 export type TeamFormResult = {
@@ -509,5 +522,203 @@ export async function getMatchFacts(eventId: number): Promise<MatchFacts> {
   const base = await getApiBase();
   const res = await fetch(`${base}/api/matches/${eventId}/facts`);
   if (!res.ok) throw new Error(`match facts failed: ${res.status}`);
+  return res.json();
+}
+
+// ── Crowd ratings & Man of the Match ─────────────────────────────────
+// Mirrors scout-web/lib/api.ts one for one. `source` discriminates BSD
+// matches (numeric event id) from local tournament fixtures (uuid).
+
+export type RatingSource = 'bsd' | 'local';
+
+export type RatingWindow = {
+  open: boolean;
+  reason: string | null;
+  opens_at_minute?: number;
+  closes_at?: string | null;
+};
+
+export type PlayerRating = {
+  player_ref: string;
+  votes: number;
+  /** Withheld until min_votes people have rated. */
+  average: number | null;
+  enough_votes: boolean;
+};
+
+export type MatchRatings = {
+  source: RatingSource;
+  match_ref: string;
+  window: RatingWindow;
+  min_votes: number;
+  players: PlayerRating[];
+  motm: {
+    total_votes: number;
+    leaders: { player_ref: string; votes: number; share: number }[];
+  };
+};
+
+export type MyVotes = {
+  ratings: Record<string, number>;
+  motm: string | null;
+};
+
+export async function getMatchRatings(
+  source: RatingSource, matchRef: string | number
+): Promise<MatchRatings> {
+  const base = await getApiBase();
+  const res = await fetch(`${base}/api/ratings/${source}/${matchRef}`);
+  if (!res.ok) throw new Error(`ratings failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getMyVotes(
+  source: RatingSource, matchRef: string | number
+): Promise<MyVotes> {
+  const base = await getApiBase();
+  const headers = await authHeaders();
+  const res = await fetch(`${base}/api/ratings/${source}/${matchRef}/mine`, { headers });
+  if (!res.ok) throw new Error(`my votes failed: ${res.status}`);
+  return res.json();
+}
+
+async function putJson(path: string, body: unknown) {
+  const base = await getApiBase();
+  const headers = await authHeaders();
+  const res = await fetch(`${base}${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = `Request failed (${res.status})`;
+    try { detail = (await res.json())?.detail || detail; } catch {}
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+export const ratePlayer = (
+  source: RatingSource, matchRef: string | number,
+  playerRef: string | number, score: number
+) => putJson(`/api/ratings/${source}/${matchRef}/players/${playerRef}`, { score });
+
+export const voteMotm = (
+  source: RatingSource, matchRef: string | number, playerRef: string | number
+) => putJson(`/api/ratings/${source}/${matchRef}/motm`, { player_ref: String(playerRef) });
+
+// ── Local tournaments ────────────────────────────────────────────────
+// Mirrors scout-web/lib/api.ts. Competitions run in Scout Editor and
+// approved for publication.
+
+export type TournamentSummary = {
+  id: string; name: string; level: string; gender: string; country: string;
+  start_date: string; end_date: string;
+  format: 'league' | 'knockout' | 'groups_knockout';
+  organizing_body: string;
+};
+
+export type TournamentTeam = {
+  team_id: string; club_id: string | null; name: string;
+  short_name: string | null; crest_url: string | null; group_name: string | null;
+};
+
+export type TournamentFixture = {
+  id: string; round: string | null; group_name: string | null;
+  kickoff_at: string; venue: string | null; status: string;
+  home_team: string | null; home_crest: string | null; home_team_id: string;
+  away_team: string | null; away_crest: string | null; away_team_id: string;
+  home_score: number | null; away_score: number | null;
+};
+
+export type TournamentStanding = {
+  team_id: string; name: string; short_name: string | null;
+  crest_url: string | null; group_name: string | null;
+  played: number; won: number; drawn: number; lost: number;
+  goals_for: number; goals_against: number; goal_difference: number;
+  points: number; form: string[]; position: number;
+};
+
+export type TournamentDetail = {
+  tournament: TournamentSummary;
+  teams: TournamentTeam[];
+  fixtures: TournamentFixture[];
+  standings: TournamentStanding[] | null;
+  group_tables: Record<string, TournamentStanding[]> | null;
+  points_rules?: { win: number; draw: number; loss: number };
+};
+
+export type TournamentMatchEvent = {
+  id: string; type: string; minute: number | null;
+  tournament_team_id: string; side: 'home' | 'away';
+  players: { id: string; first_name: string; last_name: string } | null;
+};
+
+export type TournamentSheetPlayer = {
+  player_id: string; name: string;
+  shirt_number: number | null; position: string | null;
+};
+
+export type TournamentSheet = {
+  formation: string | null;
+  starters: TournamentSheetPlayer[];
+  substitutes: TournamentSheetPlayer[];
+};
+
+export type TournamentMatch = {
+  fixture: TournamentFixture & { tournament_id: string };
+  lineups: { home: TournamentSheet; away: TournamentSheet };
+  lineup_status: 'confirmed' | 'unavailable';
+  events: TournamentMatchEvent[];
+};
+
+export async function getTournaments(): Promise<{ count: number; tournaments: TournamentSummary[] }> {
+  const base = await getApiBase();
+  const res = await fetch(`${base}/api/tournaments`);
+  if (!res.ok) throw new Error(`tournaments failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getTournament(id: string): Promise<TournamentDetail> {
+  const base = await getApiBase();
+  const res = await fetch(`${base}/api/tournaments/${id}`);
+  if (!res.ok) throw new Error(`tournament failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getTournamentMatch(
+  tournamentId: string, fixtureId: string
+): Promise<TournamentMatch> {
+  const base = await getApiBase();
+  const res = await fetch(`${base}/api/tournaments/${tournamentId}/fixtures/${fixtureId}`);
+  if (!res.ok) throw new Error(`fixture failed: ${res.status}`);
+  return res.json();
+}
+
+export type TournamentPlayer = {
+  player: {
+    id: string; name: string; first_name: string | null; last_name: string | null;
+    position: string | null; photo_url: string | null;
+    nationality: string | null; shirt_number: number | null;
+  };
+  team: {
+    team_id: string; name: string; short_name: string | null;
+    crest_url: string | null; group_name: string | null;
+  };
+  tournament_id: string;
+  stats: {
+    appearances: number; starts: number; goals: number;
+    assists: number; yellow_cards: number; red_cards: number;
+  };
+};
+
+export async function getTournamentPlayer(
+  tournamentId: string, playerId: string
+): Promise<TournamentPlayer> {
+  const base = await getApiBase();
+  const res = await fetch(
+    `${base}/api/tournaments/${tournamentId}/players/${playerId}`
+  );
+  if (!res.ok) throw new Error(`player failed: ${res.status}`);
   return res.json();
 }

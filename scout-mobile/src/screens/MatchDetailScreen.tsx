@@ -19,13 +19,15 @@ import {
   MatchDetail,
   MatchSummary,
 } from '../services/api';
+import RatingsTab from '../components/RatingsTab';
+import { buildLineupRows, lineupRowWidth, lineupPlayerId } from '../lib/lineup';
 
 interface MatchDetailScreenProps {
   route: any;
   navigation: any;
 }
 
-type TabType = 'overview' | 'lineups' | 'stats' | 'h2h' | 'facts';
+type TabType = 'overview' | 'lineups' | 'ratings' | 'stats' | 'h2h' | 'facts';
 
 export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, navigation }) => {
   const { eventId, matchSummary } = route.params;
@@ -157,7 +159,7 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
       {/* Tabs Bar */}
       <View style={styles.tabsStrip}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12 }}>
-          {(['overview', 'lineups', 'stats', 'h2h', 'facts'] as TabType[]).map((t) => {
+          {(['overview', 'lineups', 'ratings', 'stats', 'h2h', 'facts'] as TabType[]).map((t) => {
             const isActive = activeTab === t;
             return (
               <TouchableOpacity
@@ -311,30 +313,57 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
                   <Text style={styles.lineupNote}>
                     Status: {detail.lineup_status || 'Not confirmed'}
                   </Text>
-                  {/* Home and Away Lineup rosters */}
                   {['home', 'away'].map((side) => {
-                    const squad = detail.lineups[side]?.players || [];
+                    const sideData: any = (detail.lineups as any)[side] || {};
+                    const squad: any[] = sideData.players || [];
                     const teamTitle = side === 'home' ? home : away;
+                    const rows = buildLineupRows(squad.slice(0, 11), sideData.formation);
                     return (
-                      <View key={side} style={{ marginTop: 12 }}>
-                        <Text style={[styles.lineupSideTitle, { color: side === 'home' ? COLORS.volt : '#38bdf8' }]}>
-                          {teamTitle}
-                        </Text>
-                        {squad.slice(0, 11).map((p: any, idx: number) => (
-                          <TouchableOpacity
-                            key={`player-${idx}`}
-                            style={styles.lineupRow}
-                            onPress={() => {
-                              if (p.id) {
-                                navigation.navigate('PlayerDetail', { playerId: p.id, playerName: p.name });
-                              }
-                            }}
-                          >
-                            <Text style={styles.shirtNum}>{p.shirt_number || idx + 1}</Text>
-                            <Text style={styles.lineupPlayerName}>{p.name}</Text>
-                            <Text style={styles.posBadge}>{p.position || '--'}</Text>
-                          </TouchableOpacity>
-                        ))}
+                      <View key={side} style={{ marginTop: 16 }}>
+                        <View style={styles.lineupHeadRow}>
+                          <Text style={[styles.lineupSideTitle,
+                                        { color: side === 'home' ? COLORS.volt : '#38bdf8' }]}>
+                            {teamTitle}
+                          </Text>
+                          {!!sideData.formation && (
+                            <Text style={styles.formationLabel}>{sideData.formation}</Text>
+                          )}
+                        </View>
+
+                        {/* Keeper at the bottom, attack at the top. */}
+                        <View style={styles.pitch}>
+                          <View style={styles.pitchHalfLine} />
+                          <View style={styles.pitchCircle} />
+                          {rows.slice().reverse().map((row, ri) => (
+                            <View
+                              key={`row-${ri}`}
+                              style={[styles.pitchRow, { width: lineupRowWidth(row.length) }]}
+                            >
+                              {row.map((p: any, pi: number) => {
+                                const pid = lineupPlayerId(p);
+                                return (
+                                  <TouchableOpacity
+                                    key={`p-${ri}-${pi}`}
+                                    style={styles.pitchPlayer}
+                                    disabled={pid == null}
+                                    onPress={() => navigation.navigate('PlayerDetail', {
+                                      playerId: pid, playerName: p.name ?? p.short_name,
+                                    })}
+                                  >
+                                    <View style={styles.shirt}>
+                                      <Text style={styles.shirtNumText}>
+                                        {p.shirt_number ?? p.number ?? ''}
+                                      </Text>
+                                    </View>
+                                    <Text style={styles.pitchName} numberOfLines={1}>
+                                      {p.short_name ?? p.name ?? ''}
+                                    </Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </View>
+                          ))}
+                        </View>
                       </View>
                     );
                   })}
@@ -345,7 +374,17 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
             </View>
           )}
 
-          {/* TAB 3: STATS */}
+          {activeTab === 'ratings' && (
+            <RatingsTab
+              source="bsd"
+              matchRef={String(eventId)}
+              lineups={detail?.lineups}
+              homeLabel={home}
+              awayLabel={away}
+              navigation={navigation}
+            />
+          )}
+
           {activeTab === 'stats' && (
             <View style={styles.cardSection}>
               <Text style={styles.sectionTitle}>MATCH STATISTICS</Text>
@@ -563,6 +602,43 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
 };
 
 const styles = StyleSheet.create({
+  lineupHeadRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  formationLabel: {
+    color: COLORS.textSecondary, fontSize: 11, fontFamily: 'monospace',
+  },
+  pitch: {
+    backgroundColor: '#0F1A14', borderRadius: 12, borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)', paddingVertical: 14,
+    gap: 14, overflow: 'hidden',
+  },
+  pitchHalfLine: {
+    position: 'absolute', left: 0, right: 0, top: '50%',
+    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.10)',
+  },
+  pitchCircle: {
+    position: 'absolute', alignSelf: 'center', top: '50%',
+    width: 64, height: 64, marginTop: -32, borderRadius: 32,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
+  },
+  pitchRow: {
+    flexDirection: 'row', justifyContent: 'space-around',
+    alignSelf: 'center',
+  },
+  pitchPlayer: { alignItems: 'center', width: 58 },
+  shirt: {
+    width: 30, height: 30, borderRadius: 15, backgroundColor: COLORS.cardElevated,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  shirtNumText: { color: COLORS.volt, fontSize: 11, fontWeight: '800' },
+  pitchName: {
+    color: COLORS.text, fontSize: 9, fontWeight: '600',
+    marginTop: 3, textAlign: 'center',
+  },
+
   container: {
     flex: 1,
     backgroundColor: COLORS.bg,

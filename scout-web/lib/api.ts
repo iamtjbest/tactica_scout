@@ -20,10 +20,23 @@ export type LeagueMatches = {
   league_id?: number | null;
   league: string;
   matches: MatchSummary[];
+  /** "local" marks a competition run in Scout Editor. It groups in the
+   *  feed exactly like a BSD league; this only changes where a tap goes
+   *  and whether the heading links to a BSD league page. */
+  source?: "local";
+  tournament_id?: string;
 };
 
 export type MatchSummary = {
-  event_id: number | null;
+  /** BSD event id (number) or, for a local competition, the fixture
+   *  uuid (string). The `source` field says which. */
+  event_id: number | string | null;
+  /** "local" for a competition run in Scout Editor; absent for BSD. */
+  source?: "local";
+  /** Set only when source is "local", for routing to its match page. */
+  tournament_id?: string;
+  home_crest?: string | null;
+  away_crest?: string | null;
   home_team: string;
   home_team_id?: number | null;
   away_team: string;
@@ -538,5 +551,244 @@ export type MatchFacts = {
 export async function getMatchFacts(eventId: number): Promise<MatchFacts> {
   const res = await fetch(`${API_BASE}/api/matches/${eventId}/facts`, { cache: "no-store" });
   if (!res.ok) throw new Error(`match facts failed: ${res.status}`);
+  return res.json();
+}
+
+// ── Crowd ratings & Man of the Match ─────────────────────────────────
+// Works for BSD matches and for local tournaments run in the editor.
+// `source` is the discriminator: 'bsd' match refs are the numeric event
+// id, 'local' ones are the fixture uuid.
+
+export type RatingSource = "bsd" | "local";
+
+export type RatingWindow = {
+  open: boolean;
+  reason: string | null;
+  opens_at_minute?: number;
+  closes_at?: string | null;
+};
+
+export type PlayerRating = {
+  player_ref: string;
+  votes: number;
+  /** Withheld until `min_votes` people have rated, so one person can't
+   *  publish a number against a named player on their own. */
+  average: number | null;
+  enough_votes: boolean;
+};
+
+export type MatchRatings = {
+  source: RatingSource;
+  match_ref: string;
+  window: RatingWindow;
+  min_votes: number;
+  players: PlayerRating[];
+  motm: {
+    total_votes: number;
+    leaders: { player_ref: string; votes: number; share: number }[];
+  };
+};
+
+export type MyVotes = {
+  ratings: Record<string, number>;
+  motm: string | null;
+};
+
+export async function getMatchRatings(
+  source: RatingSource, matchRef: string | number
+): Promise<MatchRatings> {
+  const res = await fetch(`${API_BASE}/api/ratings/${source}/${matchRef}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(await parseErr(res, `ratings failed: ${res.status}`));
+  return res.json();
+}
+
+export async function getMyVotes(
+  source: RatingSource, matchRef: string | number
+): Promise<MyVotes> {
+  const res = await fetch(`${API_BASE}/api/ratings/${source}/${matchRef}/mine`, {
+    cache: "no-store",
+    headers: { ...(await authHeaders()) },
+  });
+  if (!res.ok) throw new Error(await parseErr(res, `my votes failed: ${res.status}`));
+  return res.json();
+}
+
+export async function ratePlayer(
+  source: RatingSource, matchRef: string | number, playerRef: string | number, score: number
+): Promise<unknown> {
+  const res = await fetch(
+    `${API_BASE}/api/ratings/${source}/${matchRef}/players/${playerRef}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+      body: JSON.stringify({ score }),
+    }
+  );
+  if (!res.ok) throw new Error(await parseErr(res, `rating failed: ${res.status}`));
+  return res.json();
+}
+
+export async function voteMotm(
+  source: RatingSource, matchRef: string | number, playerRef: string | number
+): Promise<unknown> {
+  const res = await fetch(`${API_BASE}/api/ratings/${source}/${matchRef}/motm`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ player_ref: String(playerRef) }),
+  });
+  if (!res.ok) throw new Error(await parseErr(res, `MOTM vote failed: ${res.status}`));
+  return res.json();
+}
+
+// ── Local tournaments ────────────────────────────────────────────────
+// Competitions run in Scout Editor and approved for publication. Served
+// by tournaments_public.py, which only ever returns approved ones.
+
+export type TournamentSummary = {
+  id: string;
+  name: string;
+  level: string;
+  gender: string;
+  country: string;
+  start_date: string;
+  end_date: string;
+  format: "league" | "knockout" | "groups_knockout";
+  organizing_body: string;
+};
+
+export type TournamentTeam = {
+  team_id: string;
+  club_id: string | null;
+  name: string;
+  short_name: string | null;
+  crest_url: string | null;
+  group_name: string | null;
+};
+
+export type TournamentFixture = {
+  id: string;
+  round: string | null;
+  group_name: string | null;
+  kickoff_at: string;
+  venue: string | null;
+  status: string;
+  home_team: string | null;
+  home_crest: string | null;
+  home_team_id: string;
+  away_team: string | null;
+  away_crest: string | null;
+  away_team_id: string;
+  home_score: number | null;
+  away_score: number | null;
+};
+
+export type TournamentStanding = {
+  team_id: string;
+  name: string;
+  short_name: string | null;
+  crest_url: string | null;
+  group_name: string | null;
+  played: number; won: number; drawn: number; lost: number;
+  goals_for: number; goals_against: number; goal_difference: number;
+  points: number; form: string[]; position: number;
+};
+
+export type TournamentDetail = {
+  tournament: TournamentSummary & { tiebreakers?: string[] | null };
+  teams: TournamentTeam[];
+  fixtures: TournamentFixture[];
+  standings: TournamentStanding[] | null;
+  group_tables: Record<string, TournamentStanding[]> | null;
+  tiebreakers_applied: string[];
+  points_rules?: { win: number; draw: number; loss: number };
+};
+
+export type TournamentMatchEvent = {
+  id: string;
+  type: string;
+  minute: number | null;
+  tournament_team_id: string;
+  side: "home" | "away";
+  players: { id: string; first_name: string; last_name: string } | null;
+};
+
+export type TournamentSheetPlayer = {
+  player_id: string;
+  name: string;
+  shirt_number: number | null;
+  position: string | null;
+};
+
+export type TournamentSheet = {
+  formation: string | null;
+  starters: TournamentSheetPlayer[];
+  substitutes: TournamentSheetPlayer[];
+};
+
+export type TournamentMatch = {
+  fixture: TournamentFixture & { tournament_id: string };
+  /** The team sheet the organiser entered. Empty arrays when they
+   *  haven't entered one yet; `lineup_status` says which. */
+  lineups: { home: TournamentSheet; away: TournamentSheet };
+  lineup_status: "confirmed" | "unavailable";
+  events: TournamentMatchEvent[];
+};
+
+export async function getTournaments(
+  opts: { country?: string; level?: string } = {}
+): Promise<{ count: number; tournaments: TournamentSummary[] }> {
+  const q = new URLSearchParams();
+  if (opts.country) q.set("country", opts.country);
+  if (opts.level) q.set("level", opts.level);
+  const qs = q.toString();
+  const res = await fetch(`${API_BASE}/api/tournaments${qs ? `?${qs}` : ""}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await parseErr(res, `tournaments failed: ${res.status}`));
+  return res.json();
+}
+
+export async function getTournament(id: string): Promise<TournamentDetail> {
+  const res = await fetch(`${API_BASE}/api/tournaments/${id}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(await parseErr(res, `tournament failed: ${res.status}`));
+  return res.json();
+}
+
+export async function getTournamentMatch(
+  tournamentId: string, fixtureId: string
+): Promise<TournamentMatch> {
+  const res = await fetch(
+    `${API_BASE}/api/tournaments/${tournamentId}/fixtures/${fixtureId}`,
+    { cache: "no-store" }
+  );
+  if (!res.ok) throw new Error(await parseErr(res, `fixture failed: ${res.status}`));
+  return res.json();
+}
+
+export type TournamentPlayer = {
+  player: {
+    id: string; name: string; first_name: string | null; last_name: string | null;
+    position: string | null; photo_url: string | null;
+    nationality: string | null; shirt_number: number | null;
+  };
+  team: {
+    team_id: string; name: string; short_name: string | null;
+    crest_url: string | null; group_name: string | null;
+  };
+  tournament_id: string;
+  stats: {
+    appearances: number; starts: number; goals: number;
+    assists: number; yellow_cards: number; red_cards: number;
+  };
+};
+
+export async function getTournamentPlayer(
+  tournamentId: string, playerId: string
+): Promise<TournamentPlayer> {
+  const res = await fetch(
+    `${API_BASE}/api/tournaments/${tournamentId}/players/${playerId}`,
+    { cache: "no-store" }
+  );
+  if (!res.ok) throw new Error(await parseErr(res, `player failed: ${res.status}`));
   return res.json();
 }

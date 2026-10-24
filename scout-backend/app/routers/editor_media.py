@@ -15,7 +15,6 @@ first upload.
 Crests are small on purpose. A 2 MB PNG of a department badge costs a
 student on mobile data every single time a fixture list renders.
 """
-import imghdr
 import os
 import uuid
 
@@ -40,15 +39,33 @@ EXT = {"png": "png", "jpeg": "jpg", "gif": "gif", "webp": "webp"}
 
 
 def _sniff(data: bytes) -> str | None:
-    """What this file actually is.
+    """What this file actually is, from its magic bytes.
 
-    imghdr reads magic bytes. webp predates imghdr's knowledge of it in
-    some versions, so it's checked by hand: RIFF....WEBP.
+    Hand-rolled rather than imghdr, which was removed from the standard
+    library in Python 3.13. It was imported at module level, so on 3.13
+    this module failed to import and took the whole app down at boot,
+    not just crest upload.
+
+    Only the four formats in ALLOWED are detected. Anything else is
+    None and gets the same rejection as a text file, which is what we
+    want: a BMP or an SVG is not something to serve as a crest either.
+
+    The JPEG test is the FF D8 FF start-of-image marker rather than
+    imghdr's JFIF/Exif check, which rejected valid JPEGs from encoders
+    that write neither. A phone photo with its Exif stripped is a real
+    case and used to fail.
     """
-    kind = imghdr.what(None, h=data)
-    if kind:
-        return kind
-    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+    if len(data) < 12:
+        return None
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "jpeg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    # RIFF....WEBP. The four length bytes in between are not fixed, and
+    # checking only "RIFF" would let a WAV through as an image.
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "webp"
     return None
 
@@ -60,8 +77,10 @@ def _validated(data: bytes) -> str:
     if len(data) > MAX_BYTES:
         raise HTTPException(
             status_code=413,
+            # Rounded up, so a file one byte over doesn't report the
+            # same number as the limit it just broke.
             detail=f"Image must be under {MAX_BYTES // 1000} KB. That one is "
-                   f"{len(data) // 1000} KB.",
+                   f"{-(-len(data) // 1000)} KB.",
         )
     kind = _sniff(data)
     if kind not in ALLOWED:

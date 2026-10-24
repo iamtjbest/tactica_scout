@@ -31,7 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers import (
     live, matches, players, compare, leagues, news, me, teams, search, admin,
     editor, editor_fixtures, editor_review, tournaments_public, billing,
-    editor_media, editor_members, editor_structure, editor_home,
+    editor_media, editor_members, editor_structure, ratings, editor_lineups, editor_home,
 )
 
 app = FastAPI(
@@ -80,6 +80,8 @@ app.include_router(editor_media.router,      prefix="/api")
 app.include_router(editor_members.router,    prefix="/api")
 app.include_router(editor_structure.router,  prefix="/api")
 app.include_router(editor_home.router,       prefix="/api")
+app.include_router(ratings.router,          prefix="/api")
+app.include_router(editor_lineups.router,    prefix="/api")
 
 
 @app.get("/api/health")

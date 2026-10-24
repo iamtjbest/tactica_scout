@@ -26,8 +26,12 @@ export const MatchCard: React.FC<MatchCardProps> = ({
     match.status?.toLowerCase() === 'ft' ||
     match.status?.toLowerCase() === 'ended';
 
-  const homeLogo = teamLogoUrl(match.home_team_id);
-  const awayLogo = teamLogoUrl(match.away_team_id);
+  // A local competition's team ids are our own uuids, not BSD team ids,
+  // so BSD's badge CDN has no art for them and would always 404. Use
+  // the crest the organiser uploaded instead.
+  const isLocal = match.source === 'local';
+  const homeLogo = isLocal ? match.home_crest ?? null : teamLogoUrl(match.home_team_id);
+  const awayLogo = isLocal ? match.away_crest ?? null : teamLogoUrl(match.away_team_id);
 
   return (
     <TouchableOpacity

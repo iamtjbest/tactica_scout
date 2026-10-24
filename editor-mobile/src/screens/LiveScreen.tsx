@@ -3,6 +3,7 @@ import {
   View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
+import TeamSheet from "../components/TeamSheet";
 import { COLORS } from "../theme";
 import {
   getTournament, setScore, listEvents, addEvent, deleteEvent,
@@ -38,6 +39,9 @@ export default function LiveScreen({ route }: any) {
   const [minute, setMinute] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Score and events first: that is what someone at the pitch needs in
+  // the second after a goal. The sheet is filled in before kickoff.
+  const [pane, setPane] = useState<"match" | "sheet">("match");
 
   const load = useCallback(() => {
     getTournament(tournamentId).then((d) => {
@@ -88,6 +92,25 @@ export default function LiveScreen({ route }: any) {
 
   return (
     <ScrollView style={s.wrap} contentContainerStyle={{ padding: 16, gap: 12 }}>
+      <View style={s.paneTabs}>
+        {([["match", "Score & events"], ["sheet", "Team sheet"]] as const).map(([k, label]) => (
+          <TouchableOpacity key={k} onPress={() => setPane(k)}
+                            style={[s.panePill, { flex: 1 }, pane === k && s.panePillOn]}>
+            <Text style={[s.panePillText, pane === k && { color: COLORS.volt }]}>
+              {label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {pane === "sheet" ? (
+        <TeamSheet
+          fixtureId={fixtureId}
+          homeName={name(fx.home_team_id)}
+          awayName={name(fx.away_team_id)}
+        />
+      ) : (
+      <>
       <View style={s.card}>
         <View style={s.board}>
           <Side label={name(fx.home_team_id)} score={home} busy={busy}
@@ -168,6 +191,8 @@ export default function LiveScreen({ route }: any) {
           </View>
         ))}
       </View>
+      </>
+      )}
     </ScrollView>
   );
 }
@@ -192,6 +217,15 @@ function Side({ label, score, busy, onUp, onDown }: {
 }
 
 const s = StyleSheet.create({
+  paneTabs: { flexDirection: "row", gap: 6 },
+  panePill: {
+    paddingVertical: 9, borderRadius: 999, borderWidth: 1,
+    borderColor: COLORS.cardBorder, backgroundColor: COLORS.card,
+    alignItems: "center",
+  },
+  panePillOn: { borderColor: COLORS.cardBorderActive, backgroundColor: COLORS.voltMuted },
+  panePillText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: "700" },
+
   wrap: { flex: 1, backgroundColor: COLORS.bg },
   card: {
     backgroundColor: COLORS.card, borderRadius: 12, padding: 14,

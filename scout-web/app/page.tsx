@@ -158,7 +158,19 @@ export default function HomePage() {
       {visibleLeagues.map((lg) => (
         <div key={lg.league} className="space-y-2">
           <div className="flex items-center justify-between group">
-            {lg.league_id ? (
+            {/* A local competition's heading opens its own page, the
+                same way a BSD league heading opens that league. */}
+            {lg.source === "local" && lg.tournament_id ? (
+              <a href={`/tournament/${lg.tournament_id}`}
+                 className="section-label hover:text-volt2 transition-colors cursor-pointer
+                            block py-1 flex items-center gap-2">
+                {lg.league}
+                <span className="font-mono text-[9px] text-cyan border border-cyan/30
+                                 rounded px-1 py-px tracking-normal">
+                  LOCAL
+                </span>
+              </a>
+            ) : lg.league_id ? (
               <a href={`/league/${lg.league_id}`} className="section-label hover:text-volt2 transition-colors cursor-pointer block py-1">
                 {lg.league}
               </a>
@@ -180,7 +192,7 @@ export default function HomePage() {
           {!collapsedLeagues[lg.league] && (
             <div className="space-y-2">
               {lg.matches.map((m, i) => (
-                <MatchCard key={m.event_id ?? `${lg.league}-${i}`} match={m} />
+                <MatchCard key={String(m.event_id ?? `${lg.league}-${i}`)} match={m} />
               ))}
             </div>
           )}

@@ -7,11 +7,12 @@ import Link from "next/link";
 import { getMatchDetail, getMatchFacts, type MatchFacts, playerImageUrl, type MatchDetail, type TeamFormResult, BSD_IMG_BASE } from "@/lib/api";
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
-type Tab = "overview" | "timeline" | "lineups" | "h2h" | "stats" | "facts";
+type Tab = "overview" | "timeline" | "lineups" | "ratings" | "h2h" | "stats" | "facts";
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "timeline", label: "Timeline" },
   { id: "lineups",  label: "Lineups" },
+  { id: "ratings",  label: "Ratings" },
   { id: "h2h",      label: "H2H" },
   { id: "stats",    label: "Stats" },
   { id: "facts",    label: "Facts" },
@@ -123,6 +124,7 @@ export default function MatchDetailPage() {
       {tab === "overview" && <OverviewTab match={match} />}
       {tab === "timeline" && <TimelineTab match={match} />}
       {tab === "lineups" && <LineupsTab match={match} />}
+      {tab === "ratings" && <RatingsTab match={match} />}
       {tab === "h2h" && <H2HTab match={match} />}
       {tab === "stats" && <StatsTab match={match} />}
       {tab === "facts" && <FactsTab match={match} />}
@@ -445,12 +447,15 @@ function PlayerToken({ player }: { player: any }) {
   const name   = player.short_name ?? player.name ?? "Unknown";
   const number = player.number ?? player.shirt_number ?? player.jersey_number ?? null;
 
-  // Not every lineup entry carries an id, so fall back to a plain div
-  // rather than rendering a link that goes nowhere.
+  // playerId(), not player.id: BSD returns the id as `player_id` on
+  // lineup entries, so testing `player.id` meant the avatar resolved
+  // (it uses the helper) while the link silently never rendered. That
+  // is why tapping a player on the pitch did nothing.
+  const pid = playerId(player);
   const Wrapper = ({ children }: { children: React.ReactNode }) =>
-    player.id ? (
+    pid != null ? (
       <Link
-        href={`/player/${player.id}`}
+        href={`/player/${pid}`}
         className="flex flex-col items-center w-14 shrink-0 hover:opacity-80 transition-opacity"
       >
         {children}
@@ -490,12 +495,13 @@ function SubRow({ player }: { player: any }) {
     </>
   );
 
-  if (!player.id) {
+  const pid = playerId(player);
+  if (pid == null) {
     return <div className="flex items-center gap-3 py-1.5">{inner}</div>;
   }
   return (
     <Link
-      href={`/player/${player.id}`}
+      href={`/player/${pid}`}
       className="flex items-center gap-3 py-1.5 -mx-2 px-2 rounded hover:bg-bg2/60 transition-colors"
     >
       {inner}
@@ -503,37 +509,100 @@ function SubRow({ player }: { player: any }) {
   );
 }
 
-// Groups by position into GK/DEF/MID/FWD rows and renders them as a
-// pitch, goalkeeper at the bottom, attack at the top -- this reads off
-// each player's own position string rather than trying to slot an
-// exact count per the formation label, since a formation string like
-// "4-2-3-1" is just a display label here, not something every player
-// object is guaranteed to line up against neatly.
-function PitchLineup({ players }: { players: any[] }) {
-  const buckets: Record<"GK" | "DEF" | "MID" | "FWD", any[]> = { GK: [], DEF: [], MID: [], FWD: [] };
-  for (const p of players) {
-    const pos = String(p.position ?? "").toUpperCase();
-    if (pos.startsWith("G")) buckets.GK.push(p);
-    else if (pos.startsWith("D")) buckets.DEF.push(p);
-    else if (pos.startsWith("M")) buckets.MID.push(p);
-    else buckets.FWD.push(p);
+/** Outfield row sizes from a formation label: "4-2-3-1" or "4231". */
+function parseFormation(formation: unknown): number[] | null {
+  const raw = String(formation ?? "").trim();
+  if (!raw) return null;
+
+  const parts = raw.includes("-")
+    ? raw.split("-")
+    : raw.split("");               // "4231" is as common as "4-2-3-1"
+
+  const rows = parts.map((x) => Number(x.trim())).filter((n) => Number.isFinite(n) && n > 0);
+  if (rows.length < 2) return null;
+  // Outfield only; the keeper is added separately.
+  if (rows.reduce((a, b) => a + b, 0) !== 10) return null;
+  return rows;
+}
+
+const POS_RANK = (p: any) => {
+  const pos = String(p?.position ?? "").toUpperCase();
+  if (pos.startsWith("G")) return 0;
+  if (pos.startsWith("D")) return 1;
+  if (pos.startsWith("M")) return 2;
+  return 3;
+};
+
+/**
+ * Lay the XI out on a pitch.
+ *
+ * The formation label drives the rows. Bucketing by each player's
+ * position string instead is what made a 4-2-3-1 render as a 4-5-1:
+ * the two holders and the three attacking midfielders all carry
+ * position "M", so they collapsed into a single row of five.
+ *
+ * Falls back to position buckets when the formation is missing or
+ * doesn't add up to ten outfield players, so a malformed label
+ * degrades to the old behaviour rather than dropping anyone.
+ */
+function buildRows(players: any[], formation: unknown): any[][] {
+  const ordered = players.slice().sort((a, b) => POS_RANK(a) - POS_RANK(b));
+  const shape = parseFormation(formation);
+
+  if (shape && ordered.length === 11) {
+    const rows: any[][] = [[ordered[0]]];          // keeper
+    let i = 1;
+    for (const n of shape) {
+      rows.push(ordered.slice(i, i + n));
+      i += n;
+    }
+    return rows;
   }
-  const rows = (["GK", "DEF", "MID", "FWD"] as const)
-    .map((key) => ({ key, players: buckets[key] }))
-    .filter((r) => r.players.length > 0);
+
+  const buckets: any[][] = [[], [], [], []];
+  for (const p of ordered) buckets[POS_RANK(p)].push(p);
+  return buckets.filter((r) => r.length > 0);
+}
+
+/**
+ * How wide a row sits.
+ *
+ * Rows were previously all full width with justify-around, which pushes
+ * a two-man pivot out to the touchlines: the holding midfielders ended
+ * up standing where the full-backs should be. Narrow rows stay central
+ * and only a back four or a midfield five spans the full width.
+ */
+const ROW_WIDTH: Record<number, string> = {
+  1: "42%", 2: "58%", 3: "84%", 4: "100%", 5: "100%",
+};
+
+function PitchLineup({ players, formation }: { players: any[]; formation?: unknown }) {
+  const rows = buildRows(players, formation);
 
   return (
     <div
-      className="relative bg-[#0F1A14] border border-bd rounded-xl overflow-hidden mx-auto w-full max-w-[320px]"
+      className="relative bg-[#0F1A14] border border-bd rounded-xl overflow-hidden mx-auto w-full max-w-[340px]"
       style={{ aspectRatio: "3 / 4" }}
     >
+      {/* markings */}
       <div className="absolute left-0 right-0 top-1/2 border-t border-white/10" />
-      <div className="absolute left-1/2 top-1/2 w-14 h-14 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/10" />
-      <div className="absolute inset-0 flex flex-col-reverse justify-around py-4 px-1">
-        {rows.map((row) => (
-          <div key={row.key} className="flex justify-around items-start">
-            {row.players.map((p: any, i: number) => (
-              <PlayerToken key={i} player={p} />
+      <div className="absolute left-1/2 top-1/2 w-16 h-16 -translate-x-1/2 -translate-y-1/2
+                      rounded-full border border-white/10" />
+      <div className="absolute left-1/2 bottom-0 w-[55%] h-[16%] -translate-x-1/2
+                      border-x border-t border-white/10" />
+      <div className="absolute left-1/2 top-0 w-[55%] h-[16%] -translate-x-1/2
+                      border-x border-b border-white/10" />
+
+      {/* Keeper at the bottom, attack at the top. */}
+      <div className="absolute inset-0 flex flex-col-reverse justify-around py-3">
+        {rows.map((row, i) => (
+          <div
+            key={i}
+            className="flex justify-around items-start mx-auto"
+            style={{ width: ROW_WIDTH[row.length] ?? "100%" }}
+          >
+            {row.map((p: any, j: number) => (
+              <PlayerToken key={playerId(p) ?? `${i}-${j}`} player={p} />
             ))}
           </div>
         ))}
@@ -579,7 +648,7 @@ function LineupsTab({ match }: { match: MatchDetail }) {
 
       <p className="text-center text-mt text-xs font-mono">{formation ?? "—"}</p>
 
-      <PitchLineup players={starters} />
+      <PitchLineup players={starters} formation={formation} />
 
       {coach && (
         <p className="text-center text-mt text-xs">

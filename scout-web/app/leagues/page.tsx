@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { getLeagues, getStandings, type LeagueOption, type StandingsRow, type StandingsGroup } from "@/lib/api";
 import clsx from "clsx";
+import Link from "next/link";
 
 function StandingsTable({ rows }: { rows: StandingsRow[] }) {
   return (
@@ -78,6 +79,20 @@ export default function LeaguesPage() {
         <h1 className="font-display font-black text-2xl text-white">Leagues</h1>
         <p className="text-mt text-sm mt-1">Tables for every competition we track.</p>
       </div>
+
+      {/* Local competitions are the thing Scout has that the big
+          livescore apps don't, so they get a door on this page rather
+          than being buried. */}
+      <Link
+        href="/tournaments"
+        className="card block hover:border-volt/40 transition-colors"
+      >
+        <p className="text-white font-semibold">Local competitions</p>
+        <p className="text-mt text-sm mt-1">
+          University, school and community football. Tables, fixtures and player
+          ratings, same as the leagues above.
+        </p>
+      </Link>
 
       {loadingList && <p className="text-mt text-sm">Loading leagues...</p>}
 

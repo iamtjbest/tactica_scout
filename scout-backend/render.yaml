@@ -15,8 +15,13 @@ services:
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.8
+      # PYTHON_VERSION is deliberately NOT set here. On Render it
+      # outranks every other method, so a value here would pin the
+      # patch release forever and silently override .python-version.
+      # The version lives in scout-backend/.python-version instead,
+      # which names the minor series and lets Render pick up security
+      # patches on its own. pyenv reads the same file, so local dev
+      # matches production.
 
       # Sports data
       - key: BSD_API_KEY

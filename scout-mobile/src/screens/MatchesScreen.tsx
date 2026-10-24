@@ -221,7 +221,8 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
         <FlatList
           contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 30 }}
           data={filteredLeagues}
-          keyExtractor={(item, index) => `league-${item.league_id || item.league || index}`}
+          keyExtractor={(item, index) =>
+            `league-${item.tournament_id || item.league_id || item.league || index}`}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -235,12 +236,24 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
               {/* League Header */}
               <TouchableOpacity
                 style={styles.leagueHeader}
-                activeOpacity={item.league_id ? 0.7 : 1}
+                activeOpacity={item.league_id || item.tournament_id ? 0.7 : 1}
                 onPress={() => {
+                  if (item.source === 'local' && item.tournament_id) {
+                    navigation.navigate('TournamentDetail', {
+                      tournamentId: item.tournament_id,
+                      tournamentName: item.league,
+                    });
+                    return;
+                  }
                   if (item.league_id) {
-                    navigation.navigate('LeagueDetail', {
-                      leagueId: item.league_id,
-                      leagueName: item.league,
+                    // There is no 'LeagueDetail' route. The Leagues tab is
+                    // the league screen and already accepts these params.
+                    navigation.navigate('MainTabs', {
+                      screen: 'Leagues',
+                      params: {
+                        leagueId: item.league_id,
+                        leagueName: item.league,
+                      },
                     });
                   }
                 }}
@@ -249,7 +262,7 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
                 <Text style={styles.leagueName} numberOfLines={1}>
                   {item.league}
                 </Text>
-                {item.league_id && (
+                {(item.league_id || item.tournament_id) && (
                   <Ionicons name="chevron-forward" size={14} color={COLORS.textDim} style={{ marginLeft: 4 }} />
                 )}
               </TouchableOpacity>
@@ -257,15 +270,23 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
               {/* League Match Cards */}
               {item.matches.map((m, idx) => (
                 <MatchCard
-                  key={`match-${m.event_id || idx}`}
+                  key={`match-${m.event_id ?? idx}`}
                   match={m}
                   onPress={() => {
-                    if (m.event_id) {
-                      navigation.navigate('MatchDetail', {
-                        eventId: m.event_id,
-                        matchSummary: m,
+                    if (!m.event_id) return;
+                    // A local competition's fixture has its own screen:
+                    // its id is our uuid and nothing about it is BSD.
+                    if (m.source === 'local' && m.tournament_id) {
+                      navigation.navigate('TournamentMatch', {
+                        tournamentId: m.tournament_id,
+                        fixtureId: String(m.event_id),
                       });
+                      return;
                     }
+                    navigation.navigate('MatchDetail', {
+                      eventId: m.event_id,
+                      matchSummary: m,
+                    });
                   }}
                 />
               ))}

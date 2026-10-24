@@ -1,3 +1,4 @@
+import { useState } from "react";
 import Link from "next/link";
 import clsx from "clsx";
 import type { MatchSummary } from "@/lib/api";
@@ -19,6 +20,10 @@ function isMatchLive(s: string) {
 }
 
 export default function MatchCard({ match, targetTeamId, showCompetition }: { match: MatchSummary, targetTeamId?: number, showCompetition?: boolean }) {
+  // A local competition's team ids are our own uuids, not BSD team ids.
+  // Linking them to /team/{id} would 404, and BSD's badge CDN has no
+  // art for a university faculty side.
+  const isLocal = match.source === "local";
   const isLive = isMatchLive(match.status || "");
   const isFinished = isMatchFinished(match.status || "");
 
@@ -43,8 +48,13 @@ export default function MatchCard({ match, targetTeamId, showCompetition }: { ma
         <div className="flex-1 min-w-0 space-y-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 overflow-hidden">
-              <img src={`${BSD_IMG_BASE}/img/team/${match.home_team_id}/?sor=true&bg=transparent`} className="w-5 h-5 object-contain" />
-              {match.home_team_id ? (
+              <TeamBadge
+                local={isLocal}
+                crest={match.home_crest}
+                teamId={match.home_team_id}
+                name={match.home_team}
+              />
+              {match.home_team_id && !isLocal ? (
                 <Link href={`/team/${match.home_team_id}`} className="text-white text-sm font-semibold truncate hover:text-volt2 transition-colors">
                   {match.home_team}
                 </Link>
@@ -56,8 +66,13 @@ export default function MatchCard({ match, targetTeamId, showCompetition }: { ma
           </div>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 overflow-hidden">
-              <img src={`${BSD_IMG_BASE}/img/team/${match.away_team_id}/?sor=true&bg=transparent`} className="w-5 h-5 object-contain" />
-              {match.away_team_id ? (
+              <TeamBadge
+                local={isLocal}
+                crest={match.away_crest}
+                teamId={match.away_team_id}
+                name={match.away_team}
+              />
+              {match.away_team_id && !isLocal ? (
                 <Link href={`/team/${match.away_team_id}`} className="text-white text-sm font-semibold truncate hover:text-volt2 transition-colors">
                   {match.away_team}
                 </Link>
@@ -87,35 +102,70 @@ export default function MatchCard({ match, targetTeamId, showCompetition }: { ma
   );
 
   if (match.event_id == null) {
-    return <div className={clsx("opacity-80")}>{body}</div>;
+    return <div className="opacity-80">{body}</div>;
   }
 
-  // To prevent the entire card link from catching clicks on the team links,
-  // we'd need to either make the body not a Link but have a programmatic click,
-  // or put relative positioning. A common trick is to make the card relative,
-  // and put a Next Link inside that covers it using ::before, but here we can
-  // just put onClick on the card container that navigates to the match, and
-  // stop propagation on the team links. But since team links are actual <a> tags, 
-  // clicking them inside a wrapper that has onClick won't trigger the wrapper
-  // if we stop propagation. Next.js <Link> around <a> tags throws hydration errors.
-  // It's cleaner to just not make the entire card a link, but instead make the 
-  // score section the link to the match! Or make the card a programmatic router.push.
-  
-  // Wait, right now the entire card is a Link. If we put Links inside it, HTML forbids <a> inside <a>!
-  // I will just return the body directly, but change `body` to be clickable via a custom hook or onClick.
-  // Actually, I'll just change the body to have a "View Match" link at the right side if hovered.
-  
-  // Let's use router.push on the card.
+  // Where a tap goes. A local competition's fixture lives on its own
+  // page under /tournament/..., not /match/..., because its id is a
+  // fixture uuid and nothing about it comes from BSD.
+  const href =
+    match.source === "local" && match.tournament_id
+      ? `/tournament/${match.tournament_id}/match/${match.event_id}`
+      : `/match/${match.event_id}`;
+
+  // The card can't be a <Link> because the team names inside it are
+  // links too, and HTML forbids an anchor inside an anchor. So the card
+  // navigates on click and lets a real anchor win if one was hit.
   return (
-    <div 
+    <div
       className="cursor-pointer"
+      role="link"
+      tabIndex={0}
       onClick={(e) => {
-        // If clicking on an anchor tag, let it go to the team page
-        if ((e.target as HTMLElement).closest('a')) return;
-        window.location.href = `/match/${match.event_id}`;
+        if ((e.target as HTMLElement).closest("a")) return;
+        window.location.href = href;
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          window.location.href = href;
+        }
       }}
     >
       {body}
     </div>
   );
+}
+
+/**
+ * A team's badge.
+ *
+ * BSD serves club art from an id, which a local competition doesn't
+ * have, so a local side falls back to its uploaded crest and then to
+ * initials rather than requesting a BSD image that will always 404.
+ */
+function TeamBadge({ local, crest, teamId, name }: {
+  local: boolean;
+  crest?: string | null;
+  teamId?: number | string | null;
+  name?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const src = local ? crest : teamId != null
+    ? `${BSD_IMG_BASE}/img/team/${teamId}/?sor=true&bg=transparent`
+    : null;
+
+  if (!src || failed) {
+    const initials = (name || "?").split(/\s+/).filter(Boolean).slice(0, 2)
+      .map((w) => w[0]!.toUpperCase()).join("");
+    return (
+      <span className="w-5 h-5 rounded-full bg-sur2 border border-bd text-mt
+                       text-[8px] font-bold flex items-center justify-center shrink-0">
+        {initials}
+      </span>
+    );
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt="" onError={() => setFailed(true)}
+              className="w-5 h-5 object-contain shrink-0" />;
 }

@@ -557,3 +557,53 @@ export type Inbox = {
 
 export const getDashboard = () => req<Dashboard>("/api/editor/dashboard");
 export const getInbox = () => req<Inbox>("/api/editor/inbox");
+
+// ── team sheets ───────────────────────────────────────────────────────
+// Who actually played in a fixture. Entered by the organiser or a match
+// editor; it becomes the rateable list in Scout.
+
+export type SheetEntry = {
+  id: string;
+  player_id: string;
+  tournament_team_id: string;
+  role: "starter" | "substitute";
+  shirt_number: number | null;
+  position: string | null;
+  players: { id: string; first_name: string; last_name: string } | null;
+};
+
+export type SquadEntry = {
+  id: string;
+  jersey_number: number | null;
+  position: string | null;
+  players: { id: string; first_name: string; last_name: string } | null;
+};
+
+export type SideSheet = {
+  tournament_team_id: string;
+  formation: string | null;
+  starters: SheetEntry[];
+  substitutes: SheetEntry[];
+  squad: SquadEntry[];
+};
+
+export type FixtureLineup = {
+  fixture: Fixture;
+  lineups: { home: SideSheet; away: SideSheet };
+};
+
+export const getLineup = (fixtureId: string) =>
+  req<FixtureLineup>(`/api/editor/fixtures/${fixtureId}/lineup`);
+
+export const setLineup = (fixtureId: string, body: {
+  tournament_team_id: string;
+  formation?: string | null;
+  starters: { player_id: string; shirt_number?: number | null; position?: string | null }[];
+  substitutes: { player_id: string; shirt_number?: number | null; position?: string | null }[];
+}) =>
+  req<FixtureLineup>(`/api/editor/fixtures/${fixtureId}/lineup`, {
+    method: "PUT", body: JSON.stringify(body),
+  });
+
+export const clearLineup = (fixtureId: string, teamId: string) =>
+  req<void>(`/api/editor/fixtures/${fixtureId}/lineup/${teamId}`, { method: "DELETE" });

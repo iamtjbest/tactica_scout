@@ -19,6 +19,9 @@ import { CompareScreen } from './src/screens/CompareScreen';
 import { LeaguesScreen } from './src/screens/LeaguesScreen';
 import { NewsScreen } from './src/screens/NewsScreen';
 import { MatchDetailScreen } from './src/screens/MatchDetailScreen';
+import { TournamentDetailScreen } from './src/screens/TournamentDetailScreen';
+import { TournamentMatchScreen } from './src/screens/TournamentMatchScreen';
+import { TournamentPlayerScreen } from './src/screens/TournamentPlayerScreen';
 import { TeamDetailScreen } from './src/screens/TeamDetailScreen';
 import { TeamFixturesScreen } from './src/screens/TeamFixturesScreen';
 import { PlayerDetailScreen } from './src/screens/PlayerDetailScreen';
@@ -36,6 +39,11 @@ export type RootStackParamList = {
   TeamDetail: { teamId: number; teamName: string };
   TeamFixtures: { teamId: number; teamName: string; filter: 'all' | 'upcoming' };
   PlayerDetail: { playerId: number; playerName: string };
+  // Editor-hosted competitions. Both ids are uuids, not BSD integers,
+  // so they are strings and must never be fed to the BSD routes above.
+  TournamentDetail: { tournamentId: string; tournamentName?: string };
+  TournamentMatch: { tournamentId: string; fixtureId: string };
+  TournamentPlayer: { tournamentId: string; playerId: string; playerName?: string };
   Profile: undefined;
   SignIn: undefined;
   SignUp: undefined;
@@ -175,6 +183,28 @@ export default function App() {
               />
             )}
           </Stack.Screen>
+
+          {/* Local competitions run through Scout Editor. They appear in
+              the normal match list grouped like any other league; these
+              are the screens a tap lands on. */}
+          <Stack.Screen
+            name="TournamentDetail"
+            component={TournamentDetailScreen}
+            options={{ headerShown: true, title: 'Competition',
+                       animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="TournamentMatch"
+            component={TournamentMatchScreen}
+            options={{ headerShown: true, title: 'Match',
+                       animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="TournamentPlayer"
+            component={TournamentPlayerScreen}
+            options={{ headerShown: true, title: 'Player',
+                       animation: 'slide_from_right' }}
+          />
 
           {/* Detail screens */}
           <Stack.Screen
