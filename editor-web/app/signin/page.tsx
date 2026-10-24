@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import StadiumArt from "@/components/StadiumArt";
 import { signInWithEmail } from "@/lib/auth";
+import PasswordInput from "@/components/PasswordInput";
 
 /**
  * Split sign-in: form on the left, the visual on the right.
@@ -57,12 +58,11 @@ export default function SignIn() {
               <input type="email" required autoComplete="email" className="input-select mt-1.5"
                      value={email} onChange={(e) => setEmail(e.target.value)} />
             </label>
-            <label className="block">
-              <span className="text-mt text-xs uppercase tracking-wide">Password</span>
-              <input type="password" required autoComplete="current-password"
-                     className="input-select mt-1.5"
-                     value={password} onChange={(e) => setPassword(e.target.value)} />
-            </label>
+            <PasswordInput
+              value={password}
+              onChange={setPassword}
+              autoComplete="current-password"
+            />
 
             {error && (
               <p className="text-red2 text-sm font-semibold bg-red2/10 border border-red2/30

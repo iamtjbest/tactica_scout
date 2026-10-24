@@ -125,13 +125,14 @@ def _readiness(tournament_id: str) -> dict:
         .eq("tournament_id", tournament_id).execute()
     )
 
+    # Proof is the whole gate. Teams and fixtures used to be required
+    # too, from when a competition was built before being submitted.
+    # It is reviewed at creation now, so demanding a squad up front
+    # would mean nobody could ever submit. Their counts are still
+    # returned, because a reviewer wants to see them.
     missing = []
-    if len(teams) < MIN_TEAMS:
-        missing.append(f"at least {MIN_TEAMS} teams (currently {len(teams)})")
-    if not fixtures:
-        missing.append("a fixture list")
     if not proofs:
-        missing.append("at least one proof of legitimacy")
+        missing.append("at least one proof that the competition is real")
 
     return {
         "ready":   not missing,

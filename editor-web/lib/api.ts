@@ -13,13 +13,50 @@ import { authHeaders } from "./auth";
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+/**
+ * The API sleeps when idle and takes up to a minute to wake, during
+ * which fetch rejects outright rather than returning a status. Nobody
+ * should have to refresh six times to get past that, so a network-level
+ * failure is retried here with a widening gap instead of being thrown
+ * at the user.
+ *
+ * Only network failures retry. An HTTP error is a real answer from a
+ * server that is awake, and repeating it would just be slower.
+ * Writes (anything that isn't a GET) are never retried either: a POST
+ * that times out may well have been applied, and sending it again could
+ * duplicate a fixture or an invite.
+ */
+const WAKE_RETRIES = [1000, 2000, 4000, 8000, 15000];
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function fetchAwake(url: string, init: RequestInit): Promise<Response> {
+  const method = (init.method || "GET").toUpperCase();
+  const retryable = method === "GET";
+  let lastErr: unknown;
+
+  for (let attempt = 0; attempt <= (retryable ? WAKE_RETRIES.length : 0); attempt++) {
+    try {
+      return await fetch(url, init);
+    } catch (e) {
+      lastErr = e;
+      if (!retryable || attempt === WAKE_RETRIES.length) break;
+      await sleep(WAKE_RETRIES[attempt]);
+    }
+  }
+  throw new Error(
+    "Can't reach the server right now. It may still be waking up. " +
+    "Give it a moment and try again."
+  );
+}
+
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(await authHeaders()),
     ...((init.headers as Record<string, string>) || {}),
   };
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchAwake(`${API_BASE}${path}`, {
     ...init,
     headers,
     cache: "no-store",
@@ -548,6 +585,12 @@ export type Dashboard = {
 
 export type Inbox = {
   requests: (AccessRequest & { tournament_name: string | null })[];
+  /** Submitted and still with us. Present so an organiser can see that
+   *  something happened, rather than an empty inbox after submitting. */
+  in_review: {
+    tournament_id: string; tournament_name: string;
+    status: string; submitted_at: string | null; message: string;
+  }[];
   decisions: {
     tournament_id: string; tournament_name: string;
     status: string; reviewed_at: string | null; reason: string | null;

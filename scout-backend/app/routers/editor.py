@@ -88,7 +88,15 @@ def _owned_tournament(tournament_id: str, user: dict, need: str = "owner") -> di
 # is exactly the one an organiser most needs to correct -- a club pulls
 # out, a name was spelled wrong, a fixture moves -- and locking it would
 # strand them with a wrong table in front of an audience.
-FROZEN_STATUSES = {"pending"}
+# Everything except an approved competition is read-only. A competition
+# is submitted the moment it is created, so a draft here means "waiting
+# on us", not "still being written". The organiser builds the squad and
+# the fixture list after approval, which is also when the data is worth
+# reviewers' and fans' attention.
+#
+# Proof is the exception and is not gated here: add_proof does its own
+# draft/rejected check, so a rejected competition can still be fixed.
+FROZEN_STATUSES = {"pending", "draft"}
 
 
 def _require_editable(t: dict):
@@ -96,9 +104,9 @@ def _require_editable(t: dict):
         raise HTTPException(
             status_code=409,
             detail=(
-                "This competition is with us for review, so it's locked until "
-                "we've made a decision. You'll be able to edit it again as soon "
-                "as it's approved, or if we send it back."
+                "This competition is under review, so it's locked until we've "
+                "made a decision. Reviews take 7 to 14 days. You'll be able to "
+                "add teams, players and fixtures as soon as it's approved."
             ),
         )
 

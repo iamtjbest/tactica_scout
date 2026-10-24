@@ -97,6 +97,18 @@ function Detail() {
   const [ready, setReady] = useState<Readiness | null>(null);
   const [section, setSection] = useState<Section>("matches");
   const [navOpen, setNavOpen] = useState(false);
+  // Remembered per browser: someone who collapses it means it.
+  const [navCollapsed, setNavCollapsed] = useState(false);
+  useEffect(() => {
+    try {
+      setNavCollapsed(localStorage.getItem("editor.navCollapsed") === "1");
+    } catch { /* private mode, blocked storage: just stay expanded */ }
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem("editor.navCollapsed", navCollapsed ? "1" : "0");
+    } catch { /* not worth failing a render over */ }
+  }, [navCollapsed]);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -115,12 +127,14 @@ function Detail() {
   // The backend attaches the caller's role. A scorer sees the same
   // screens but the controls they can't use aren't drawn.
   const role = (t as any)._role ?? "owner";
-  // Mirrors FROZEN_STATUSES on the backend: review is the only thing
-  // that locks a competition, and it unlocks again whichever way the
-  // decision goes. Hiding the controls is a courtesy; the server
+  // Mirrors FROZEN_STATUSES on the backend: nothing is editable until
+  // it is approved. A competition is submitted the moment it is
+  // created, so draft here means "waiting on us" rather than "still
+  // being written". Hiding the controls is a courtesy; the server
   // refuses the write regardless.
   const editable =
-    t.status !== "pending" && (role === "owner" || role === "editor");
+    (t.status === "approved" || t.status === "rejected") &&
+    (role === "owner" || role === "editor");
 
   // Proof is narrower. It is the evidence a decision was made on, so it
   // is only editable while that decision is still outstanding -- which
@@ -148,8 +162,26 @@ function Detail() {
   return (
     <div className="lg:flex lg:items-start">
       {/* ── competition menu ───────────────────────────────── */}
-      <div className="hidden lg:block w-64 shrink-0 border-r border-bd min-h-screen">
-        {nav}
+      {/* Collapsible: on a laptop the 56px rail plus a 256px menu plus
+          the page's own content leaves very little room for a wide
+          table, so the menu folds away and the choice is remembered. */}
+      <div className={clsx(
+        "hidden lg:block shrink-0 border-r border-bd min-h-screen relative transition-all",
+        navCollapsed ? "w-10" : "w-64"
+      )}>
+        <button
+          type="button"
+          onClick={() => setNavCollapsed((v) => !v)}
+          title={navCollapsed ? "Expand menu" : "Collapse menu"}
+          aria-label={navCollapsed ? "Expand menu" : "Collapse menu"}
+          aria-expanded={!navCollapsed}
+          className="absolute top-3 right-2 z-10 w-6 h-6 rounded-md flex items-center
+                     justify-center text-mt hover:text-white hover:bg-sur2
+                     transition-colors"
+        >
+          {navCollapsed ? "›" : "‹"}
+        </button>
+        {!navCollapsed && nav}
       </div>
 
       {/* phone: the same menu behind a disclosure, so the content
@@ -191,12 +223,15 @@ function Detail() {
           </div>
         )}
 
-        {t.status === "pending" && (
+        {(t.status === "pending" || t.status === "draft") && (
           <div className="card border-cyan/30 mb-6">
-            <p className="text-white text-sm">Locked while we review it.</p>
+            <p className="text-white text-sm">
+              Under review. Locked until we&rsquo;ve made a decision.
+            </p>
             <p className="text-mt text-xs mt-1">
-              What gets reviewed is what gets published, so nothing can change
-              until we decide. It unlocks either way.
+              We get back to every organiser within 7 to 14 days. You&rsquo;ll be
+              emailed as soon as there&rsquo;s a decision, and it&rsquo;ll show in your
+              inbox. Teams, players and fixtures unlock once it&rsquo;s approved.
             </p>
           </div>
         )}
@@ -359,7 +394,6 @@ function TeamsTab({ tid, teams, editable, onChanged }: {
 }) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<any[]>([]);
-  const [group, setGroup] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [openSquad, setOpenSquad] = useState<string | null>(null);
 
@@ -375,7 +409,9 @@ function TeamsTab({ tid, teams, editable, onChanged }: {
 
   const add = async (body: Record<string, unknown>) => {
     setError(null);
-    try { await addTeam(tid, { ...body, group_name: group || null }); setQ(""); onChanged(); }
+    // Groups are set in Format & structure, which is the one place
+    // that knows the competition's shape.
+    try { await addTeam(tid, { ...body, group_name: null }); setQ(""); onChanged(); }
     catch (e: any) { setError(e.message); }
   };
 
@@ -386,8 +422,6 @@ function TeamsTab({ tid, teams, editable, onChanged }: {
           <p className="section-label">Add a team</p>
           <input className="input-select" value={q} onChange={(e) => setQ(e.target.value)}
                  placeholder="Search existing clubs, or type a new name" />
-          <input className="input-select" value={group} onChange={(e) => setGroup(e.target.value)}
-                 placeholder="Group (only for groups + knockout)" />
 
           {hits.length > 0 && (
             <div className="space-y-1">
@@ -402,9 +436,9 @@ function TeamsTab({ tid, teams, editable, onChanged }: {
           )}
 
           {q.trim().length >= 2 && (
-            <button className="text-volt2 text-sm font-semibold"
+            <button type="button" className="btn-volt w-full sm:w-auto"
                     onClick={() => add({ club_name: q.trim() })}>
-              Create &quot;{q.trim()}&quot; as a new club
+              Add &ldquo;{q.trim()}&rdquo; as a new team
             </button>
           )}
           {error && <p className="text-red2 text-sm font-semibold">{error}</p>}
@@ -501,22 +535,34 @@ function Squad({ teamId, editable }: { teamId: string; editable: boolean }) {
       )}
 
       {editable && (
-        <form onSubmit={add} className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <input className="input-select" placeholder="First name" required
-                 value={f.first_name} onChange={(e) => setF({ ...f, first_name: e.target.value })} />
-          <input className="input-select" placeholder="Last name" required
-                 value={f.last_name} onChange={(e) => setF({ ...f, last_name: e.target.value })} />
+        <form onSubmit={add} className="grid grid-cols-2 sm:grid-cols-5 gap-2 items-end">
+          <label className="block">
+            <span className="text-mt text-[11px] uppercase tracking-wide">First name</span>
+            <input className="input-select mt-1" required
+                   value={f.first_name}
+                   onChange={(e) => setF({ ...f, first_name: e.target.value })} />
+          </label>
+          <label className="block">
+            <span className="text-mt text-[11px] uppercase tracking-wide">Last name</span>
+            <input className="input-select mt-1" required
+                   value={f.last_name}
+                   onChange={(e) => setF({ ...f, last_name: e.target.value })} />
+          </label>
           {/* dob is required by the schema on purpose: it's how the same
               student is recognised next season instead of getting a new
               record and losing his career stats. */}
-          <input className="input-select" type="date" required title="Date of birth"
-                 value={f.dob} onChange={(e) => setF({ ...f, dob: e.target.value })} />
-          <div className="flex gap-2">
-            <input className="input-select" placeholder="#" type="number" min={1} max={99}
+          <label className="block">
+            <span className="text-mt text-[11px] uppercase tracking-wide">Date of birth</span>
+            <input className="input-select mt-1" type="date" required
+                   value={f.dob} onChange={(e) => setF({ ...f, dob: e.target.value })} />
+          </label>
+          <label className="block">
+            <span className="text-mt text-[11px] uppercase tracking-wide">Shirt no.</span>
+            <input className="input-select mt-1" type="number" min={1} max={99}
                    value={f.jersey_number}
                    onChange={(e) => setF({ ...f, jersey_number: e.target.value })} />
-            <button className="btn-volt px-3">Add</button>
-          </div>
+          </label>
+          <button className="btn-volt w-full">Add player</button>
         </form>
       )}
       {error && <p className="text-red2 text-xs font-semibold">{error}</p>}

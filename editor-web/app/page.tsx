@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * editor.tactica.com.ng — the public front door.
+ * editor.tacticaengine.com — the public front door.
  *
  * Not the dashboard. The dashboard moved to /competitions, because
  * someone arriving at this domain for the first time has no idea what
@@ -19,9 +19,9 @@ import Link from "next/link";
 import PitchField from "@/components/PitchField";
 import ScoreCardArt from "@/components/ScoreCardArt";
 
-const SCOUT = "https://scout.tactica.com.ng";
-const TACTICA = "https://tactica.com.ng";
-const CONTACT = "hello@tactica.com.ng";
+const SCOUT = "https://scout.tacticaengine.com";
+const TACTICA = "https://tacticaengine.com";
+const CONTACT = "hello@tacticaengine.com";
 
 /* What the thing actually does. Written as outcomes, because "fixture
    generation" is a feature and "you stop keeping the table in a
@@ -244,7 +244,7 @@ export default function Landing() {
               Open Scout
               <span aria-hidden="true">→</span>
             </a>
-            <p className="mt-3 font-mono text-[11px] text-mt2">scout.tactica.com.ng</p>
+            <p className="mt-3 font-mono text-[11px] text-mt2">scout.tacticaengine.com</p>
           </div>
 
           {/* phone, drawn */}
@@ -365,7 +365,7 @@ export default function Landing() {
           </p>
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 font-mono text-[11px] text-mt">
             <a href={SCOUT} className="hover:text-white transition-colors">
-              scout.tactica.com.ng
+              scout.tacticaengine.com
             </a>
             <a href={`mailto:${CONTACT}`} className="hover:text-white transition-colors">
               {CONTACT}

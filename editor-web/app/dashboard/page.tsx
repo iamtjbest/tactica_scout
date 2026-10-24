@@ -37,8 +37,8 @@ function Home() {
         <div className="card border-red2/40">
           <p className="text-red2 text-sm font-semibold">{error}</p>
           <p className="text-mt text-xs mt-1">
-            If this says &ldquo;Failed to fetch&rdquo;, the backend is asleep or
-            unreachable. It takes about a minute to wake.
+            This usually clears on its own. If it keeps happening, check your
+            connection and try again in a minute.
           </p>
         </div>
       </div>

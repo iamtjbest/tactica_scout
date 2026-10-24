@@ -6,7 +6,7 @@ import StatusPill from "@/components/StatusPill";
 import Crest from "@/components/Crest";
 import clsx from "clsx";
 import CreateWizard from "@/components/CreateWizard";
-import { listTournaments, addProof, type Tournament } from "@/lib/api";
+import { listTournaments, addProof, type Tournament, submitForReview } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 
 export default function Page() {
@@ -82,17 +82,38 @@ function Competitions() {
     for (const p of proofs) {
       try { await addProof(id, p); } catch { failed.push(p.url); }
     }
+    // Creating a competition IS submitting it. There is no separate
+    // "submit" step any more: what gets reviewed is the claim that the
+    // competition is real, and that is the form plus the proof. The
+    // squad and the fixture list are built after approval.
+    //
+    // Submit only when the proof actually saved. Submitting without it
+    // would put an unreviewable competition in the queue.
+    let submitted = false;
+    if (failed.length === 0) {
+      try { await submitForReview(id); submitted = true; } catch { /* reported below */ }
+    }
+
     setCreating(false);
     load();
+
     if (failed.length) {
       setError(
-        `Competition created, but ${failed.length} proof(s) didn't save. ` +
-        `Add them again from the Proof tab.`
+        `Competition created, but ${failed.length} proof didn't save, so it ` +
+        `wasn't submitted. Add the proof again and submit from the ` +
+        `competition page.`
+      );
+    } else if (!submitted) {
+      setError(
+        "Competition created and proof saved, but submitting it failed. " +
+        "Open it and hit Submit for review."
       );
     } else {
       setNotice(
-        "Competition created. It's in Drafts below. Submit it for approval, " +
-        "and teams and players unlock once an admin approves it."
+        "Submitted. Your competition is under review. We get back to every " +
+        "organiser within 7 to 14 days, and you'll be emailed as soon as " +
+        "there's a decision. It stays locked until then, and teams, players " +
+        "and fixtures unlock once it's approved."
       );
     }
   };
@@ -144,9 +165,8 @@ function Competitions() {
         <div className="card border-red2/40">
           <p className="text-red2 text-sm font-semibold">{error}</p>
           <p className="text-mt text-xs mt-1">
-            If this says &ldquo;Failed to fetch&rdquo;, the backend is either asleep
-            or not reachable from this address. It sleeps when idle and takes
-            about a minute to wake.
+            This usually clears on its own. If it keeps happening, check your
+            connection and try again in a minute.
           </p>
         </div>
       )}

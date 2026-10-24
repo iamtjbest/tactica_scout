@@ -189,8 +189,30 @@ def inbox(user: dict = Depends(require_user)):
             })
     decisions.sort(key=lambda d: d.get("reviewed_at") or "", reverse=True)
 
+    # Anything still with us. A competition is submitted the moment it
+    # is created, so this is the first thing an organiser sees after
+    # creating one, and it is the answer to "has anyone looked at it".
+    in_review = []
+    for t in mine.values():
+        if t["_role"] != "owner":
+            continue
+        if t["status"] in {"pending", "draft"}:
+            in_review.append({
+                "tournament_id":   t["id"],
+                "tournament_name": t["name"],
+                "status":          t["status"],
+                "submitted_at":    t.get("submitted_at") or t.get("created_at"),
+                "message": (
+                    "Submitted and waiting on review. We get back to every "
+                    "organiser within 7 to 14 days. Nothing can be edited "
+                    "until it's approved."
+                ),
+            })
+    in_review.sort(key=lambda d: d.get("submitted_at") or "", reverse=True)
+
     return {
         "requests": requests,
+        "in_review": in_review,
         "decisions": decisions[:10],
         "unread": len(requests),
     }

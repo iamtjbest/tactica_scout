@@ -330,9 +330,9 @@ export default function CreateWizard({
               <Row k="Proof" v={`${proofs.length} attached`} />
             </dl>
             <p className="text-mt text-sm pt-2 border-t border-bd">
-              This creates a draft. Next you add the teams and the fixtures,
-              then submit it for approval. Nothing appears on Scout until an
-              admin approves it.
+              Submitting sends this straight to review. We get back to every
+              organiser within 7 to 14 days. It stays locked until then, and
+              you add teams, players and fixtures once it&rsquo;s approved.
             </p>
           </div>
 
@@ -343,7 +343,7 @@ export default function CreateWizard({
               Back
             </button>
             <button className="btn-volt" disabled={busy} onClick={create}>
-              {busy ? "Creating..." : "Create competition"}
+              {busy ? "Submitting..." : "Submit for review"}
             </button>
           </div>
         </div>
