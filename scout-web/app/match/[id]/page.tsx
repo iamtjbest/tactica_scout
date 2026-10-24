@@ -1,10 +1,15 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import clsx from "clsx";
 import { User } from "lucide-react";
 import Link from "next/link";
-import { getMatchDetail, getMatchFacts, type MatchFacts, playerImageUrl, type MatchDetail, type TeamFormResult, BSD_IMG_BASE } from "@/lib/api";
+import {
+  getMatchDetail, getMatchFacts, type MatchFacts, playerImageUrl,
+  type MatchDetail, type TeamFormResult, BSD_IMG_BASE,
+  getMatchRatings, getMyVotes, ratePlayer, voteMotm,
+  type MatchRatings, type MyVotes,
+} from "@/lib/api";
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
 type Tab = "overview" | "timeline" | "lineups" | "ratings" | "h2h" | "stats" | "facts";
@@ -668,6 +673,211 @@ function LineupsTab({ match }: { match: MatchDetail }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ── ratings ──────────────────────────────────────────────────────
+ * Crowd ratings and Man of the Match for a BSD fixture. The local
+ * competition version lives in app/tournament/[id]/match/[fixtureId];
+ * this is the same UI against source="bsd", where the match ref is the
+ * integer event id rather than a uuid.
+ *
+ * Everyone on the team sheet is rateable, not just whoever had an
+ * incident logged, which is why it reads the lineups rather than the
+ * goalscorers.
+ */
+const RATING_STEPS = [4, 5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 10];
+
+function RatingsTab({ match }: { match: MatchDetail }) {
+  const matchRef = match.event_id;
+  const [data, setData] = useState<MatchRatings | null>(null);
+  const [mine, setMine] = useState<MyVotes | null>(null);
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    getMatchRatings("bsd", matchRef)
+      .then((d) => { setData(d); setError(null); })
+      .catch((e) => setError(e.message));
+    // A 401 here is the signed-out case, not a failure worth showing.
+    getMyVotes("bsd", matchRef)
+      .then((m) => { setMine(m); setSignedIn(true); })
+      .catch(() => { setMine(null); setSignedIn(false); });
+  }, [matchRef]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const act = async (key: string, fn: () => Promise<unknown>) => {
+    setBusy(key); setError(null);
+    try { await fn(); load(); }
+    catch (e: any) { setError(e.message); }
+    finally { setBusy(null); }
+  };
+
+  if (!data && !error) return <p className="text-mt text-sm">Loading ratings...</p>;
+  if (!data) return <p className="text-red2 text-sm font-semibold">{error}</p>;
+
+  // Both team sheets, starters and bench, keyed by the same id the
+  // backend stores a vote against.
+  const seen = new Map<string, { name: string; side: "home" | "away" }>();
+  for (const side of ["home", "away"] as const) {
+    const { starters, bench } = splitLineup(match.lineups?.[side]);
+    for (const p of [...starters, ...bench]) {
+      const pid = playerId(p);
+      if (pid == null) continue;
+      seen.set(String(pid), {
+        name: p?.name ?? p?.short_name ?? "Unknown",
+        side,
+      });
+    }
+  }
+
+  const byRef = new Map(data.players.map((p) => [p.player_ref, p]));
+  const open = data.window.open;
+  const entries = Array.from(seen.entries());
+  const sides = [
+    { label: match.home_team, refs: entries.filter(([, v]) => v.side === "home").map(([k]) => k) },
+    { label: match.away_team, refs: entries.filter(([, v]) => v.side === "away").map(([k]) => k) },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <div className={clsx("card", open && "border-volt/35")}>
+        <p className="text-white font-semibold">
+          {open ? "Voting is open" : "Voting is closed"}
+        </p>
+        <p className="text-mt text-sm mt-1">
+          {open
+            ? "Rate the players and pick your Man of the Match. Closes 30 minutes after full time."
+            : data.window.reason}
+        </p>
+        {signedIn === false && (
+          <p className="text-mt text-sm mt-2">
+            <Link href="/signin" className="text-volt font-semibold hover:underline">
+              Sign in
+            </Link>{" "}
+            to vote.
+          </p>
+        )}
+      </div>
+
+      {data.motm.total_votes > 0 && (
+        <div className="card">
+          <p className="text-mt text-[10px] font-mono uppercase tracking-wide mb-3">
+            Man of the Match · {data.motm.total_votes}{" "}
+            {data.motm.total_votes === 1 ? "vote" : "votes"}
+          </p>
+          <div className="space-y-2">
+            {data.motm.leaders.map((m) => (
+              <div key={m.player_ref} className="flex items-center gap-3">
+                <span className="text-white text-xs w-28 truncate">
+                  {seen.get(m.player_ref)?.name ?? "Player"}
+                </span>
+                <div className="flex-1 h-1.5 rounded-full bg-sur2 overflow-hidden">
+                  <div className="h-full bg-volt rounded-full" style={{ width: `${m.share}%` }} />
+                </div>
+                <span className="text-mt font-mono text-[11px] w-9 text-right">{m.share}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {error && <p className="text-red2 text-sm font-semibold">{error}</p>}
+
+      {seen.size === 0 && (
+        <p className="text-mt text-sm">
+          Nobody to rate yet. Lineups aren&apos;t out for this match.
+        </p>
+      )}
+
+      {sides.map((side) =>
+        side.refs.length === 0 ? null : (
+          <div key={side.label} className="card">
+            <p className="text-mt text-[10px] font-mono uppercase tracking-wide mb-2">
+              {side.label}
+            </p>
+            <div className="divide-y divide-bd/40">
+              {side.refs.map((ref) => {
+                const agg = byRef.get(ref);
+                const my = mine?.ratings?.[ref];
+                const isMotm = mine?.motm === ref;
+                const canVote = open && signedIn === true;
+
+                return (
+                  <div key={ref} className="py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="min-w-0 flex-1">
+                        <Link
+                          href={`/player/${ref}`}
+                          className="text-white text-sm truncate block hover:text-volt"
+                        >
+                          {seen.get(ref)?.name}
+                        </Link>
+                        <p className="text-mt text-[11px]">
+                          {agg?.enough_votes
+                            // The average is already the big number beside it.
+                            ? `${agg.votes} ${agg.votes === 1 ? "vote" : "votes"}`
+                            : agg
+                              ? `${agg.votes} of ${data.min_votes} votes needed`
+                              : "No votes yet"}
+                          {my != null && ` · you gave ${my}`}
+                        </p>
+                      </div>
+                      {agg?.enough_votes && (
+                        <span className="font-display font-black text-white text-base">
+                          {agg.average}
+                        </span>
+                      )}
+                      {canVote && (
+                        <button
+                          disabled={busy != null}
+                          onClick={() => act(`motm-${ref}`, () => voteMotm("bsd", matchRef, ref))}
+                          className={clsx(
+                            "text-[10px] font-mono uppercase px-2 py-1 rounded border transition-colors",
+                            isMotm
+                              ? "border-volt/50 text-volt bg-volt/10"
+                              : "border-bd text-mt hover:text-white"
+                          )}
+                        >
+                          MOTM
+                        </button>
+                      )}
+                    </div>
+
+                    {canVote && (
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {RATING_STEPS.map((v) => (
+                          <button
+                            key={v}
+                            disabled={busy != null}
+                            onClick={() => act(`${ref}-${v}`, () => ratePlayer("bsd", matchRef, ref, v))}
+                            className={clsx(
+                              "text-xs font-semibold px-2.5 py-1 rounded transition-colors",
+                              my === v
+                                ? "bg-volt text-bg"
+                                : "bg-sur2 text-white/80 hover:text-white"
+                            )}
+                          >
+                            {v}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )
+      )}
+
+      <p className="text-mt2 text-xs">
+        An average appears once {data.min_votes} people have rated a player, so one
+        person can&apos;t publish a score against someone on their own.
+      </p>
     </div>
   );
 }
