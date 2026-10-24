@@ -17,7 +17,6 @@ export default function LeaguePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"standings" | "matches" | "stats">("standings");
-  const [season, setSeason] = useState("2023-2024");
 
   useEffect(() => {
     if (isNaN(id)) return;
@@ -46,15 +45,16 @@ export default function LeaguePage() {
           <h1 className="font-display font-black text-2xl text-white">{leagueName}</h1>
           <FollowButton entityType="league" entityId={id} entityName={leagueName} />
         </div>
-        <select
-          value={season}
-          onChange={(e) => setSeason(e.target.value)}
-          className="bg-bg text-white border border-bd rounded-md px-3 py-1.5 text-sm outline-none focus:border-volt2"
-        >
-          <option value="2023-2024">2023/2024 (Current)</option>
-          <option value="2022-2023">2022/2023</option>
-          <option value="2021-2022">2021/2022</option>
-        </select>
+        {/* This was a dropdown hardcoded to 2023/2024 "(Current)", three
+            seasons out of date, and it filtered nothing: getStandings()
+            takes no season and the chosen value was never sent. A control
+            that lies about the date AND does nothing is worse than no
+            control, so it now states the season the standings are
+            actually for. Make it a real picker once the backend accepts
+            a season_id. */}
+        <span className="font-mono text-xs text-mt border border-bd rounded-md px-3 py-1.5">
+          {currentSeasonLabel()}
+        </span>
       </div>
 
       {/* Tabs */}
@@ -255,4 +255,17 @@ function MatchCardWrapper({ match }: { match: any }) {
   }, []);
   if (!MatchCard) return null;
   return <MatchCard match={match} />;
+}
+
+/**
+ * The season a European league is currently in, from today's date.
+ *
+ * Seasons run August to May, so anything from July onwards belongs to
+ * the season starting this year, and January to June belongs to the one
+ * that started last year.
+ */
+function currentSeasonLabel(now: Date = new Date()): string {
+  const y = now.getFullYear();
+  const startYear = now.getMonth() >= 6 ? y : y - 1;
+  return `${startYear}/${startYear + 1}`;
 }
