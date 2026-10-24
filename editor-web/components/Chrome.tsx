@@ -150,7 +150,7 @@ export default function Chrome({ children }: { children: React.ReactNode }) {
               <p className="font-mono text-[10px] text-mt2 tracking-[0.16em] uppercase">
                 Powered by Tactica
               </p>
-              <a href="https://scout.tactica.com.ng"
+              <a href="https://scout.tacticaengine.com"
                  className="text-mt text-xs hover:text-volt transition-colors">
                 Open Scout
               </a>

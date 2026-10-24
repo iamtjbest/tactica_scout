@@ -40,7 +40,7 @@ ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 CODE_LEN = 8
 
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-MAIL_FROM = os.environ.get("MAIL_FROM", "Tactica <noreply@tactica.com.ng>")
+MAIL_FROM = os.environ.get("MAIL_FROM", "Tactica <noreply@tacticaengine.com>")
 # No default on purpose. The editor isn't deployed yet, so inventing a
 # URL would put a dead link in an invite and in the owner's email. When
 # this is unset the CODE still works -- it is typed into the app, which

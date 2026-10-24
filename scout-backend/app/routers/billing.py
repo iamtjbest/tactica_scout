@@ -50,7 +50,7 @@ router = APIRouter()
 PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY", "")
 PAYSTACK_BASE = "https://api.paystack.co"
 APP_CALLBACK_URL = os.environ.get(
-    "BILLING_CALLBACK_URL", "https://editor.tactica.com.ng/billing/callback"
+    "BILLING_CALLBACK_URL", "https://editor.tacticaengine.com/billing/callback"
 )
 
 # Amounts in KOBO: Paystack takes the minor unit, so NGN 5,000 is
