@@ -151,7 +151,7 @@ def get_match_ratings(home_team: str | None, away_team: str | None) -> dict:
             return {k: v for k, v in cached.items() if k != "_cached_at"}
 
     # 1. Live ratings for each side. These are the real numbers --
-    #    same ones app.tactica.com.ng shows, because it's the same call.
+    #    same ones app.tacticaengine.com shows, because it's the same call.
     hf = _form(home_team)
     af = _form(away_team)
 

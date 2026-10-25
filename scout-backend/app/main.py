@@ -2,7 +2,7 @@
 Scout by Tactica — FastAPI Backend
 =============================================================
 Serves both the Scout web app and the Scout mobile app. Separate
-service from the main Tactica backend (app.tactica.com.ng's engine) —
+service from the main Tactica backend (app.tacticaengine.com's engine) —
 same BSD data source, same auth token, own cache namespace, own repo.
 
 Auth is Supabase Auth. The frontend signs in, verifies email codes and
@@ -51,7 +51,7 @@ app.add_middleware(
         # dev; leaving it out of this list is why the editor reported
         # "Failed to fetch" -- a CORS rejection looks identical to a
         # dead network from the browser's side.
-        "https://editor.tacticaengine.com",
+        "https://scouteditor.tacticaengine.com",
         "http://localhost:3001",
         "http://127.0.0.1:3001",
     ],

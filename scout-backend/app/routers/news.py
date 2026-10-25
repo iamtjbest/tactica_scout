@@ -13,7 +13,7 @@ The News tab's feed. Two sources, merged and sorted newest-first:
    format) that you edit directly, paste a post's own URL in whenever
    you want it featured.
 
-The blog (blog.tactica.com.ng) isn't live yet. Once it exists, pull its
+The blog (blog.tacticaengine.com) isn't live yet. Once it exists, pull its
 RSS/sitemap here the same way Medium's is handled below, same pattern,
 just another source function merged into the same list.
 """
