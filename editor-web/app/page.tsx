@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * editor.tacticaengine.com — the public front door.
+ * scouteditor.tacticaengine.com — the public front door.
  *
  * Not the dashboard. The dashboard moved to /competitions, because
  * someone arriving at this domain for the first time has no idea what

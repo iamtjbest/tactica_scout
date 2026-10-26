@@ -46,7 +46,9 @@ MAIL_FROM = os.environ.get("MAIL_FROM", "Tactica <noreply@tacticaengine.com>")
 # this is unset the CODE still works -- it is typed into the app, which
 # is how it gets used at a pitch anyway -- and join_url simply isn't
 # offered. Set EDITOR_URL on Render once the domain is live.
-EDITOR_URL = os.environ.get("EDITOR_URL", "").rstrip("/")
+EDITOR_URL = os.environ.get(
+    "EDITOR_URL", "https://scouteditor.tacticaengine.com"
+).rstrip("/")
 
 
 def _join_url(code: str) -> str | None:
