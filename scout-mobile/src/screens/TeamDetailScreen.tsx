@@ -32,9 +32,6 @@ interface TeamDetailScreenProps {
 
 type TabType = 'overview' | 'matches' | 'squad' | 'table';
 
-// Matches tab shows this many before the View All screen. Same number
-// as scout-web's INITIAL so the two apps agree. Was 5, which on a
-// 38-game season meant you couldn't see past the next fortnight.
 const FIXTURES_PREVIEW = 10;
 
 export const TeamDetailScreen: React.FC<TeamDetailScreenProps> = ({ route, navigation }) => {
@@ -57,11 +54,12 @@ export const TeamDetailScreen: React.FC<TeamDetailScreenProps> = ({ route, navig
         setRecentFixtures(fixRes.recent || []);
         setUpcomingFixtures(fixRes.upcoming || []);
 
-        // If team has a primary league, fetch standings for the Table tab
-        if (teamRes.primary_league_id) {
+        if (teamRes && teamRes.primary_league_id) {
           try {
             const stdRes = await getStandings(teamRes.primary_league_id);
-            setStandings(stdRes.standings || []);
+            if (stdRes && stdRes.standings) {
+              setStandings(stdRes.standings);
+            }
           } catch {}
         }
       })
@@ -74,7 +72,7 @@ export const TeamDetailScreen: React.FC<TeamDetailScreenProps> = ({ route, navig
 
   return (
     <View style={styles.container}>
-      {/* Top Bar with Back Button */}
+      {/* Top Header Bar with Back Button */}
       <View style={styles.topNav}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
@@ -87,45 +85,28 @@ export const TeamDetailScreen: React.FC<TeamDetailScreenProps> = ({ route, navig
         <View style={{ width: 32 }} />
       </View>
 
-      {/* Hero Club Card */}
+      {/* Team Header Hero Card */}
       <View style={styles.heroCard}>
-        <View style={styles.heroTopRow}>
-          <View style={styles.logoWrap}>
-            {logo ? (
-              <Image source={{ uri: logo }} style={styles.logoImg} resizeMode="contain" />
-            ) : (
-              <Ionicons name="shield-outline" size={32} color={COLORS.textDim} />
-            )}
-          </View>
-
-          <View style={styles.heroInfo}>
-            <Text style={styles.clubName} numberOfLines={1}>{displayName}</Text>
-            <Text style={styles.clubCountry}>{team?.country || 'Football Club'}</Text>
-
-            {/* Primary League & Position Tag */}
-            {team?.primary_league_name && (
-              <View style={styles.leagueTagRow}>
-                <Ionicons name="trophy-outline" size={12} color={COLORS.volt} />
-                <Text style={styles.leagueTagText}>
-                  {team.primary_league_name}
-                  {team.position != null ? ` • Position #${team.position}` : ''}
-                </Text>
-              </View>
-            )}
-          </View>
-
-          <FollowButton teamName={displayName} size="sm" />
+        <View style={styles.heroLogoWrap}>
+          {logo ? (
+            <Image source={{ uri: logo }} style={styles.heroLogo} resizeMode="contain" />
+          ) : (
+            <Ionicons name="shield-outline" size={32} color={COLORS.textDim} />
+          )}
         </View>
-
-        {/* Stadium & Capacity info */}
-        {team?.venue && (
-          <View style={styles.venueRow}>
-            <Ionicons name="location-outline" size={13} color={COLORS.textDim} />
-            <Text style={styles.venueText} numberOfLines={1}>
-              {team.venue} {team.venue_capacity ? `(${team.venue_capacity.toLocaleString()} cap)` : ''}
-            </Text>
+        <View style={styles.heroInfo}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <Text style={styles.heroTeamName} numberOfLines={1}>{displayName}</Text>
+            <FollowButton
+              teamName={displayName}
+              token={`team:${teamId}:${displayName}`}
+              size="sm"
+            />
           </View>
-        )}
+          <Text style={styles.heroSubText} numberOfLines={1}>
+            {team?.country || ''} {team?.venue ? `• ${team.venue}` : ''}
+          </Text>
+        </View>
       </View>
 
       {/* Tabs */}
@@ -150,175 +131,123 @@ export const TeamDetailScreen: React.FC<TeamDetailScreenProps> = ({ route, navig
       {loading ? (
         <View style={styles.centerBox}>
           <ActivityIndicator size="large" color={COLORS.volt} />
-          <Text style={styles.loadingText}>Loading squad and records...</Text>
+          <Text style={styles.loadingText}>Loading team details...</Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ padding: 14, paddingBottom: 50 }}>
+        <ScrollView contentContainerStyle={{ padding: 14, paddingBottom: 50 }} showsVerticalScrollIndicator={false}>
           {/* TAB 1: OVERVIEW */}
           {activeTab === 'overview' && (
-            <View>
-              {/* Manager & Tactical Profile */}
-              {team?.manager_name && (
-                <View style={styles.cardSection}>
-                  <Text style={styles.sectionTitle}>MANAGER & SYSTEM</Text>
-                  <View style={styles.managerRow}>
-                    <Ionicons name="person-outline" size={18} color={COLORS.volt} style={{ marginRight: 8 }} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.managerName}>{team.manager_name}</Text>
-                      <Text style={styles.managerSub}>Head Coach</Text>
-                    </View>
-                  </View>
+            <View style={{ gap: 14 }}>
+              {/* Quick Info Box */}
+              <View style={styles.infoCard}>
+                <Text style={styles.cardHeader}>CLUB OVERVIEW</Text>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoKey}>Manager</Text>
+                  <Text style={styles.infoVal}>{team?.manager_name || '—'}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoKey}>Stadium / Venue</Text>
+                  <Text style={styles.infoVal}>{team?.venue || '—'}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoKey}>Capacity</Text>
+                  <Text style={styles.infoVal}>{team?.venue_capacity ? team.venue_capacity.toLocaleString() : '—'}</Text>
+                </View>
+                <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+                  <Text style={styles.infoKey}>Primary League</Text>
+                  <Text style={styles.infoVal}>{team?.primary_league_name || '—'}</Text>
+                </View>
+              </View>
 
-                  {team.manager_stats && (
-                    <View style={styles.statsRow}>
-                      <View style={styles.miniStatBox}>
-                        <Text style={styles.miniStatVal}>
-                          {team.manager_stats.avg_possession != null
-                            ? `${team.manager_stats.avg_possession}%`
-                            : '54%'}
-                        </Text>
-                        <Text style={styles.miniStatLabel}>Avg Poss.</Text>
-                      </View>
-                      <View style={styles.miniStatBox}>
-                        <Text style={[styles.miniStatVal, { color: COLORS.win }]}>
-                          {team.manager_stats.avg_goals_scored != null
-                            ? team.manager_stats.avg_goals_scored
-                            : '1.8'}
-                        </Text>
-                        <Text style={styles.miniStatLabel}>Goals / G</Text>
-                      </View>
-                      <View style={styles.miniStatBox}>
-                        <Text style={[styles.miniStatVal, { color: COLORS.loss }]}>
-                          {team.manager_stats.avg_goals_conceded != null
-                            ? team.manager_stats.avg_goals_conceded
-                            : '1.1'}
-                        </Text>
-                        <Text style={styles.miniStatLabel}>Conceded / G</Text>
-                      </View>
-                    </View>
-                  )}
+              {/* Recent Form / Matches Preview */}
+              {recentFixtures.length > 0 && (
+                <View style={styles.infoCard}>
+                  <View style={[styles.rowBetween, { marginBottom: 8 }]}>
+                    <Text style={styles.cardHeader}>RECENT MATCHES</Text>
+                    <TouchableOpacity onPress={() => setActiveTab('matches')}>
+                      <Text style={styles.viewAllText}>View all →</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {recentFixtures.slice(0, 3).map((m, idx) => (
+                    <MatchCard
+                      key={`recent-${m.event_id || idx}`}
+                      match={m}
+                      onPress={() => m.event_id && navigation.navigate('MatchDetail', { eventId: m.event_id, matchSummary: m })}
+                    />
+                  ))}
                 </View>
               )}
-
-              {/* Next Fixtures Preview */}
-              <View style={[styles.cardSection, { marginTop: 12 }]}>
-                <Text style={styles.sectionTitle}>UPCOMING FIXTURES</Text>
-                {upcomingFixtures.length > 0 ? (
-                  upcomingFixtures.slice(0, 6).map((m, idx) => (
-                    <MatchCard
-                      key={`next-fix-${m.event_id || idx}`}
-                      match={m}
-                      showCompetition
-                      onPress={() => {
-                        if (m.event_id) {
-                          navigation.navigate('MatchDetail', {
-                            eventId: m.event_id,
-                            matchSummary: m,
-                          });
-                        }
-                      }}
-                    />
-                  ))
-                ) : (
-                  <Text style={styles.noDataText}>No upcoming fixtures on file.</Text>
-                )}
-                {upcomingFixtures.length > 0 && (
-                  <TouchableOpacity
-                    style={styles.viewAllBtn}
-                    onPress={() => navigation.navigate('TeamFixtures', { teamId, teamName: displayName, filter: 'upcoming' })}
-                  >
-                    <Text style={styles.viewAllText}>View All</Text>
-                    <Ionicons name="chevron-forward" size={14} color={COLORS.volt} />
-                  </TouchableOpacity>
-                )}
-              </View>
             </View>
           )}
 
           {/* TAB 2: MATCHES */}
           {activeTab === 'matches' && (
-            <View>
-              <Text style={styles.sectionTitle}>RECENT</Text>
-              {recentFixtures.length > 0 ? (
-                recentFixtures.slice(0, FIXTURES_PREVIEW).map((m, idx) => (
-                  <MatchCard
-                    key={`recent-fix-${m.event_id || idx}`}
-                    match={m}
-                    showCompetition
-                    onPress={() => {
-                      if (m.event_id) {
-                        navigation.navigate('MatchDetail', { eventId: m.event_id, matchSummary: m });
-                      }
-                    }}
-                  />
-                ))
-              ) : (
-                <Text style={styles.noDataText}>No recent results on file.</Text>
+            <View style={{ gap: 14 }}>
+              {upcomingFixtures.length > 0 && (
+                <View>
+                  <Text style={styles.groupHeading}>UPCOMING FIXTURES</Text>
+                  {upcomingFixtures.map((m, idx) => (
+                    <MatchCard
+                      key={`upc-${m.event_id || idx}`}
+                      match={m}
+                      onPress={() => m.event_id && navigation.navigate('MatchDetail', { eventId: m.event_id, matchSummary: m })}
+                    />
+                  ))}
+                </View>
               )}
-
-              <Text style={[styles.sectionTitle, { marginTop: 16 }]}>UPCOMING</Text>
-              {upcomingFixtures.length > 0 ? (
-                upcomingFixtures.slice(0, FIXTURES_PREVIEW).map((m, idx) => (
-                  <MatchCard
-                    key={`upcoming-fix-${m.event_id || idx}`}
-                    match={m}
-                    showCompetition
-                    onPress={() => {
-                      if (m.event_id) {
-                        navigation.navigate('MatchDetail', { eventId: m.event_id, matchSummary: m });
-                      }
-                    }}
-                  />
-                ))
-              ) : (
-                <Text style={styles.noDataText}>No upcoming fixtures on file.</Text>
+              {recentFixtures.length > 0 && (
+                <View>
+                  <Text style={styles.groupHeading}>FINISHED MATCHES</Text>
+                  {recentFixtures.map((m, idx) => (
+                    <MatchCard
+                      key={`rec-${m.event_id || idx}`}
+                      match={m}
+                      onPress={() => m.event_id && navigation.navigate('MatchDetail', { eventId: m.event_id, matchSummary: m })}
+                    />
+                  ))}
+                </View>
               )}
-
-              {(recentFixtures.length > 0 || upcomingFixtures.length > 0) && (
-                <TouchableOpacity
-                  style={styles.viewAllBtn}
-                  onPress={() => navigation.navigate('TeamFixtures', { teamId, teamName: displayName, filter: 'all' })}
-                >
-                  <Text style={styles.viewAllText}>View All</Text>
-                  <Ionicons name="chevron-forward" size={14} color={COLORS.volt} />
-                </TouchableOpacity>
+              {recentFixtures.length === 0 && upcomingFixtures.length === 0 && (
+                <View style={styles.centerBox}>
+                  <Ionicons name="calendar-outline" size={36} color={COLORS.textDim} />
+                  <Text style={styles.emptyText}>No fixtures available for this team.</Text>
+                </View>
               )}
             </View>
           )}
 
           {/* TAB 3: SQUAD */}
           {activeTab === 'squad' && (
-            <View style={styles.cardSection}>
-              <Text style={styles.sectionTitle}>ROSTER ({team?.squad?.length || 0} PLAYERS)</Text>
+            <View style={styles.infoCard}>
+              <Text style={styles.cardHeader}>SQUAD ROSTER</Text>
               {team?.squad && team.squad.length > 0 ? (
                 team.squad.map((p, idx) => {
-                  const photo = playerImageUrl(p.id);
+                  const pImg = playerImageUrl(p.id);
                   return (
                     <TouchableOpacity
-                      key={`squad-${p.id || idx}`}
+                      key={`player-${p.id || idx}`}
                       style={styles.playerRow}
-                      onPress={() => {
-                        navigation.navigate('PlayerDetail', { playerId: p.id, playerName: p.name });
-                      }}
+                      onPress={() => navigation.navigate('PlayerDetail', { playerId: p.id, playerName: p.name })}
                     >
-                      <Text style={styles.playerNum}>{p.jersey_number ?? '-'}</Text>
-                      <View style={styles.playerPhotoWrap}>
-                        {photo ? (
-                          <Image source={{ uri: photo }} style={styles.playerPhoto} />
+                      <View style={styles.playerAvatarWrap}>
+                        {pImg ? (
+                          <Image source={{ uri: pImg }} style={styles.playerAvatar} />
                         ) : (
                           <Ionicons name="person" size={16} color={COLORS.textDim} />
                         )}
                       </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.playerNameText} numberOfLines={1}>{p.name}</Text>
-                        <Text style={styles.playerMetaText}>{p.position} • {p.nationality}</Text>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.playerName} numberOfLines={1}>{p.name}</Text>
+                        <Text style={styles.playerSub}>{p.position} {p.nationality ? `• ${p.nationality}` : ''}</Text>
                       </View>
-                      <Ionicons name="chevron-forward" size={16} color={COLORS.textDim} />
+                      {p.jersey_number != null && (
+                        <Text style={styles.jerseyNum}>#{p.jersey_number}</Text>
+                      )}
                     </TouchableOpacity>
                   );
                 })
               ) : (
-                <Text style={styles.noDataText}>Squad roster currently empty.</Text>
+                <Text style={styles.noDataText}>No squad players recorded.</Text>
               )}
             </View>
           )}
@@ -330,16 +259,12 @@ export const TeamDetailScreen: React.FC<TeamDetailScreenProps> = ({ route, navig
                 <StandingsTable
                   standings={standings}
                   highlightTeamId={teamId}
-                  onSelectTeam={(tId, tName) => {
-                    if (tId !== teamId) {
-                      navigation.push('TeamDetail', { teamId: tId, teamName: tName });
-                    }
-                  }}
+                  onSelectTeam={(tId, tName) => navigation.push('TeamDetail', { teamId: tId, teamName: tName })}
                 />
               ) : (
                 <View style={styles.centerBox}>
                   <Ionicons name="trophy-outline" size={36} color={COLORS.textDim} />
-                  <Text style={styles.noDataText}>No competition table on file for this team.</Text>
+                  <Text style={styles.emptyText}>No competition table on file for this team.</Text>
                 </View>
               )}
             </View>
@@ -351,232 +276,95 @@ export const TeamDetailScreen: React.FC<TeamDetailScreenProps> = ({ route, navig
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
-  },
+  container: { flex: 1, backgroundColor: COLORS.bg },
   topNav: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 8,
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+    backgroundColor: COLORS.card,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.cardBorder,
   },
-  backBtn: {
-    padding: 4,
-  },
-  navTitle: {
-    color: COLORS.text,
-    fontSize: 14,
-    fontWeight: '700',
-    maxWidth: '80%',
-    textAlign: 'center',
-  },
+  backBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  navTitle: { color: COLORS.text, fontSize: 16, fontWeight: '800' },
   heroCard: {
-    backgroundColor: COLORS.card,
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.cardBorder,
-  },
-  heroTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    padding: 14,
+    backgroundColor: COLORS.card,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.cardBorder,
+    gap: 14,
   },
-  logoWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 14,
+  heroLogoWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: COLORS.cardElevated,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 14,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
   },
-  logoImg: {
-    width: 44,
-    height: 44,
-  },
-  heroInfo: {
-    flex: 1,
-  },
-  clubName: {
-    color: COLORS.text,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  clubCountry: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  leagueTagRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-    gap: 4,
-  },
-  leagueTagText: {
-    color: COLORS.volt,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  venueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: COLORS.cardBorder,
-    gap: 6,
-  },
-  venueText: {
-    color: COLORS.textDim,
-    fontSize: 12,
-    flex: 1,
-  },
+  heroLogo: { width: 34, height: 34 },
+  heroInfo: { flex: 1, minWidth: 0 },
+  heroTeamName: { color: COLORS.text, fontSize: 18, fontWeight: '900' },
+  heroSubText: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
   tabRow: {
     flexDirection: 'row',
-    backgroundColor: COLORS.cardElevated,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.cardBorder,
+    backgroundColor: COLORS.card,
   },
-  tabBtn: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  tabBtnActive: {
-    borderBottomWidth: 2,
-    borderBottomColor: COLORS.volt,
-  },
-  tabLabel: {
-    color: COLORS.textDim,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  tabLabelActive: {
-    color: COLORS.volt,
-  },
-  centerBox: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 30,
-  },
-  loadingText: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    marginTop: 10,
-  },
-  cardSection: {
+  tabBtn: { flex: 1, alignItems: 'center', paddingVertical: 10 },
+  tabBtnActive: { borderBottomWidth: 2, borderBottomColor: COLORS.volt },
+  tabLabel: { color: COLORS.textDim, fontSize: 11, fontWeight: '700' },
+  tabLabelActive: { color: COLORS.text, fontWeight: '900' },
+  centerBox: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30, minHeight: 200 },
+  loadingText: { color: COLORS.textSecondary, fontSize: 13, marginTop: 10 },
+  emptyText: { color: COLORS.textDim, fontSize: 13, marginTop: 8, textAlign: 'center' },
+  infoCard: {
     backgroundColor: COLORS.card,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
-    padding: 14,
+    padding: 12,
   },
-  sectionTitle: {
-    color: COLORS.textDim,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-    marginBottom: 12,
-  },
-  managerRow: {
+  cardHeader: { color: COLORS.volt, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 8 },
+  infoRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255, 255, 255, 0.04)',
   },
-  managerName: {
-    color: COLORS.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  managerSub: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 14,
-  },
-  miniStatBox: {
-    flex: 1,
-    backgroundColor: COLORS.cardElevated,
-    padding: 10,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  miniStatVal: {
-    color: COLORS.text,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  miniStatLabel: {
-    color: COLORS.textDim,
-    fontSize: 10,
-    marginTop: 2,
-  },
+  infoKey: { color: COLORS.textSecondary, fontSize: 13 },
+  infoVal: { color: COLORS.text, fontSize: 13, fontWeight: '600' },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  viewAllText: { color: COLORS.volt, fontSize: 12, fontWeight: '700' },
+  groupHeading: { color: COLORS.volt, fontSize: 10, fontWeight: '800', letterSpacing: 1.3, marginBottom: 6 },
   playerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(255, 255, 255, 0.04)',
+    gap: 10,
   },
-  playerNum: {
-    width: 28,
-    color: COLORS.textDim,
-    fontSize: 12,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  playerPhotoWrap: {
+  playerAvatarWrap: {
     width: 32,
     height: 32,
     borderRadius: 16,
     backgroundColor: COLORS.cardElevated,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
     overflow: 'hidden',
   },
-  playerPhoto: {
-    width: 32,
-    height: 32,
-  },
-  playerNameText: {
-    color: COLORS.text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  playerMetaText: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  noDataText: {
-    color: COLORS.textDim,
-    fontSize: 12,
-    paddingVertical: 12,
-    textAlign: 'center',
-  },
-  viewAllBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    paddingVertical: 12,
-    marginTop: 4,
-  },
-  viewAllText: {
-    color: COLORS.volt,
-    fontSize: 12,
-    fontWeight: '700',
-  },
+  playerAvatar: { width: 32, height: 32 },
+  playerName: { color: COLORS.text, fontSize: 13, fontWeight: '600' },
+  playerSub: { color: COLORS.textSecondary, fontSize: 11, marginTop: 1 },
+  jerseyNum: { color: COLORS.textDim, fontSize: 13, fontWeight: '800' },
+  noDataText: { color: COLORS.textDim, fontSize: 12, paddingVertical: 12, textAlign: 'center' },
 });

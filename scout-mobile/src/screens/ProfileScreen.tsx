@@ -1,12 +1,10 @@
-// src/screens/ProfileScreen.tsx — User profile, settings, followed clubs & API server config
-import React, { useState, useEffect } from 'react';
+// src/screens/ProfileScreen.tsx — User profile & account settings
+import React, { useState } from 'react';
 import {
   View,
   Text,
   ScrollView,
-  TextInput,
   TouchableOpacity,
-  ActivityIndicator,
   Alert,
   StyleSheet,
   Platform,
@@ -18,10 +16,6 @@ import { COLORS } from '../theme';
 import {
   getMe,
   updateLanguage,
-  updateFollowedTeams,
-  getApiBase,
-  setApiBase,
-  resetApiBase,
   ScoutUser,
 } from '../services/api';
 import { isSignedIn, signOut } from '../services/auth';
@@ -32,21 +26,15 @@ interface ProfileScreenProps {
 }
 
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
+  const insets = useSafeAreaInsets();
+  const topPadding = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 20) : 12);
+
   const [user, setUser] = useState<ScoutUser | null>(null);
   const [loading, setLoading] = useState(true);
-
-
-  // Server URL settings (Render / LAN)
-  const [apiUrl, setApiUrl] = useState('');
-  const [apiTesting, setApiTesting] = useState(false);
-  const [apiStatus, setApiStatus] = useState<string | null>(null);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const url = await getApiBase();
-      setApiUrl(url);
-
       if (await isSignedIn()) {
         const me = await getMe();
         setUser(me.user);
@@ -60,9 +48,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
     }
   };
 
-  // Fires on mount and again on every focus. Coming back from
-  // SignIn/Verify/ResetPassword this screen is still mounted
-  // underneath, so a mount-only effect would never re-run.
   useFocusEffect(
     React.useCallback(() => {
       loadData();
@@ -72,6 +57,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
   const handleLogout = async () => {
     await signOut();
     setUser(null);
+    Alert.alert("Signed out", "You have been signed out successfully.");
   };
 
   const handleLanguageChange = async (lang: string) => {
@@ -79,204 +65,110 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
       await updateLanguage(lang);
       if (user) setUser({ ...user, language: lang });
     } catch (err: any) {
-      Alert.alert('Notice', err.message || 'Could not update language preference.');
+      Alert.alert('Error', err.message || 'Failed to update language');
     }
   };
-
-  const handleUnfollow = async (team: string) => {
-    if (!user) return;
-    const updated = user.followed_teams.filter((t) => t !== team);
-    try {
-      await updateFollowedTeams(updated);
-      setUser({ ...user, followed_teams: updated });
-    } catch {}
-  };
-
-  const handleSaveApiUrl = async () => {
-    if (!apiUrl.trim()) return;
-    setApiTesting(true);
-    setApiStatus(null);
-    try {
-      const cleanUrl = apiUrl.trim().replace(/\/+$/, '');
-      const testRes = await fetch(`${cleanUrl}/api/live-scores`);
-      if (testRes.ok) {
-        await setApiBase(cleanUrl);
-        setApiStatus('Connected successfully!');
-      } else {
-        await setApiBase(cleanUrl);
-        setApiStatus(`Connected with status ${testRes.status}`);
-      }
-    } catch (err: any) {
-      setApiStatus('Could not reach server at this address.');
-    } finally {
-      setApiTesting(false);
-    }
-  };
-
-  const handleResetApiUrl = async () => {
-    await resetApiBase();
-    const def = await getApiBase();
-    setApiUrl(def);
-    setApiStatus('Reset to default URL');
-  };
-
-  const insets = useSafeAreaInsets();
-  const topPadding = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 20) : 12);
 
   return (
     <View style={styles.container}>
       {/* Top Header */}
-      <View style={[styles.topNav, { paddingTop: topPadding + 8 }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+      <View style={[styles.topNav, { paddingTop: topPadding + 6 }]}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backBtn}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
           <Ionicons name="chevron-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
-        <Text style={styles.navTitle}>Profile & Settings</Text>
+        <Text style={styles.navTitle}>Profile &amp; Settings</Text>
         <View style={{ width: 32 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 14, paddingBottom: insets.bottom + 50 }}>
-        {/* SECTION 1: AUTHENTICATION */}
-        <View style={styles.cardSection}>
-          <Text style={styles.sectionTitle}>TACTICA ACCOUNT</Text>
-
-          {loading ? (
-            <ActivityIndicator color={COLORS.volt} />
-          ) : user ? (
-            <View>
-              <View style={styles.userRow}>
-                <Ionicons name="person-circle" size={44} color={COLORS.volt} style={{ marginRight: 12 }} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.usernameText}>{user.display_name || user.email}</Text>
-                  <Text style={styles.userStatusText}>Scout Pro Member</Text>
+      <ScrollView
+        contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40, gap: 16 }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* TACTICA ACCOUNT SECTION */}
+        <View style={styles.card}>
+          <Text style={styles.sectionHeader}>TACTICA ACCOUNT</Text>
+          {user ? (
+            <View style={{ gap: 12 }}>
+              <View style={styles.userInfoRow}>
+                <View style={styles.avatarCircle}>
+                  <Text style={styles.avatarText}>
+                    {(user.display_name || user.email || 'U')[0].toUpperCase()}
+                  </Text>
                 </View>
-                <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
-                  <Text style={styles.logoutText}>Sign Out</Text>
-                </TouchableOpacity>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.userName} numberOfLines={1}>
+                    {user.display_name || 'Tactica User'}
+                  </Text>
+                  <Text style={styles.userEmail} numberOfLines={1}>
+                    {user.email || 'Signed in'}
+                  </Text>
+                </View>
+                <View style={styles.roleBadge}>
+                  <Text style={styles.roleBadgeText}>{user.role.toUpperCase()}</Text>
+                </View>
               </View>
+
+              <TouchableOpacity
+                style={styles.outlineBtn}
+                onPress={handleLogout}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.outlineBtnText}>Sign out</Text>
+              </TouchableOpacity>
             </View>
           ) : (
-            <View>
-              <Text style={styles.signedOutText}>
-                Sign in to follow teams, players and leagues across every device.
+            <View style={{ gap: 10 }}>
+              <Text style={styles.bodyText}>
+                Sign in to sync your followed teams, players, and leagues across every device.
               </Text>
-              <TouchableOpacity
-                style={styles.submitBtn}
-                onPress={() => navigation.navigate('SignIn')}
-              >
-                <Text style={styles.submitBtnText}>Sign in</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.secondaryBtn}
-                onPress={() => navigation.navigate('SignUp')}
-              >
-                <Text style={styles.secondaryBtnText}>Create account</Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+                <TouchableOpacity
+                  style={[styles.primaryBtn, { flex: 1 }]}
+                  onPress={() => navigation.navigate('SignIn')}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.primaryBtnText}>Sign in</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.outlineBtn, { flex: 1 }]}
+                  onPress={() => navigation.navigate('SignUp')}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.outlineBtnText}>Create account</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
         </View>
 
-        {/* SECTION 2: FOLLOWED CLUBS */}
-        {user && (
-          <View style={[styles.cardSection, { marginTop: 14 }]}>
-            <Text style={styles.sectionTitle}>
-              FOLLOWED CLUBS ({user.followed_teams?.length || 0})
-            </Text>
-            {user.followed_teams && user.followed_teams.length > 0 ? (
-              <View style={styles.followedChipsRow}>
-                {user.followed_teams.map((teamName) => (
-                  <View key={teamName} style={styles.followedChip}>
-                    <Ionicons name="shield-outline" size={13} color={COLORS.volt} style={{ marginRight: 6 }} />
-                    <Text style={styles.chipText}>{teamName}</Text>
-                    <TouchableOpacity
-                      onPress={() => handleUnfollow(teamName)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      style={{ marginLeft: 6 }}
-                    >
-                      <Ionicons name="close-circle" size={16} color={COLORS.textDim} />
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={styles.noDataText}>
-                You are not following any clubs yet. Tap the star icon on any team or match to follow them.
-              </Text>
-            )}
-          </View>
-        )}
-
-        {/* SECTION 3: LANGUAGE PREFERENCE */}
-        <View style={[styles.cardSection, { marginTop: 14 }]}>
-          <Text style={styles.sectionTitle}>LANGUAGE / IDIOMA</Text>
-          <View style={styles.langGrid}>
+        {/* LANGUAGE / IDIOMA SECTION */}
+        <View style={styles.card}>
+          <Text style={styles.sectionHeader}>LANGUAGE / IDIOMA</Text>
+          <View style={styles.langRow}>
             {[
-              { code: 'en', label: 'English' },
-              { code: 'es', label: 'Español' },
-              { code: 'fr', label: 'Français' },
-              { code: 'de', label: 'Deutsch' },
-            ].map((l) => {
-              const isSelected = (user?.language || 'en') === l.code;
+              { id: 'en', label: 'English' },
+              { id: 'es', label: 'Español' },
+              { id: 'fr', label: 'Français' },
+              { id: 'de', label: 'Deutsch' },
+            ].map((lang) => {
+              const active = (user?.language || 'en') === lang.id;
               return (
                 <TouchableOpacity
-                  key={l.code}
-                  style={[styles.langBtn, isSelected && styles.langBtnActive]}
-                  onPress={() => handleLanguageChange(l.code)}
+                  key={lang.id}
+                  style={[styles.langChip, active && styles.langChipActive]}
+                  onPress={() => handleLanguageChange(lang.id)}
+                  activeOpacity={0.8}
                 >
-                  <Text style={[styles.langText, isSelected && styles.langTextActive]}>
-                    {l.label}
+                  <Text style={[styles.langChipText, active && styles.langChipTextActive]}>
+                    {lang.label}
                   </Text>
                 </TouchableOpacity>
               );
             })}
-          </View>
-        </View>
-
-        {/* SECTION 4: BACKEND SERVER CONFIG (Render / Local) */}
-        <View style={[styles.cardSection, { marginTop: 14 }]}>
-          <View style={styles.serverHeader}>
-            <Text style={styles.sectionTitle}>BACKEND SERVER URL</Text>
-            <Ionicons name="server-outline" size={16} color={COLORS.volt} />
-          </View>
-          <Text style={styles.serverHint}>
-            Connect your mobile app to your Render-hosted backend or local PC IP.
-          </Text>
-
-          <TextInput
-            style={styles.authInput}
-            value={apiUrl}
-            onChangeText={setApiUrl}
-            placeholder="https://tactica-scout-api.onrender.com"
-            placeholderTextColor={COLORS.textDim}
-            autoCapitalize="none"
-          />
-
-          {apiStatus && (
-            <Text
-              style={[
-                styles.statusNotice,
-                { color: apiStatus.includes('success') ? COLORS.win : COLORS.volt },
-              ]}
-            >
-              {apiStatus}
-            </Text>
-          )}
-
-          <View style={styles.serverBtnRow}>
-            <TouchableOpacity
-              style={styles.saveServerBtn}
-              onPress={handleSaveApiUrl}
-              disabled={apiTesting}
-            >
-              {apiTesting ? (
-                <ActivityIndicator size="small" color="#000" />
-              ) : (
-                <Text style={styles.saveServerText}>Save & Test URL</Text>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.resetServerBtn} onPress={handleResetApiUrl}>
-              <Text style={styles.resetServerText}>Reset Default</Text>
-            </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
@@ -285,236 +177,86 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  signedOutText: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    lineHeight: 19,
-    marginBottom: 16,
-  },
-  secondaryBtn: {
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-    borderRadius: 10,
-    paddingVertical: 13,
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  secondaryBtnText: { color: COLORS.text, fontSize: 14, fontWeight: '700' },
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
-  },
+  container: { flex: 1, backgroundColor: COLORS.bg },
   topNav: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 8,
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+    backgroundColor: COLORS.card,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.cardBorder,
   },
-  backBtn: {
-    padding: 4,
-  },
-  navTitle: {
-    color: COLORS.text,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  cardSection: {
+  backBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  navTitle: { color: COLORS.text, fontSize: 16, fontWeight: '800' },
+  card: {
     backgroundColor: COLORS.card,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
-    padding: 16,
+    padding: 14,
   },
-  sectionTitle: {
-    color: COLORS.textDim,
-    fontSize: 11,
+  sectionHeader: {
+    color: COLORS.volt,
+    fontSize: 10,
     fontWeight: '800',
     letterSpacing: 1.2,
-    marginBottom: 12,
+    marginBottom: 8,
   },
-  userRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  usernameText: {
-    color: COLORS.text,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  userStatusText: {
-    color: COLORS.volt,
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  logoutBtn: {
-    backgroundColor: COLORS.cardElevated,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
+  bodyText: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 18 },
+  userInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  avatarCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.voltMuted,
     borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-  },
-  logoutText: {
-    color: COLORS.loss,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  authToggle: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.cardElevated,
-    borderRadius: 8,
-    padding: 4,
-    marginBottom: 14,
-  },
-  authTab: {
-    flex: 1,
+    borderColor: COLORS.cardBorderActive,
     alignItems: 'center',
-    paddingVertical: 7,
+    justifyContent: 'center',
+  },
+  avatarText: { color: COLORS.volt, fontSize: 18, fontWeight: '900' },
+  userName: { color: COLORS.text, fontSize: 15, fontWeight: '700' },
+  userEmail: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
+  roleBadge: {
+    backgroundColor: 'rgba(56, 189, 248, 0.125)',
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.3)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: 6,
   },
-  authTabActive: {
-    backgroundColor: COLORS.card,
-  },
-  authTabText: {
-    color: COLORS.textDim,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  authTabTextActive: {
-    color: COLORS.text,
-    fontWeight: '700',
-  },
-  authInput: {
-    backgroundColor: COLORS.cardElevated,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    height: 42,
-    color: COLORS.text,
-    fontSize: 14,
-  },
-  errorText: {
-    color: COLORS.loss,
-    fontSize: 12,
-    marginTop: 8,
-  },
-  submitBtn: {
+  roleBadgeText: { color: '#38bdf8', fontSize: 10, fontWeight: '900' },
+  primaryBtn: {
     backgroundColor: COLORS.volt,
     borderRadius: 10,
-    height: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 14,
-  },
-  submitBtnText: {
-    color: '#000',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  followedChipsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  followedChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.cardElevated,
-    borderWidth: 1,
-    borderColor: 'rgba(212, 255, 0, 0.25)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  chipText: {
-    color: COLORS.text,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  noDataText: {
-    color: COLORS.textDim,
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  langGrid: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  langBtn: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: COLORS.cardElevated,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-  },
-  langBtnActive: {
-    borderColor: COLORS.volt,
-    backgroundColor: 'rgba(212, 255, 0, 0.1)',
-  },
-  langText: {
-    color: COLORS.textDim,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  langTextActive: {
-    color: COLORS.volt,
-    fontWeight: '800',
-  },
-  serverHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  serverHint: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    marginBottom: 10,
-    lineHeight: 16,
-  },
-  statusNotice: {
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 6,
-  },
-  serverBtnRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 12,
-  },
-  saveServerBtn: {
-    flex: 1,
-    backgroundColor: COLORS.volt,
-    borderRadius: 8,
-    height: 38,
+    paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  saveServerText: {
-    color: '#000',
-    fontSize: 12,
-    fontWeight: '800',
+  primaryBtnText: { color: COLORS.bg, fontSize: 13, fontWeight: '900' },
+  outlineBtn: {
+    backgroundColor: COLORS.cardElevated,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
   },
-  resetServerBtn: {
+  outlineBtnText: { color: COLORS.text, fontSize: 13, fontWeight: '700' },
+  langRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  langChip: {
     paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
     backgroundColor: COLORS.cardElevated,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
-    borderRadius: 8,
-    height: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  resetServerText: {
-    color: COLORS.textDim,
-    fontSize: 12,
-    fontWeight: '600',
-  },
+  langChipActive: { backgroundColor: COLORS.voltMuted, borderColor: COLORS.volt },
+  langChipText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600' },
+  langChipTextActive: { color: COLORS.volt, fontWeight: '800' },
 });

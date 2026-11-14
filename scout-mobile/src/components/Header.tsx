@@ -21,10 +21,10 @@ export const Header: React.FC<HeaderProps> = ({
   title,
 }) => {
   const insets = useSafeAreaInsets();
-  const topPadding = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 20) : 12);
+  const topPadding = Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 16);
 
   return (
-    <View style={[styles.container, { paddingTop: topPadding + 6 }]}>
+    <View style={[styles.container, { paddingTop: topPadding + 8 }]}>
       <View style={styles.content}>
         {/* Left: Back button OR SCOUT Brand */}
         <View style={styles.leftSection}>
@@ -41,7 +41,7 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </View>
 
-        {/* Center: Search dead center (or Screen Title if provided on detail screens) */}
+        {/* Center: Search or Screen Title */}
         <View style={styles.centerSection}>
           {title ? (
             <Text style={styles.titleText} numberOfLines={1}>{title}</Text>
@@ -79,9 +79,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.cardBorder,
     zIndex: 100,
+    paddingBottom: 8,
   },
   content: {
-    height: 52,
+    height: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
