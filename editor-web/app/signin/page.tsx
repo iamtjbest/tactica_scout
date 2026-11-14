@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import StadiumArt from "@/components/StadiumArt";
 import { signInWithEmail } from "@/lib/auth";
 import PasswordInput from "@/components/PasswordInput";
@@ -29,7 +30,13 @@ export default function SignIn() {
       await signInWithEmail(email.trim(), password);
       router.replace("/dashboard");
     } catch (err: any) {
-      setError(err.message || "Could not sign in.");
+      const message = err.message || "Could not sign in.";
+      if (message.toLowerCase().includes("confirm your email") ||
+          message.toLowerCase().includes("email not confirmed")) {
+        router.push(`/verify?email=${encodeURIComponent(email.trim().toLowerCase())}`);
+      } else {
+        setError(message);
+      }
     } finally {
       setBusy(false);
     }
@@ -63,6 +70,11 @@ export default function SignIn() {
               onChange={setPassword}
               autoComplete="current-password"
             />
+            <div className="text-right -mt-2">
+              <Link href="/forgot-password" className="text-volt text-xs hover:text-volt2 transition-colors">
+                Forgot password?
+              </Link>
+            </div>
 
             {error && (
               <p className="text-red2 text-sm font-semibold bg-red2/10 border border-red2/30
