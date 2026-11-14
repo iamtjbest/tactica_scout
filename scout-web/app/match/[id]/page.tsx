@@ -27,6 +27,8 @@ export default function MatchDetailPage() {
   const params = useParams();
   const eventId = Number(params.id);
   const [match, setMatch] = useState<MatchDetail | null>(null);
+  const [facts, setFacts] = useState<MatchFacts | null>(null);
+  const [factsFailed, setFactsFailed] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
   const [error, setError] = useState<string | null>(null);
 
@@ -34,6 +36,16 @@ export default function MatchDetailPage() {
     getMatchDetail(eventId)
       .then(setMatch)
       .catch((e) => setError(e.message || "Failed to load match."));
+  }, [eventId]);
+
+  useEffect(() => {
+    let alive = true;
+    setFacts(null);
+    setFactsFailed(false);
+    getMatchFacts(eventId)
+      .then((f) => { if (alive) setFacts(f); })
+      .catch(() => { if (alive) setFactsFailed(true); });
+    return () => { alive = false; };
   }, [eventId]);
 
   if (error) {
@@ -126,13 +138,13 @@ export default function MatchDetailPage() {
         ))}
       </div>
 
-      {tab === "overview" && <OverviewTab match={match} />}
+      {tab === "overview" && <OverviewTab match={match} facts={facts} onOpenFacts={() => setTab("facts")} />}
       {tab === "timeline" && <TimelineTab match={match} />}
       {tab === "lineups" && <LineupsTab match={match} />}
       {tab === "ratings" && <RatingsTab match={match} />}
       {tab === "h2h" && <H2HTab match={match} />}
       {tab === "stats" && <StatsTab match={match} />}
-      {tab === "facts" && <FactsTab match={match} />}
+      {tab === "facts" && <FactsTab match={match} facts={facts} failed={factsFailed} />}
     </div>
   );
 }
@@ -340,10 +352,39 @@ function TeamFormCard({ match }: { match: MatchDetail }) {
   );
 }
 
-function OverviewTab({ match }: { match: MatchDetail }) {
+function OverviewTab({ match, facts, onOpenFacts }: {
+  match: MatchDetail;
+  facts: MatchFacts | null;
+  onOpenFacts: () => void;
+}) {
   const hasExtra = match.venue || match.referee || match.round;
+  const hasProbs = facts && (facts.home.win_prob != null || facts.away.win_prob != null);
   return (
     <div className="space-y-3">
+      {hasProbs && (
+        <div className="card space-y-2.5">
+          <div className="flex items-center justify-between">
+            <p className="section-label">Tactica Win Probability</p>
+            <button onClick={onOpenFacts} className="text-[11px] font-mono text-volt hover:underline">
+              Full ratings &rarr;
+            </button>
+          </div>
+          <div className="flex h-2 rounded-full overflow-hidden bg-bg2 gap-0.5">
+            <div className="bg-volt" style={{ width: `${facts.home.win_prob ?? 0}%` }} />
+            {facts.draw_prob != null && (
+              <div className="bg-white/25" style={{ width: `${facts.draw_prob}%` }} />
+            )}
+            <div className="bg-cyan" style={{ width: `${facts.away.win_prob ?? 0}%` }} />
+          </div>
+          <div className="flex justify-between text-xs font-mono text-white">
+            <span className="text-volt font-bold">{facts.home.win_prob?.toFixed(1)}%</span>
+            {facts.draw_prob != null && (
+              <span className="text-mt">Draw {facts.draw_prob.toFixed(1)}%</span>
+            )}
+            <span className="text-cyan font-bold">{facts.away.win_prob?.toFixed(1)}%</span>
+          </div>
+        </div>
+      )}
       <div className="card space-y-2">
         <p className="text-mt text-sm">
           Kickoff: <span className="text-white">{match.event_date ? new Date(match.event_date).toLocaleString() : "TBD"}</span>
@@ -1132,24 +1173,11 @@ function StatsTab({ match }: { match: MatchDetail }) {
 // The copy and the rules here are mirrored in scout-mobile's Facts tab
 // (MatchDetailScreen.tsx). They render the same backend response, so if
 // one changes, change both.
-function FactsTab({ match }: { match: MatchDetail }) {
-  // Fetched here rather than with the match: Tactica's backend sleeps on
-  // Render's free tier and a cold start is ~50s. That cost belongs to
-  // this tab, not to the whole page.
-  const [facts, setFacts] = useState<MatchFacts | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let alive = true;
-    setFailed(false);
-    getMatchFacts(match.event_id)
-      .then((f: MatchFacts) => { if (alive) setFacts(f); })
-      .catch(() => { if (alive) setFailed(true); });
-    return () => {
-      alive = false;
-    };
-  }, [match.event_id]);
-
+function FactsTab({ match, facts, failed }: {
+  match: MatchDetail;
+  facts: MatchFacts | null;
+  failed: boolean;
+}) {
   if (failed) {
     return (
       <div className="card">

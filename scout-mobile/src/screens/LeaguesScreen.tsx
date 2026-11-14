@@ -19,11 +19,13 @@ import {
   getStandings,
   getLeagueFixtures,
   getLeagueTopStats,
+  getTournaments,
   playerImageUrl,
   teamLogoUrl,
   StandingsRow,
   MatchSummary,
   TopStatPlayer,
+  TournamentSummary,
 } from '../services/api';
 
 interface LeaguesScreenProps {
@@ -43,6 +45,7 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
   const [fixtures, setFixtures] = useState<MatchSummary[]>([]);
   const [topScorers, setTopScorers] = useState<TopStatPlayer[]>([]);
   const [topAssists, setTopAssists] = useState<TopStatPlayer[]>([]);
+  const [localTournaments, setLocalTournaments] = useState<TournamentSummary[]>([]);
 
   // Initial load leagues list
   useEffect(() => {
@@ -55,6 +58,12 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
         }
       })
       .catch((err) => console.warn('Failed to get leagues:', err));
+  }, []);
+
+  useEffect(() => {
+    getTournaments()
+      .then((res) => setLocalTournaments(res.tournaments || []))
+      .catch((err) => console.warn('Failed to get local competitions:', err));
   }, []);
 
   // Sync if route params change
@@ -94,6 +103,35 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
 
   return (
     <View style={styles.container}>
+      {localTournaments.length > 0 && (
+        <View style={{ paddingHorizontal: 14, paddingTop: 10 }}>
+          <Text style={{ color: COLORS.volt, fontSize: 10, fontWeight: '800', letterSpacing: 1.4, marginBottom: 6 }}>
+            LOCAL COMPETITIONS
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+            {localTournaments.map((t) => (
+              <TouchableOpacity
+                key={t.id}
+                onPress={() => navigation.navigate('TournamentDetail', {
+                  tournamentId: t.id, tournamentName: t.name,
+                })}
+                style={{
+                  backgroundColor: COLORS.card,
+                  borderColor: COLORS.cardBorderActive,
+                  borderWidth: 1,
+                  borderRadius: 10,
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                }}
+              >
+                <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: '700' }}>{t.name}</Text>
+                <Text style={{ color: COLORS.textDim, fontSize: 10 }}>{t.organizing_body}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
       {/* Horizontal League Pills */}
       <View style={styles.pillsContainer}>
         <ScrollView

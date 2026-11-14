@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   FlatList,
   RefreshControl,
-  ActivityIndicator,
   StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,11 +25,15 @@ interface MatchesScreenProps {
 
 type FilterType = 'all' | 'live' | 'upcoming' | 'finished' | 'following';
 
+function todayLocalISO(): string {
+  const d = new Date();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${month}-${day}`;
+}
+
 export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
-  const [selectedDate, setSelectedDate] = useState<string>(() => {
-    const today = new Date();
-    return today.toISOString().split('T')[0];
-  });
+  const [selectedDate, setSelectedDate] = useState<string>(todayLocalISO);
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [leagues, setLeagues] = useState<LeagueMatches[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,18 +82,27 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
 
   // Date controls
   const changeDateBy = (days: number) => {
-    const d = new Date(selectedDate);
+    const [year, month, day] = selectedDate.split('-').map(Number);
+    const d = new Date(year, month - 1, day);
     d.setDate(d.getDate() + days);
-    setSelectedDate(d.toISOString().split('T')[0]);
+    setSelectedDate(
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    );
   };
 
   const isToday = () => {
-    return selectedDate === new Date().toISOString().split('T')[0];
+    return selectedDate === todayLocalISO();
   };
 
   const setDateToday = () => {
-    setSelectedDate(new Date().toISOString().split('T')[0]);
+    setSelectedDate(todayLocalISO());
   };
+
+  useEffect(() => {
+    if (!isToday()) return;
+    const timer = setInterval(() => { void fetchMatches(); }, 25_000);
+    return () => clearInterval(timer);
+  }, [selectedDate, fetchMatches]);
 
   // Filter matches
   const filterMatch = (m: MatchSummary, leagueGroup: LeagueMatches): boolean => {
@@ -212,9 +224,33 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
 
       {/* Matches List */}
       {loading ? (
-        <View style={styles.centerBox}>
-          <ActivityIndicator size="large" color={COLORS.volt} />
-          <Text style={styles.loadingText}>Fetching fixtures...</Text>
+        <View style={{ paddingHorizontal: 14, paddingTop: 14, gap: 10 }}>
+          <View style={{ width: 120, height: 12, borderRadius: 6, backgroundColor: COLORS.cardElevated }} />
+          {[0, 1, 2, 3, 4].map((k) => (
+            <View
+              key={k}
+              style={{
+                backgroundColor: COLORS.card,
+                borderRadius: 12,
+                padding: 14,
+                borderWidth: 1,
+                borderColor: COLORS.cardBorder,
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <View style={{ gap: 8 }}>
+                <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: COLORS.cardElevated }} />
+                <View style={{ width: 96, height: 12, borderRadius: 6, backgroundColor: COLORS.cardElevated }} />
+              </View>
+              <View style={{ width: 52, height: 22, borderRadius: 6, backgroundColor: COLORS.cardElevated }} />
+              <View style={{ gap: 8, alignItems: 'flex-end' }}>
+                <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: COLORS.cardElevated }} />
+                <View style={{ width: 88, height: 12, borderRadius: 6, backgroundColor: COLORS.cardElevated }} />
+              </View>
+            </View>
+          ))}
         </View>
       ) : totalMatchesCount === 0 ? (
         <View style={styles.centerBox}>

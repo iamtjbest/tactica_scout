@@ -3,10 +3,12 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import clsx from "clsx";
+import FollowButton from "@/components/FollowButton";
+import MatchSkeleton from "@/components/MatchSkeleton";
 import { getTournament, type TournamentDetail, type TournamentStanding,
          type TournamentFixture } from "@/lib/api";
 
-type Tab = "table" | "matches" | "teams";
+type Tab = "table" | "matches" | "teams" | "stats" | "bracket";
 
 /**
  * A published local competition, as a fan sees it.
@@ -37,11 +39,17 @@ export default function TournamentPage() {
       </main>
     );
   }
-  if (!d) return <main className="px-4 pt-6"><p className="text-mt text-sm">Loading...</p></main>;
+  if (!d) return <main className="max-w-screen-md mx-auto px-4 pt-6"><MatchSkeleton count={5} /></main>;
 
   const t = d.tournament;
   const hasTable = Boolean(d.standings?.length || Object.keys(d.group_tables ?? {}).length);
-  const tabs: Tab[] = hasTable ? ["matches", "table", "teams"] : ["matches", "teams"];
+  const tabs: Tab[] = [
+    "matches",
+    ...(hasTable ? ["table" as const] : []),
+    "teams",
+    "stats",
+    ...(t.format !== "league" ? ["bracket" as const] : []),
+  ];
 
   return (
     <main className="max-w-screen-md mx-auto px-4 pt-4 pb-24">
@@ -49,13 +57,18 @@ export default function TournamentPage() {
         ← Competitions
       </Link>
 
-      <h1 className="font-display font-black text-2xl text-white mt-2">{t.name}</h1>
-      <p className="text-mt text-sm mt-1">
-        {t.organizing_body} • {t.country}
-      </p>
-      <p className="text-mt2 text-xs mt-1 font-mono">
-        {seasonRange(t.start_date, t.end_date)}
-      </p>
+      <div className="flex items-start justify-between gap-3 mt-2">
+        <div>
+          <h1 className="font-display font-black text-2xl text-white">{t.name}</h1>
+          <p className="text-mt text-sm mt-1">
+            {t.organizing_body} • {t.country}
+          </p>
+          <p className="text-mt2 text-xs mt-1 font-mono">
+            {seasonRange(t.start_date, t.end_date)}
+          </p>
+        </div>
+        <FollowButton entityType="tournament" entityId={id} entityName={t.name} />
+      </div>
 
       <div className="flex gap-2 mt-4">
         {tabs.map((x) => (
@@ -73,6 +86,13 @@ export default function TournamentPage() {
       <div className="mt-4">
         {tab === "matches" && <Matches tournamentId={id} fixtures={d.fixtures} />}
         {tab === "table" && hasTable && <Tables d={d} />}
+        {tab === "stats" && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TournamentLeaders title="Golden Boot" stat="goals" rows={d.top_scorers ?? []} />
+            <TournamentLeaders title="Top Assists" stat="assists" rows={d.top_assists ?? []} />
+          </div>
+        )}
+        {tab === "bracket" && t.format !== "league" && <Bracket fixtures={d.fixtures} tournamentId={id} />}
         {tab === "teams" && (
           <div className="space-y-2">
             {d.teams.map((tm) => (
@@ -90,6 +110,68 @@ export default function TournamentPage() {
         )}
       </div>
     </main>
+  );
+}
+
+function TournamentLeaders({ title, stat, rows }: {
+  title: string; stat: string;
+  rows: { player_id: string; player_name: string; team_name: string; value: number }[];
+}) {
+  return (
+    <section className="card">
+      <h2 className="section-label mb-3">{title}</h2>
+      {rows.length ? (
+        <ol className="space-y-2">
+          {rows.slice(0, 10).map((player, index) => (
+            <li key={`${player.player_id}-${index}`} className="flex items-center gap-3 text-sm">
+              <span className="text-mt2 font-mono w-5">{index + 1}</span>
+              <span className="flex-1 min-w-0">
+                <span className="block text-white truncate">{player.player_name}</span>
+                <span className="block text-mt2 text-xs truncate">{player.team_name}</span>
+              </span>
+              <span className="font-mono font-bold text-volt">{player.value} {stat}</span>
+            </li>
+          ))}
+        </ol>
+      ) : <p className="text-mt text-sm">No {stat} recorded yet.</p>}
+    </section>
+  );
+}
+
+function Bracket({ fixtures, tournamentId }: {
+  fixtures: TournamentFixture[]; tournamentId: string;
+}) {
+  const rounds: Record<string, TournamentFixture[]> = {};
+  for (const fixture of fixtures) {
+    const round = (fixture.round || "Knockout").trim();
+    (rounds[round] ||= []).push(fixture);
+  }
+  const entries = Object.entries(rounds);
+  if (!entries.length) return <p className="text-mt text-sm">No bracket fixtures published yet.</p>;
+
+  return (
+    <div className="space-y-5">
+      {entries.map(([round, matches]) => (
+        <section key={round} className="space-y-2">
+          <h2 className="section-label">{round}</h2>
+          {matches.map((fixture) => (
+            <Link
+              key={fixture.id}
+              href={`/tournament/${tournamentId}/match/${fixture.id}`}
+              className="card flex items-center justify-between gap-3 hover:border-volt/40"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block text-white truncate">{fixture.home_team || "TBD"}</span>
+                <span className="block text-white truncate">{fixture.away_team || "TBD"}</span>
+              </span>
+              <span className="font-mono text-white text-right">
+                {fixture.home_score ?? "–"}<br />{fixture.away_score ?? "–"}
+              </span>
+            </Link>
+          ))}
+        </section>
+      ))}
+    </div>
   );
 }
 

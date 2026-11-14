@@ -64,6 +64,13 @@ export const TournamentMatchScreen: React.FC<any> = ({ route, navigation }) => {
 
   useEffect(() => { load(); }, [load]);
 
+  const liveStatus = String(d?.fixture?.status || '').toLowerCase();
+  useEffect(() => {
+    if (!['live', 'ht'].includes(liveStatus)) return;
+    const timer = setInterval(() => load(), 25_000);
+    return () => clearInterval(timer);
+  }, [liveStatus, load]);
+
   const openPlayer = useCallback((id: string, name: string) => {
     navigation.navigate('TournamentPlayer', {
       tournamentId, playerId: id, playerName: name,

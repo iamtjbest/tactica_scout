@@ -58,7 +58,7 @@ MATCH_TTL = 60  # seconds for live/upcoming matches; finished matches could cach
 
 
 def _today_str() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return datetime.now(timezone(timedelta(hours=1))).strftime("%Y-%m-%d")
 
 
 def _extract_events(data) -> list[dict]:
@@ -79,76 +79,76 @@ def matches_by_date(date: str):
     except ValueError:
         raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
 
-    ttl       = MATCH_TTL if date == _today_str() else 86400
-    cache_key = f"matches_by_date__v5__{date}"
-    cached    = cache_read(cache_key)
-    if cached and cache_age(cached) < ttl:
-        cached["cached"] = True
-        return cached
+    ttl = MATCH_TTL if date == _today_str() else 86400
+    cache_key = f"matches_by_date__bsd_v6__{date}"
+    cached = cache_read(cache_key)
+    is_cached = bool(cached and cache_age(cached) < ttl)
 
-    data = bsd_get("/events/", params={"date_from": date, "date_to": date, "limit": 500})
-    if data is None:
-        if cached:
-            cached["cached"] = True
-            cached["stale"]  = True
-            return cached
-        return {"_cached_at": time.time(), "date": date, "count": 0, "leagues": [], "cached": False,
-                "error": "BSD API unreachable"}
+    if is_cached:
+        bsd_leagues = cached.get("leagues", [])
+        bsd_count = cached.get("count", 0)
+        sample = cached.get("_debug_sample_event")
+    else:
+        data = bsd_get("/events/", params={"date_from": date, "date_to": date, "limit": 500})
+        if data is None and cached:
+            bsd_leagues = cached.get("leagues", [])
+            bsd_count = cached.get("count", 0)
+            sample = cached.get("_debug_sample_event")
+            is_cached = True
+        elif data is None:
+            bsd_leagues = []
+            bsd_count = 0
+            sample = None
+        else:
+            events = _extract_events(data)
+            league_map = get_league_id_map()
+            by_league: dict[tuple, list] = {}
+            for ev in events:
+                league = extract_league_name(ev, league_map)
+                league_id = ev.get("league_id") or ev.get("tournament_id") or ev.get("competition_id")
+                by_league.setdefault((league_id, league), []).append({
+                    "event_id": ev.get("id"),
+                    "home_team": ev.get("home_team", ""),
+                    "home_team_id": ev.get("home_team_id"),
+                    "away_team": ev.get("away_team", ""),
+                    "away_team_id": ev.get("away_team_id"),
+                    "home_score": ev.get("home_score"),
+                    "away_score": ev.get("away_score"),
+                    "minute": ev.get("current_minute") or 0,
+                    "status": ev.get("status", "notstarted"),
+                    "kickoff": ev.get("event_date", ""),
+                })
 
-    events     = _extract_events(data)
-    league_map = get_league_id_map()
+            league_order = {
+                "Premier League": 1, "Champions League": 2, "Europa League": 3,
+                "La Liga": 4, "Serie A": 5, "Bundesliga": 6, "Ligue 1": 7,
+                "MLS": 8, "Eredivisie": 9, "Primeira Liga": 10, "Championship": 11,
+            }
+            bsd_leagues = [
+                {"league_id": k[0], "league": k[1], "matches": v}
+                for k, v in by_league.items()
+            ]
+            bsd_leagues.sort(key=lambda x: (league_order.get(x["league"], 999), x["league"]))
+            bsd_count = len(events)
+            sample = debug_field(events[0] if events else None)
+            cache_write(cache_key, {
+                "_cached_at": time.time(),
+                "count": bsd_count,
+                "leagues": bsd_leagues,
+                "_debug_sample_event": sample,
+            })
 
-    by_league: dict[str, list] = {}
-    for ev in events:
-        league = extract_league_name(ev, league_map)
-        league_id = ev.get("league_id") or ev.get("tournament_id") or ev.get("competition_id")
-        group_key = (league_id, league)
-        by_league.setdefault(group_key, []).append({
-            "event_id":     ev.get("id"),
-            "home_team":    ev.get("home_team", ""),
-            "home_team_id": ev.get("home_team_id"),
-            "away_team":    ev.get("away_team", ""),
-            "away_team_id": ev.get("away_team_id"),
-            "home_score":   ev.get("home_score"),
-            "away_score":   ev.get("away_score"),
-            "minute":       ev.get("current_minute") or 0,
-            "status":       ev.get("status", "notstarted"),
-            "kickoff":      ev.get("event_date", ""),
-        })
-
-    # Sort leagues by priority, then alphabetically
-    league_order = {
-        "Premier League": 1,
-        "Champions League": 2,
-        "Europa League": 3,
-        "La Liga": 4,
-        "Serie A": 5,
-        "Bundesliga": 6,
-        "Ligue 1": 7,
-        "MLS": 8,
-        "Eredivisie": 9,
-        "Primeira Liga": 10,
-        "Championship": 11
-    }
-    leagues_list = [{"league_id": k[0], "league": k[1], "matches": v} for k, v in by_league.items()]
-    leagues_list.sort(key=lambda x: (league_order.get(x["league"], 999), x["league"]))
-
-    # Local competitions go at the top. Someone browsing Scout in Zaria
-    # cares more that their faculty is playing than that Everton are,
-    # and the big leagues are one scroll away either way.
+    # Local fixtures are queried on every request; their own date window
+    # and approval state can change independently of the BSD cache.
     local = _local_leagues(date)
-    leagues_list = local + leagues_list
-
-    result = {
+    return {
         "_cached_at": time.time(),
-        "date":       date,
-        "count":      len(events) + sum(len(g["matches"]) for g in local),
-        "leagues":    leagues_list,
-        "_debug_sample_event": debug_field(events[0] if events else None),
-        "cached":     False,
+        "date": date,
+        "count": bsd_count + sum(len(g["matches"]) for g in local),
+        "leagues": local + bsd_leagues,
+        "_debug_sample_event": sample,
+        "cached": is_cached,
     }
-    cache_write(cache_key, result)
-    return result
 
 
 def _local_leagues(date: str) -> list[dict]:
@@ -171,8 +171,8 @@ def _local_leagues(date: str) -> list[dict]:
     from app.routers.editor import _db, _rows
 
     try:
-        start = f"{date}T00:00:00"
-        end = f"{date}T23:59:59.999"
+        start = f"{date}T00:00:00+01:00"
+        end = f"{date}T23:59:59.999+01:00"
         fixtures = _rows(
             _db().table("fixtures")
             .select("id, tournament_id, kickoff_at, status, round, group_name, "

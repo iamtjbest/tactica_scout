@@ -57,7 +57,9 @@ export default function TopBar() {
 
 function SearchModal({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<{ teams: any[]; players: any[] } | null>(null);
+  const [results, setResults] = useState<{
+    tournaments: any[]; teams: any[]; players: any[];
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -105,6 +107,24 @@ function SearchModal({ onClose }: { onClose: () => void }) {
             <p className="p-8 text-center text-mt text-sm">Start typing to search...</p>
           ) : results ? (
             <div className="space-y-4 p-2">
+              {results.tournaments?.length > 0 && (
+                <div>
+                  <p className="text-xs font-mono uppercase tracking-widest text-mt mb-2 px-2">Local Competitions</p>
+                  {results.tournaments.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => {
+                        onClose();
+                        router.push(`/tournament/${t.id}`);
+                      }}
+                      className="w-full text-left p-3 hover:bg-white/5 rounded-lg flex items-center justify-between"
+                    >
+                      <span className="text-white font-semibold">{t.name}</span>
+                      <span className="text-xs text-mt">{t.organizing_body || t.country}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               {results.teams.length > 0 && (
                 <div>
                   <p className="text-xs font-mono uppercase tracking-widest text-mt mb-2 px-2">Teams</p>
@@ -131,7 +151,9 @@ function SearchModal({ onClose }: { onClose: () => void }) {
                       key={p.id}
                       onClick={() => {
                         onClose();
-                        router.push(`/player/${p.id}`);
+                        router.push(p.source === "local" && p.tournament_id
+                          ? `/tournament/${p.tournament_id}/player/${p.id}`
+                          : `/player/${p.id}`);
                       }}
                       className="w-full text-left p-3 hover:bg-white/5 rounded-lg flex items-center justify-between"
                     >
@@ -144,7 +166,8 @@ function SearchModal({ onClose }: { onClose: () => void }) {
                   ))}
                 </div>
               )}
-              {results.teams.length === 0 && results.players.length === 0 && (
+              {(results.tournaments?.length ?? 0) === 0 &&
+                results.teams.length === 0 && results.players.length === 0 && (
                 <p className="p-8 text-center text-mt text-sm">No results found for "{query}"</p>
               )}
             </div>

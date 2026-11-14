@@ -206,6 +206,57 @@ def public_tournament(tournament_id: str):
         .order("kickoff_at").execute()
     )
 
+    goal_counts: dict[str, dict] = {}
+    assist_counts: dict[str, dict] = {}
+    fixture_ids = [f["id"] for f in fixtures_raw]
+    if fixture_ids:
+        event_rows = _rows(
+            _db().table("match_events")
+            .select("type, player_id, related_player_id, tournament_team_id")
+            .in_("fixture_id", fixture_ids)
+            .in_("type", ["goal", "penalty_scored"])
+            .execute()
+        )
+        for event in event_rows:
+            player_id = event.get("player_id")
+            assist_id = event.get("related_player_id")
+            team_id = event.get("tournament_team_id")
+            if player_id:
+                scorer = goal_counts.setdefault(player_id, {"value": 0, "team_id": team_id})
+                scorer["value"] += 1
+            if assist_id:
+                assister = assist_counts.setdefault(assist_id, {"value": 0, "team_id": team_id})
+                assister["value"] += 1
+
+    stat_player_ids = sorted(set(goal_counts) | set(assist_counts))
+    players_by_id = {}
+    if stat_player_ids:
+        players_by_id = {
+            player["id"]: player
+            for player in _rows(
+                _db().table("players").select("id, first_name, last_name, photo_url")
+                .in_("id", stat_player_ids).execute()
+            )
+        }
+
+    def rank_stats(bucket: dict[str, dict]) -> list[dict]:
+        ranked = []
+        for player_id, info in bucket.items():
+            player = players_by_id.get(player_id) or {}
+            team = teams.get(info["team_id"], {})
+            name = f"{player.get('first_name', '')} {player.get('last_name', '')}".strip() or "Unknown"
+            ranked.append({
+                "player_id": player_id,
+                "player_name": name,
+                "photo_url": player.get("photo_url"),
+                "team_id": info["team_id"],
+                "team_name": team.get("name") or "Unknown",
+                "team_crest": team.get("crest_url"),
+                "value": info["value"],
+            })
+        ranked.sort(key=lambda item: (-item["value"], item["player_name"].lower()))
+        return ranked[:20]
+
     fixtures = []
     for fx in fixtures_raw:
         home = teams.get(fx["home_team_id"], {})
@@ -248,6 +299,8 @@ def public_tournament(tournament_id: str):
         "tournament":  t,
         "teams":       list(teams.values()),
         "fixtures":    fixtures,
+        "top_scorers": rank_stats(goal_counts),
+        "top_assists": rank_stats(assist_counts),
         "standings":   standings,
         "group_tables": tables,
         # Which tiebreakers actually ran. head_to_head is in the schema

@@ -27,15 +27,13 @@ interface MatchDetailScreenProps {
   navigation: any;
 }
 
-type TabType = 'overview' | 'lineups' | 'ratings' | 'stats' | 'h2h' | 'facts';
+type TabType = 'overview' | 'timeline' | 'lineups' | 'ratings' | 'stats' | 'h2h' | 'facts';
 
 export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, navigation }) => {
   const { eventId, matchSummary } = route.params;
   const [detail, setDetail] = useState<MatchDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
-  // Facts come from their own endpoint. Tactica's backend sleeps on
-  // Render's free tier, so a cold start costs this tab, not the page.
   const [facts, setFacts] = useState<MatchFacts | null>(null);
   const [factsFailed, setFactsFailed] = useState(false);
 
@@ -47,13 +45,14 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
   }, [eventId]);
 
   useEffect(() => {
-    if (activeTab !== 'facts' || facts || factsFailed) return;
     let alive = true;
+    setFacts(null);
+    setFactsFailed(false);
     getMatchFacts(eventId)
       .then((f: MatchFacts) => { if (alive) setFacts(f); })
       .catch(() => { if (alive) setFactsFailed(true); });
     return () => { alive = false; };
-  }, [activeTab, eventId, facts, factsFailed]);
+  }, [eventId]);
 
   const home = detail?.home_team || matchSummary?.home_team || 'Home';
   const away = detail?.away_team || matchSummary?.away_team || 'Away';
@@ -159,7 +158,7 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
       {/* Tabs Bar */}
       <View style={styles.tabsStrip}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12 }}>
-          {(['overview', 'lineups', 'ratings', 'stats', 'h2h', 'facts'] as TabType[]).map((t) => {
+          {(['overview', 'timeline', 'lineups', 'ratings', 'stats', 'h2h', 'facts'] as TabType[]).map((t) => {
             const isActive = activeTab === t;
             return (
               <TouchableOpacity
@@ -187,6 +186,39 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
           {/* TAB 1: OVERVIEW */}
           {activeTab === 'overview' && (
             <View>
+              {facts &&
+                (facts.home?.win_prob != null || facts.away?.win_prob != null) && (
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => setActiveTab('facts')}
+                  style={[styles.cardSection, { marginBottom: 12 }]}
+                >
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>TACTICA WIN PROBABILITY</Text>
+                    <Text style={{ color: COLORS.volt, fontSize: 11, fontWeight: '700' }}>Full ratings →</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', height: 6, borderRadius: 999, backgroundColor: COLORS.bg, overflow: 'hidden', gap: 2 }}>
+                    <View style={{ width: `${facts.home?.win_prob ?? 0}%`, backgroundColor: COLORS.volt }} />
+                    {facts.draw_prob != null && (
+                      <View style={{ width: `${facts.draw_prob}%`, backgroundColor: 'rgba(255,255,255,0.25)' }} />
+                    )}
+                    <View style={{ width: `${facts.away?.win_prob ?? 0}%`, backgroundColor: '#38bdf8' }} />
+                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+                    <Text style={{ color: COLORS.volt, fontSize: 12, fontWeight: '800' }}>
+                      {facts.home?.win_prob?.toFixed(1)}%
+                    </Text>
+                    {facts.draw_prob != null && (
+                      <Text style={{ color: COLORS.textSecondary, fontSize: 11, fontWeight: '600' }}>
+                        Draw {facts.draw_prob.toFixed(1)}%
+                      </Text>
+                    )}
+                    <Text style={{ color: '#38bdf8', fontSize: 12, fontWeight: '800' }}>
+                      {facts.away?.win_prob?.toFixed(1)}%
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
               {/* Form Strip -- mirrors scout-web's TeamFormCard:
                   opponent crest, name and score, tappable through to the
                   match. Was W/D/L pills only, which told you a result
@@ -301,6 +333,68 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
                   <Text style={styles.noDataText}>No incidents recorded for this event.</Text>
                 )}
               </View>
+            </View>
+          )}
+
+          {activeTab === 'timeline' && (
+            <View style={styles.cardSection}>
+              <Text style={styles.sectionTitle}>MATCH TIMELINE</Text>
+              {detail?.incidents && detail.incidents.length > 0 ? (
+                [...detail.incidents]
+                  .sort((a: any, b: any) => {
+                    const aMin = a.minute ?? (a.period_second != null ? Math.floor(a.period_second / 60) : 0);
+                    const bMin = b.minute ?? (b.period_second != null ? Math.floor(b.period_second / 60) : 0);
+                    return bMin - aMin;
+                  })
+                  .map((inc: any, idx: number) => {
+                    const type = String(inc.type || inc.incident_type || '').toLowerCase();
+                    const minute = inc.minute ?? (inc.period_second != null ? Math.floor(inc.period_second / 60) : '-');
+                    const player = inc.player || inc.player_name || inc.scorer || '';
+                    const sideLabel = inc.is_home === true ? home : inc.is_home === false ? away : 'Event';
+                    let iconName: keyof typeof Ionicons.glyphMap = 'time-outline';
+                    let tint = COLORS.text;
+                    if (type.includes('goal')) {
+                      iconName = 'football';
+                      tint = COLORS.volt;
+                    } else if (type.includes('red')) {
+                      iconName = 'square';
+                      tint = '#FF4444';
+                    } else if (type.includes('yellow')) {
+                      iconName = 'square';
+                      tint = '#FFC53D';
+                    } else if (type.includes('sub')) {
+                      iconName = 'swap-horizontal';
+                      tint = '#38bdf8';
+                    }
+
+                    return (
+                      <View key={inc.id || `tl-${idx}`} style={styles.incidentRow}>
+                        <Text style={styles.incidentMin}>{minute}&apos;</Text>
+                        <View style={styles.incidentIconWrap}>
+                          <Ionicons name={iconName} size={13} color={tint} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.incidentDesc, { color: tint, fontWeight: '700' }]} numberOfLines={1}>
+                            {type.toUpperCase().replace(/_/g, ' ')}{player ? ` • ${player}` : ''}
+                          </Text>
+                          {!!inc.assist && (
+                            <Text style={{ color: COLORS.textSecondary, fontSize: 11 }}>Assist: {inc.assist}</Text>
+                          )}
+                          {!!inc.player_in && (
+                            <Text style={{ color: COLORS.textSecondary, fontSize: 11 }}>
+                              In: {inc.player_in} {inc.player_out ? `• Out: ${inc.player_out}` : ''}
+                            </Text>
+                          )}
+                        </View>
+                        <Text style={{ color: COLORS.textDim, fontSize: 10, maxWidth: 80 }} numberOfLines={1}>
+                          {sideLabel}
+                        </Text>
+                      </View>
+                    );
+                  })
+              ) : (
+                <Text style={styles.noDataText}>No key events (goals, cards, subs) reported yet.</Text>
+              )}
             </View>
           )}
 

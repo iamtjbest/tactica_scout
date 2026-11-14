@@ -61,7 +61,10 @@ const MIN_LEAD_DAYS = 0;
 function earliestStart(): string {
   const d = new Date();
   d.setDate(d.getDate() + MIN_LEAD_DAYS);
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 type Proof = { type: string; url: string; note: string };
@@ -99,7 +102,20 @@ export default function CreateWizard({
   const datesOk =
     !!f.start_date && !!f.end_date && f.end_date >= f.start_date &&
     f.start_date >= earliestStart();
-  const step1Ok = missing.length === 0 && datesOk && proofs.length > 0;
+  const step1Ok = missing.length === 0 && datesOk;
+
+  const nextFromDetails = () => {
+    if (missing.length > 0) {
+      setError(`Complete the required fields: ${missing.join(", ").replace(/_/g, " ")}.`);
+      return;
+    }
+    if (!datesOk) {
+      setError("Check that the end date is on or after the start date.");
+      return;
+    }
+    setError(null);
+    setStep(2);
+  };
 
   const addProof = () => {
     if (!proofDraft.url.trim()) return;
@@ -108,6 +124,11 @@ export default function CreateWizard({
   };
 
   const create = async () => {
+    if (proofs.length === 0) {
+      setError("Add at least one proof of legitimacy before submitting for review.");
+      setStep(1);
+      return;
+    }
     setBusy(true); setError(null);
     try {
       const t = await createTournament({
@@ -183,9 +204,7 @@ export default function CreateWizard({
 
             {/* Stated up front, not discovered on submit. */}
             <p className="text-amber text-xs">
-              * The start date must be at least {MIN_LEAD_DAYS} days from today.
-              We need time to review the competition, and you need time to fix
-              anything we send back. Earliest you can start is {earliestStart()}.
+              * The start date can be today or later. Earliest you can start is {earliestStart()}.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-bd">
@@ -252,16 +271,15 @@ export default function CreateWizard({
               Cancel
             </button>
             <div className="text-right">
-              {!step1Ok && (
+              {error && <p className="text-red2 text-xs mb-2">{error}</p>}
+              {!step1Ok && !error && (
                 <p className="text-mt2 text-xs mb-2">
                   {missing.length > 0
                     ? `${missing.length} field(s) still to fill`
-                    : !datesOk
-                    ? "Check the dates"
-                    : "Add at least one proof"}
+                    : "Check the dates"}
                 </p>
               )}
-              <button className="btn-volt" disabled={!step1Ok} onClick={() => setStep(2)}>
+              <button className="btn-volt" type="button" onClick={nextFromDetails}>
                 Next step
               </button>
             </div>

@@ -5,6 +5,7 @@ import { getMatchesByDate, getMe, type LeagueMatches, type MatchSummary } from "
 import { isSignedIn } from "@/lib/auth";
 import MatchCard from "@/components/MatchCard";
 import DateNav from "@/components/DateNav";
+import MatchSkeleton from "@/components/MatchSkeleton";
 
 type StatusFilter = "all" | "following" | "live" | "upcoming" | "finished";
 const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
@@ -30,14 +31,14 @@ function matchPasses(m: MatchSummary, filter: StatusFilter): boolean {
   return !isMatchFinished(m.status) && !isMatchLive(m.status); // "upcoming"
 }
 
-function isFollowed(m: MatchSummary, leagueId: number | null | undefined, followedTokens: string[]): boolean {
+function isFollowed(m: MatchSummary, lg: LeagueMatches, followedTokens: string[]): boolean {
   if (!followedTokens || followedTokens.length === 0) return false;
   return followedTokens.some((token) => {
     const parts = token.split(':');
     if (parts.length >= 2) {
       const [type, rawId] = parts;
-      if (type === "tournament" && String(leagueId ?? "") === rawId) return true;
-      if (type === "league" && String(leagueId) === rawId) return true;
+      if (type === "tournament" && String(lg.tournament_id ?? "") === rawId) return true;
+      if (type === "league" && String(lg.league_id ?? "") === rawId) return true;
       if (type === "team" && (String(m.home_team_id) === rawId || String(m.away_team_id) === rawId)) return true;
       return false;
     }
@@ -48,7 +49,10 @@ function isFollowed(m: MatchSummary, leagueId: number | null | undefined, follow
 }
 
 function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${month}-${day}`;
 }
 
 export default function HomePage() {
@@ -105,7 +109,7 @@ export default function HomePage() {
        
        let filteredMatches = lg.matches;
        if (statusFilter === "following") {
-         filteredMatches = filteredMatches.filter(m => isFollowed(m, lg.league_id, followedTeams));
+         filteredMatches = filteredMatches.filter(m => isFollowed(m, lg, followedTeams));
        } else {
          filteredMatches = filteredMatches.filter((m) => matchPasses(m, statusFilter));
        }
@@ -134,7 +138,7 @@ export default function HomePage() {
         ))}
       </div>
 
-      {loading && <p className="text-mt text-sm">Loading matches...</p>}
+      {loading && <MatchSkeleton />}
 
       {error && (
         <div className="card border-red2/40">

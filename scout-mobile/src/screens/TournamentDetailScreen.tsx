@@ -18,8 +18,9 @@ import {
   getTournament,
   type TournamentDetail, type TournamentFixture, type TournamentStanding,
 } from '../services/api';
+import { FollowButton } from '../components/FollowButton';
 
-type Tab = 'matches' | 'table' | 'teams';
+type Tab = 'matches' | 'table' | 'teams' | 'stats' | 'bracket';
 
 /**
  * Organisers type the group as "B" or as "Group B". Prefixing blindly is
@@ -67,6 +68,15 @@ export const TournamentDetailScreen: React.FC<any> = ({ route, navigation }) => 
 
   useEffect(() => { load(); }, [load]);
 
+  const hasLive = Boolean(d?.fixtures?.some((fx) =>
+    ['live', 'ht'].includes(String(fx.status).toLowerCase())
+  ));
+  useEffect(() => {
+    if (!hasLive) return;
+    const timer = setInterval(() => load(), 25_000);
+    return () => clearInterval(timer);
+  }, [hasLive, load]);
+
   React.useLayoutEffect(() => {
     navigation.setOptions({ title: tournamentName || 'Competition' });
   }, [navigation, tournamentName]);
@@ -81,7 +91,13 @@ export const TournamentDetailScreen: React.FC<any> = ({ route, navigation }) => 
   const hasTable = Boolean(
     d.standings?.length || Object.keys(d.group_tables ?? {}).length
   );
-  const tabs: Tab[] = hasTable ? ['matches', 'table', 'teams'] : ['matches', 'teams'];
+  const tabs: Tab[] = [
+    'matches',
+    ...(hasTable ? ['table' as const] : []),
+    'teams',
+    'stats',
+    ...(d.tournament.format !== 'league' ? ['bracket' as const] : []),
+  ];
 
   return (
     <ScrollView
@@ -92,12 +108,19 @@ export const TournamentDetailScreen: React.FC<any> = ({ route, navigation }) => 
                         onRefresh={() => { setRefreshing(true); load(); }} />
       }
     >
-      <View>
-        <Text style={s.title}>{d.tournament.name}</Text>
-        <Text style={s.muted}>
-          {d.tournament.organizing_body} • {d.tournament.country}
-        </Text>
-        <Text style={s.mono}>{seasonRange(d.tournament.start_date, d.tournament.end_date)}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={s.title}>{d.tournament.name}</Text>
+          <Text style={s.muted}>
+            {d.tournament.organizing_body} • {d.tournament.country}
+          </Text>
+          <Text style={s.mono}>{seasonRange(d.tournament.start_date, d.tournament.end_date)}</Text>
+        </View>
+        <FollowButton
+          teamName={d.tournament.name}
+          token={`tournament:${tournamentId}:${d.tournament.name}`}
+          size="sm"
+        />
       </View>
 
       <View style={s.tabs}>
@@ -114,6 +137,36 @@ export const TournamentDetailScreen: React.FC<any> = ({ route, navigation }) => 
       {tab === 'matches' && (
         <Matches fixtures={d.fixtures} navigation={navigation}
                  tournamentId={tournamentId} />
+      )}
+
+      {tab === 'bracket' && d.tournament.format !== 'league' && (
+        <Matches fixtures={d.fixtures} navigation={navigation}
+                 tournamentId={tournamentId} />
+      )}
+
+      {tab === 'stats' && (
+        <View style={{ gap: 12 }}>
+          {([
+            { title: 'GOLDEN BOOT', rows: d.top_scorers ?? [], suffix: 'G' },
+            { title: 'TOP ASSISTS', rows: d.top_assists ?? [], suffix: 'A' },
+          ] as const).map(({ title, rows, suffix }) => (
+            <View key={title} style={s.card}>
+              <Text style={s.label}>{title}</Text>
+              {rows.length ? rows.slice(0, 10).map((player, index) => (
+                <View key={`${player.player_id}-${index}`} style={[s.row, { paddingVertical: 8 }]}>
+                  <Text style={[s.mono, { width: 22 }]}>{index + 1}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.body} numberOfLines={1}>{player.player_name}</Text>
+                    <Text style={s.muted} numberOfLines={1}>{player.team_name}</Text>
+                  </View>
+                  <Text style={[s.body, { color: COLORS.volt, fontWeight: '800' }]}>
+                    {player.value} {suffix}
+                  </Text>
+                </View>
+              )) : <Text style={s.muted}>No {title.toLowerCase()} recorded yet.</Text>}
+            </View>
+          ))}
+        </View>
       )}
 
       {tab === 'table' && hasTable && (

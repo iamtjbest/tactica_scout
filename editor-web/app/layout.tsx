@@ -18,6 +18,7 @@ export const metadata: Metadata = {
   },
   description: DESCRIPTION,
   applicationName: "Scout Editor",
+  icons: { icon: "/favicon.svg" },
   alternates: { canonical: "/" },
   openGraph: {
     type: "website",

@@ -5,22 +5,26 @@ import { ChevronLeft, ChevronRight, Calendar } from "lucide-react";
 const WINDOW = 3; // days shown on each side of the selected date
 
 function toISODate(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${month}-${day}`;
 }
 
 function shiftDate(iso: string, days: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
+  const [year, month, day] = iso.split("-").map(Number);
+  const d = new Date(year, month - 1, day);
+  d.setDate(d.getDate() + days);
   return toISODate(d);
 }
 
 function dayLabel(iso: string): { top: string; bottom: string } {
   const todayISO = toISODate(new Date());
-  const d = new Date(`${iso}T00:00:00Z`);
+  const [year, month, day] = iso.split("-").map(Number);
+  const d = new Date(year, month - 1, day);
   if (iso === todayISO) return { top: "TODAY", bottom: "" };
   return {
-    top: d.toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" }).toUpperCase(),
-    bottom: d.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }),
+    top: d.toLocaleDateString("en-GB", { weekday: "short" }).toUpperCase(),
+    bottom: d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
   };
 }
 

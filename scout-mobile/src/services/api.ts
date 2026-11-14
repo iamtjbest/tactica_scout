@@ -645,7 +645,19 @@ export type TournamentDetail = {
   fixtures: TournamentFixture[];
   standings: TournamentStanding[] | null;
   group_tables: Record<string, TournamentStanding[]> | null;
+  top_scorers: TournamentTopStat[];
+  top_assists: TournamentTopStat[];
   points_rules?: { win: number; draw: number; loss: number };
+};
+
+export type TournamentTopStat = {
+  player_id: string;
+  player_name: string;
+  photo_url: string | null;
+  team_id: string;
+  team_name: string;
+  team_crest: string | null;
+  value: number;
 };
 
 export type TournamentMatchEvent = {

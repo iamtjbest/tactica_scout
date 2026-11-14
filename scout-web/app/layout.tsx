@@ -22,6 +22,7 @@ export const metadata: Metadata = {
   },
   description: DESCRIPTION,
   applicationName: "Scout by Tactica",
+  icons: { icon: "/favicon.svg" },
   manifest: "/manifest.json",
   alternates: { canonical: "/" },
   openGraph: {
