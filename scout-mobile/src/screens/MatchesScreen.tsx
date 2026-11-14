@@ -104,7 +104,24 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
     return () => clearInterval(timer);
   }, [selectedDate, fetchMatches]);
 
-  // Filter matches
+  const isTokenMatch = (m: MatchSummary, leagueGroup: LeagueMatches): boolean => {
+    if (!followedTeams || followedTeams.length === 0) return false;
+    return followedTeams.some((token) => {
+      const parts = token.split(':');
+      if (parts.length >= 2) {
+        const [kind, rawId] = parts;
+        if (kind === 'tournament' && leagueGroup.tournament_id === rawId) return true;
+        if (kind === 'league' && String(leagueGroup.league_id) === rawId) return true;
+        if (kind === 'team' && (String(m.home_team_id) === rawId || String(m.away_team_id) === rawId)) return true;
+        return false;
+      }
+      return (
+        m.home_team?.toLowerCase() === token.toLowerCase() ||
+        m.away_team?.toLowerCase() === token.toLowerCase()
+      );
+    });
+  };
+
   const filterMatch = (m: MatchSummary, leagueGroup: LeagueMatches): boolean => {
     const status = String(m.status || '').toLowerCase();
     const isLive =
@@ -119,28 +136,7 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
     if (activeFilter === 'live') return isLive;
     if (activeFilter === 'finished') return isFinished;
     if (activeFilter === 'upcoming') return isUpcoming;
-    if (activeFilter === 'following') {
-      if (!followedTeams || followedTeams.length === 0) return false;
-      return followedTeams.some((token) => {
-        const parts = token.split(':');
-        if (parts.length >= 2) {
-          const [kind, rawId] = parts;
-          if (kind === 'tournament' && leagueGroup.tournament_id === rawId) return true;
-          if (kind === 'league' && String(leagueGroup.league_id) === rawId) return true;
-          if (
-            kind === 'team' &&
-            (String(m.home_team_id) === rawId || String(m.away_team_id) === rawId)
-          ) {
-            return true;
-          }
-          return false;
-        }
-        return (
-          m.home_team?.toLowerCase() === token.toLowerCase() ||
-          m.away_team?.toLowerCase() === token.toLowerCase()
-        );
-      });
-    }
+    if (activeFilter === 'following') return isTokenMatch(m, leagueGroup);
     return true; // 'all'
   };
 
@@ -148,9 +144,15 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
   const filteredLeagues = leagues
     .map((l) => ({
       ...l,
-      matches: l.matches.filter((m) => filterMatch(m, l)),
+      matches: l.matches
+        .filter((m) => filterMatch(m, l))
+        .sort((a, b) => Number(isTokenMatch(b, l)) - Number(isTokenMatch(a, l))),
     }))
-    .filter((l) => l.matches.length > 0);
+    .filter((l) => l.matches.length > 0)
+    .sort((a, b) =>
+      Number(b.matches.some((m) => isTokenMatch(m, b))) -
+      Number(a.matches.some((m) => isTokenMatch(m, a)))
+    );
 
   const totalMatchesCount = filteredLeagues.reduce(
     (acc, cur) => acc + cur.matches.length,
