@@ -80,6 +80,13 @@ export default function SignIn() {
             One account works across Scout and the editor. If someone sent you
             a join code, sign in first, then open the link they gave you.
           </p>
+
+          <p className="text-mt2 text-xs mt-4 leading-relaxed">
+            Need an account? {" "}
+            <a href="/signup" className="text-volt hover:text-volt2 transition-colors">
+              Create one
+            </a>
+          </p>
         </div>
       </div>
 

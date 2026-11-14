@@ -19,7 +19,7 @@ import { reviewQueue, getInbox } from "@/lib/api";
  * all. The rail keeps Dashboard, Inbox and Settings one click away from
  * anywhere without taking the room.
  */
-const BARE = ["/", "/signin"];
+const BARE = ["/", "/signin", "/signup"];
 const isRail = (path: string) => path.startsWith("/t/");
 
 const NAV = [

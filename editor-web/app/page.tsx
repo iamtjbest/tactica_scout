@@ -69,7 +69,7 @@ export default function Landing() {
             Contact
           </a>
           <Link
-            href="/signin"
+            href="/signup"
             className="bg-volt text-bg font-bold px-4 py-2 rounded-xl
                        hover:bg-volt2 hover:shadow-volt transition-all duration-200"
           >
@@ -125,7 +125,7 @@ export default function Landing() {
             <div className="mt-9 flex flex-wrap items-center gap-3
                             animate-[fadeUp_0.6s_ease-out_0.24s_both]">
               <Link
-                href="/signin"
+                href="/signup"
                 className="bg-volt text-bg font-bold text-[15px] px-7 py-3.5 rounded-xl
                            hover:bg-volt2 hover:shadow-volt transition-all duration-200"
               >
