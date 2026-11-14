@@ -112,6 +112,28 @@ def _fixture_with_tournament(fixture_id: str, user: dict,
     return fx, t
 
 
+def _require_kickoff_reached(fx: dict):
+    status = str(fx.get("status") or "").lower()
+    if status in {"live", "ht", "ft"}:
+        return
+    raw_ko = fx.get("kickoff_at")
+    if not raw_ko:
+        return
+    try:
+        ko = datetime.fromisoformat(str(raw_ko).replace("Z", "+00:00"))
+        if ko.tzinfo is None:
+            ko = ko.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) + timedelta(minutes=15) < ko:
+            raise HTTPException(
+                status_code=409,
+                detail="This match hasn't kicked off yet. Score and event updates unlock at kickoff time.",
+            )
+    except HTTPException:
+        raise
+    except (TypeError, ValueError, OverflowError):
+        pass
+
+
 def _teams(tournament_id: str) -> list[dict]:
     return _rows(
         _db().table("tournament_teams")
@@ -441,7 +463,8 @@ def set_score(fixture_id: str, body: ScoreIn, user: dict = Depends(require_user)
     wrong score in one tap without touching the goal log, and needs to
     be able to put a score up before anyone has keyed in who scored.
     """
-    _fixture_with_tournament(fixture_id, user, need="editor")
+    fx, _ = _fixture_with_tournament(fixture_id, user, need="editor")
+    _require_kickoff_reached(fx)
 
     raw = body.model_dump(exclude_unset=True)
     patch = {
@@ -501,6 +524,7 @@ def add_event(fixture_id: str, body: EventIn, user: dict = Depends(require_user)
     result the referee gave.
     """
     fx, t = _fixture_with_tournament(fixture_id, user, need="editor")
+    _require_kickoff_reached(fx)
 
     if body.type not in EVENT_TYPES:
         raise HTTPException(

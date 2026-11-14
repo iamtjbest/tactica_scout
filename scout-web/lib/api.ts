@@ -244,37 +244,103 @@ export type StandingsRow = {
 
 export type StandingsGroup = { group: string; standings: StandingsRow[] };
 
-export async function getStandings(leagueId: number): Promise<{
+export type LeagueSeason = {
+  id: number | null;
+  label: string;
+  is_current: boolean;
+  winner_name: string | null;
+  winner_id: number | null;
+};
+
+export async function getLeagueSeasons(leagueId: number): Promise<{
   league_id: number;
   league: string;
-  standings: StandingsRow[] | null;
-  groups: StandingsGroup[] | null;
+  country: string;
+  seasons: LeagueSeason[];
 }> {
-  const res = await fetch(`${API_BASE}/api/standings?league_id=${leagueId}`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`standings failed: ${res.status}`);
+  const res = await fetch(`${API_BASE}/api/leagues/${leagueId}/seasons`, { cache: "no-store" });
+  if (!res.ok) throw new Error(await parseErr(res, `seasons failed: ${res.status}`));
   return res.json();
 }
 
-export async function getLeagueFixtures(leagueId: number): Promise<{ league_id: number; matches: MatchSummary[] }> {
-  const res = await fetch(`${API_BASE}/api/leagues/${leagueId}/fixtures`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`league fixtures failed: ${res.status}`);
+export async function getStandings(
+  leagueId: number,
+  seasonId?: number | null
+): Promise<{
+  league_id: number;
+  league: string;
+  country?: string;
+  standings: StandingsRow[] | null;
+  groups: StandingsGroup[] | null;
+}> {
+  const qs = seasonId != null ? `&season_id=${seasonId}` : "";
+  const res = await fetch(`${API_BASE}/api/standings?league_id=${leagueId}${qs}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(await parseErr(res, `standings failed: ${res.status}`));
+  return res.json();
+}
+
+export async function getLeagueFixtures(
+  leagueId: number,
+  seasonId?: number | null
+): Promise<{ league_id: number; matches: MatchSummary[] }> {
+  const qs = seasonId != null ? `?season_id=${seasonId}` : "";
+  const res = await fetch(`${API_BASE}/api/leagues/${leagueId}/fixtures${qs}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(await parseErr(res, `league fixtures failed: ${res.status}`));
   return res.json();
 }
 
 export type TopStatPlayer = {
   rank: number;
-  player_id: number;
+  player_id: number | null;
   player_name: string;
-  position: string;
-  team_id: number;
+  team_id: number | null;
   team_name: string;
   value: number;
-  matches: number;
+  position?: string;
+  matches?: number;
 };
 
-export async function getLeagueTopStats(leagueId: number): Promise<{ league_id: number; scorers: TopStatPlayer[]; assists: TopStatPlayer[] }> {
-  const res = await fetch(`${API_BASE}/api/leagues/${leagueId}/top-stats`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`league top stats failed: ${res.status}`);
+export async function getLeagueTopStats(
+  leagueId: number,
+  seasonId?: number | null
+): Promise<{
+  league_id: number;
+  scorers: TopStatPlayer[];
+  assists: TopStatPlayer[];
+  ratings: TopStatPlayer[];
+  cards: TopStatPlayer[];
+}> {
+  const qs = seasonId != null ? `?season_id=${seasonId}` : "";
+  const res = await fetch(`${API_BASE}/api/leagues/${leagueId}/top-stats${qs}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(await parseErr(res, `top stats failed: ${res.status}`));
+  return res.json();
+}
+
+export type LeagueTeamStat = {
+  team_id: number | null;
+  team: string;
+  played: number;
+  goals_per_match: number;
+  conceded_per_match: number;
+  clean_sheets: number;
+  win_rate: number;
+  possession_avg: number | null;
+};
+
+export async function getLeagueTeamStats(
+  leagueId: number,
+  seasonId?: number | null
+): Promise<{
+  league_id: number;
+  goals_per_match: LeagueTeamStat[];
+  conceded_per_match: LeagueTeamStat[];
+  clean_sheets: LeagueTeamStat[];
+  win_rate: LeagueTeamStat[];
+  possession: LeagueTeamStat[];
+}> {
+  const qs = seasonId != null ? `?season_id=${seasonId}` : "";
+  const res = await fetch(`${API_BASE}/api/leagues/${leagueId}/team-stats${qs}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(await parseErr(res, `team stats failed: ${res.status}`));
   return res.json();
 }
 
@@ -342,7 +408,11 @@ async function parseErr(res: Response, fallback: string): Promise<string> {
     const body = await res.json();
     const detail = body?.detail;
     if (Array.isArray(detail)) {
-      return detail.map((item: any) => item?.msg || JSON.stringify(item)).join("; ") || fallback;
+      return detail.map((item: any) => {
+        const loc = Array.isArray(item?.loc) ? item.loc.join(".") : "";
+        const message = item?.msg || JSON.stringify(item);
+        return loc ? `${loc}: ${message}` : message;
+      }).join("; ") || fallback;
     }
     if (typeof detail === "string" && detail.trim()) return detail;
     if (detail && typeof detail === "object") return JSON.stringify(detail);

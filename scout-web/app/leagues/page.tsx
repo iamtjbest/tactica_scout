@@ -3,39 +3,7 @@ import { useEffect, useState } from "react";
 import { getLeagues, getStandings, type LeagueOption, type StandingsRow, type StandingsGroup } from "@/lib/api";
 import clsx from "clsx";
 import Link from "next/link";
-
-function StandingsTable({ rows }: { rows: StandingsRow[] }) {
-  return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="text-mt text-xs uppercase tracking-wide border-b border-bd">
-          <th className="text-left font-semibold py-2 pr-2">#</th>
-          <th className="text-left font-semibold py-2 pr-2">Team</th>
-          <th className="text-center font-semibold py-2 px-1">P</th>
-          <th className="text-center font-semibold py-2 px-1">W</th>
-          <th className="text-center font-semibold py-2 px-1">D</th>
-          <th className="text-center font-semibold py-2 px-1">L</th>
-          <th className="text-center font-semibold py-2 px-1">GD</th>
-          <th className="text-center font-semibold py-2 pl-1">Pts</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r, i) => (
-          <tr key={r.team_id ?? `${r.team}-${i}`} className="border-b border-bd/50 last:border-0">
-            <td className="py-2 pr-2 text-mt">{r.position ?? i + 1}</td>
-            <td className="py-2 pr-2 text-white font-semibold truncate max-w-[140px]">{r.team}</td>
-            <td className="py-2 px-1 text-center text-mt">{r.played}</td>
-            <td className="py-2 px-1 text-center text-mt">{r.won}</td>
-            <td className="py-2 px-1 text-center text-mt">{r.drawn}</td>
-            <td className="py-2 px-1 text-center text-mt">{r.lost}</td>
-            <td className="py-2 px-1 text-center text-mt">{r.goal_diff}</td>
-            <td className="py-2 pl-1 text-center text-white font-bold">{r.points}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
+import StandingsTable from "@/components/StandingsTable";
 
 export default function LeaguesPage() {
   const [leagues, setLeagues] = useState<LeagueOption[]>([]);
@@ -123,7 +91,11 @@ export default function LeaguesPage() {
 
       {!loadingTable && !error && groups && groups.length > 0 && (
         <div className="space-y-4">
-          <p className="section-label">{leagueName}</p>
+          {selected !== null && (
+            <Link href={`/league/${selected}`} className="section-label hover:text-volt">
+              {leagueName}
+            </Link>
+          )}
           {groups.map((g) => (
             <div key={g.group} className="card overflow-x-auto">
               <p className="text-mt text-xs uppercase tracking-wide mb-2">{g.group}</p>
@@ -135,7 +107,11 @@ export default function LeaguesPage() {
 
       {!loadingTable && !error && rows && rows.length > 0 && (
         <div className="card overflow-x-auto">
-          <p className="section-label mb-3">{leagueName}</p>
+          {selected !== null && (
+            <Link href={`/league/${selected}`} className="section-label mb-3 block hover:text-volt">
+              {leagueName}
+            </Link>
+          )}
           <StandingsTable rows={rows} />
         </div>
       )}

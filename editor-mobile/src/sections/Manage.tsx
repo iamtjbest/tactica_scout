@@ -16,7 +16,7 @@ import {
   listMembers, listInvites, createInvite, revokeInvite,
   listRequests, decideRequest, removeMember,
   updateTournament, updateClub, updateTournamentTeam, updateRegisteredPlayer,
-  uploadPlayerPhoto, TIEBREAKERS,
+  uploadPlayerPhoto, uploadTournamentCrest, TIEBREAKERS,
   type Tournament, type TeamRow, type StandingRow, type Proof, type PlayerRegistration,
   type Member, type Invite, type AccessRequest,
 } from "../services/api";
@@ -396,6 +396,42 @@ export function Info({ t, editable, onChanged }: {
     finally { setBusy(false); }
   };
 
+  const uploadLogo = async () => {
+    setBusy(true); setError(null); setSaved(false);
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setError("Allow photo-library access to choose a competition logo.");
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+      });
+      if (result.canceled) return;
+      const image = result.assets[0];
+      if (image.fileSize && image.fileSize > 1_000_000) {
+        setError("The competition logo must be under 1 MB.");
+        return;
+      }
+      const type = image.mimeType ?? "image/jpeg";
+      if (!["image/png", "image/jpeg", "image/webp"].includes(type)) {
+        setError("Choose a PNG, JPG, or WebP image.");
+        return;
+      }
+      await uploadTournamentCrest(t.id, {
+        uri: image.uri,
+        name: image.fileName ?? `tournament-${t.id}.jpg`,
+        type,
+      });
+      setSaved(true);
+      onChanged();
+    } catch (e: any) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
   if (!editable) {
     return (
       <View style={S.card}>
@@ -413,6 +449,17 @@ export function Info({ t, editable, onChanged }: {
 
   return (
     <View style={{ gap: 10 }}>
+      <View style={S.card}>
+        <Text style={S.label}>COMPETITION LOGO</Text>
+        <View style={[S.wrapRow, { gap: 12, marginTop: 8 }]}>
+          <Crest url={t.crest_url} name={t.name} size={56} />
+          <View style={{ flex: 1, gap: 6 }}>
+            <Text style={S.muted}>PNG, JPG, or WebP under 1 MB.</Text>
+            <Btn label={t.crest_url ? "Update competition logo" : "Upload competition logo"}
+                 busy={busy} onPress={uploadLogo} />
+          </View>
+        </View>
+      </View>
       <View style={S.card}>
         <Field label="Name" value={f.name}
                onChangeText={(v: string) => { setF({ ...f, name: v }); setSaved(false); }} />

@@ -6,7 +6,9 @@ import StatusPill from "@/components/StatusPill";
 import Crest from "@/components/Crest";
 import clsx from "clsx";
 import CreateWizard from "@/components/CreateWizard";
-import { listTournaments, addProof, type Tournament, submitForReview } from "@/lib/api";
+import {
+  listTournaments, addProof, type Tournament, submitForReview, uploadTournamentCrest,
+} from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 
 export default function Page() {
@@ -74,7 +76,20 @@ function Competitions() {
       .catch(() => {});
   }, [load]);
 
-  const done = async (id: string, proofs: { type: string; url: string; note: string }[]) => {
+  const done = async (
+    id: string,
+    proofs: { type: string; url: string; note: string }[],
+    logoFile?: File | null
+  ) => {
+    let logoUploadFailed = false;
+    if (logoFile) {
+      try {
+        await uploadTournamentCrest(id, logoFile);
+      } catch {
+        logoUploadFailed = true;
+      }
+    }
+
     // Proof is gathered during the wizard but can only be attached once
     // the tournament exists, so it's saved here. A failure is reported
     // rather than swallowed: the competition is created either way.
@@ -101,13 +116,15 @@ function Competitions() {
       setError(
         `Competition created, but ${failed.length} proof didn't save, so it ` +
         `wasn't submitted. Add the proof again and submit from the ` +
-        `competition page.`
+        `competition page.${logoUploadFailed ? " The logo also failed to upload; retry it under Info." : ""}`
       );
     } else if (!submitted) {
       setError(
         "Competition created and proof saved, but submitting it failed. " +
-        "Open it and hit Submit for review."
+        `Open it and hit Submit for review.${logoUploadFailed ? " The logo also failed to upload; retry it under Info." : ""}`
       );
+    } else if (logoUploadFailed) {
+      setError("Submitted, but the logo failed to upload. Re-upload it under Info.");
     } else {
       setNotice(
         "Submitted. Your competition is under review. We get back to every " +

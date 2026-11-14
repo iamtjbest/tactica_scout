@@ -206,6 +206,22 @@ export async function uploadPlayerPhoto(
   return body as { photo_url: string };
 }
 
+export async function uploadTournamentCrest(
+  tournamentId: string, image: { uri: string; name: string; type: string }
+): Promise<{ crest_url: string }> {
+  const base = await getApiBase();
+  const form = new FormData();
+  form.append("file", image as unknown as Blob);
+  const res = await fetch(`${base}/api/editor/tournaments/${tournamentId}/crest`, {
+    method: "POST",
+    headers: await authHeaders(),
+    body: form,
+  });
+  const body = await res.json().catch(() => null) as { detail?: string } | null;
+  if (!res.ok) throw new Error(body?.detail || `Upload failed (${res.status})`);
+  return body as { crest_url: string };
+}
+
 // ── fixtures ──────────────────────────────────────────────────────────
 export const generateFixtures = (tid: string, body: Record<string, unknown>) =>
   req<{ created: number; fixtures: Fixture[]; notes: string[] }>(
@@ -222,6 +238,9 @@ export const addFixture = (tid: string, body: Record<string, unknown>) =>
   req<Fixture>(`/api/editor/tournaments/${tid}/fixtures`, {
     method: "POST", body: JSON.stringify(body),
   });
+
+export const deleteFixture = (fixtureId: string) =>
+  req<void>(`/api/editor/fixtures/${fixtureId}`, { method: "DELETE" });
 
 export const updateFixture = (fid: string, body: Record<string, unknown>) =>
   req<Fixture>(`/api/editor/fixtures/${fid}`, {

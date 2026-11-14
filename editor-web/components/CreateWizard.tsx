@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { createTournament } from "@/lib/api";
 
@@ -73,7 +73,7 @@ export default function CreateWizard({
   defaultEmail, onDone, onCancel,
 }: {
   defaultEmail: string;
-  onDone: (id: string, proofs: Proof[]) => void;
+  onDone: (id: string, proofs: Proof[], logoFile?: File | null) => void | Promise<void>;
   onCancel: () => void;
 }) {
   const [step, setStep] = useState(1);
@@ -89,6 +89,18 @@ export default function CreateWizard({
   });
   const [proofs, setProofs] = useState<Proof[]>([]);
   const [proofDraft, setProofDraft] = useState<Proof>({ type: "link", url: "", note: "" });
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!logoFile) {
+      setLogoPreview(null);
+      return;
+    }
+    const preview = URL.createObjectURL(logoFile);
+    setLogoPreview(preview);
+    return () => URL.revokeObjectURL(preview);
+  }, [logoFile]);
 
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
 
@@ -136,7 +148,7 @@ export default function CreateWizard({
         name: f.name.trim(),
         organizing_body: f.organizing_body.trim(),
       });
-      onDone((t as any).id, proofs);
+      await onDone((t as any).id, proofs, logoFile);
     } catch (e: any) {
       setError(e.message);
       setStep(1);
@@ -224,6 +236,60 @@ export default function CreateWizard({
                   Include the country code.
                 </p>
               </Field>
+            </div>
+          </div>
+
+          <div className="card space-y-3">
+            <div>
+              <p className="section-label">Competition logo (Optional)</p>
+              <p className="text-mt text-sm mt-1">
+                Upload your tournament crest or badge (PNG, JPG, or WebP under 1 MB).
+              </p>
+            </div>
+            <div className="flex items-center gap-4">
+              {logoPreview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={logoPreview} alt="Preview" className="w-14 h-14 rounded-xl object-cover border border-bd" />
+              ) : (
+                <div className="w-14 h-14 rounded-xl bg-sur2 border border-bd flex items-center justify-center text-mt text-xs font-bold">
+                  LOGO
+                </div>
+              )}
+              <label className="tab-pill tab-pill-inactive cursor-pointer hover:border-volt">
+                {logoFile ? "Change logo" : "Choose logo image"}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null;
+                    if (file && file.type && !["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+                      setLogoFile(null);
+                      setError("Choose a PNG, JPG, or WebP logo.");
+                      e.target.value = "";
+                      return;
+                    }
+                    if (file && file.size > 1_000_000) {
+                      setLogoFile(null);
+                      setError("The competition logo must be under 1 MB.");
+                      e.target.value = "";
+                      return;
+                    }
+                    setError(null);
+                    setLogoFile(file);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              {logoFile && (
+                <button
+                  type="button"
+                  onClick={() => { setLogoFile(null); setLogoPreview(null); }}
+                  className="text-mt hover:text-red2 text-xs"
+                >
+                  Remove
+                </button>
+              )}
             </div>
           </div>
 

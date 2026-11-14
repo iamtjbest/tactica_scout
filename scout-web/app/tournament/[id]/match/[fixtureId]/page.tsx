@@ -28,6 +28,7 @@ export default function TournamentMatchPage() {
   const [tabPicked, setTabPicked] = useState(false);
 
   useEffect(() => {
+    if (!id || !fixtureId) return;
     getTournamentMatch(id, fixtureId)
       .then((x) => {
         setD(x); setError(null);

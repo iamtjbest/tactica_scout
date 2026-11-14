@@ -316,7 +316,6 @@ def public_tournament(tournament_id: str):
     return result
 
 
-@router.get("/tournaments/{tournament_id}/fixtures/{fixture_id}")
 def _poisson_pmf(k: int, lam: float) -> float:
     if lam <= 0:
         return 1.0 if k == 0 else 0.0
@@ -411,6 +410,7 @@ def _local_prediction(fx: dict, teams: dict[str, dict], all_fixtures: list[dict]
     }
 
 
+@router.get("/tournaments/{tournament_id}/fixtures/{fixture_id}")
 def public_fixture(tournament_id: str, fixture_id: str):
     """One match, with its event timeline. Scout's match page for a
     local tournament."""

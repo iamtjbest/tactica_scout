@@ -1,4 +1,4 @@
-// src/screens/LeaguesScreen.tsx — Competitions & Standings view
+// src/screens/LeaguesScreen.tsx — Full 5-Tab Mobile League & Competition Hub
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -6,26 +6,31 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  FlatList,
   Image,
+  Modal,
   StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme';
 import { StandingsTable } from '../components/StandingsTable';
 import { MatchCard } from '../components/MatchCard';
+import { FollowButton } from '../components/FollowButton';
 import {
   getLeagues,
+  getTournaments,
+  getLeagueSeasons,
   getStandings,
   getLeagueFixtures,
   getLeagueTopStats,
-  getTournaments,
+  getLeagueTeamStats,
   playerImageUrl,
   teamLogoUrl,
-  StandingsRow,
-  MatchSummary,
-  TopStatPlayer,
-  TournamentSummary,
+  type StandingsRow,
+  type StandingsGroup,
+  type MatchSummary,
+  type TopStatPlayer,
+  type LeagueSeason,
+  type TournamentSummary,
 } from '../services/api';
 
 interface LeaguesScreenProps {
@@ -33,21 +38,57 @@ interface LeaguesScreenProps {
   route?: any;
 }
 
+type LeagueTab = 'table' | 'matches' | 'player-stats' | 'team-stats' | 'season';
+
+const TABS: { id: LeagueTab; label: string }[] = [
+  { id: 'table', label: 'Table' },
+  { id: 'matches', label: 'Fixtures' },
+  { id: 'player-stats', label: 'Player Stats' },
+  { id: 'team-stats', label: 'Team Stats' },
+  { id: 'season', label: 'Season' },
+];
+
+const MONTHS = [
+  { val: '01', label: 'Jan' }, { val: '02', label: 'Feb' },
+  { val: '03', label: 'Mar' }, { val: '04', label: 'Apr' },
+  { val: '05', label: 'May' }, { val: '06', label: 'Jun' },
+  { val: '07', label: 'Jul' }, { val: '08', label: 'Aug' },
+  { val: '09', label: 'Sep' }, { val: '10', label: 'Oct' },
+  { val: '11', label: 'Nov' }, { val: '12', label: 'Dec' },
+];
+
 export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route }) => {
   const [leagues, setLeagues] = useState<{ league_id: number; name: string }[]>([]);
+  const [localTournaments, setLocalTournaments] = useState<TournamentSummary[]>([]);
   const [selectedLeagueId, setSelectedLeagueId] = useState<number | null>(
     route?.params?.leagueId || null
   );
-  const [activeTab, setActiveTab] = useState<'table' | 'matches' | 'stats'>('table');
+  const [leagueTitle, setLeagueTitle] = useState<string>(route?.params?.leagueName || '');
+  const [leagueCountry, setLeagueCountry] = useState<string>('');
 
+  const [seasons, setSeasons] = useState<LeagueSeason[]>([]);
+  const [selectedSeasonId, setSelectedSeasonId] = useState<number | null>(null);
+  const [selectedSeasonLabel, setSelectedSeasonLabel] = useState<string>('');
+  const [seasonModalOpen, setSeasonModalOpen] = useState(false);
+
+  const [activeTab, setActiveTab] = useState<LeagueTab>('table');
   const [loading, setLoading] = useState(true);
+
   const [standings, setStandings] = useState<StandingsRow[]>([]);
+  const [groups, setGroups] = useState<StandingsGroup[]>([]);
   const [fixtures, setFixtures] = useState<MatchSummary[]>([]);
   const [topScorers, setTopScorers] = useState<TopStatPlayer[]>([]);
   const [topAssists, setTopAssists] = useState<TopStatPlayer[]>([]);
-  const [localTournaments, setLocalTournaments] = useState<TournamentSummary[]>([]);
+  const [topRatings, setTopRatings] = useState<TopStatPlayer[]>([]);
+  const [topCards, setTopCards] = useState<TopStatPlayer[]>([]);
+  const [teamStats, setTeamStats] = useState<any>(null);
 
-  // Initial load leagues list
+  // Fixture Date + Month + Year + Status filters
+  const [selectedDay, setSelectedDay] = useState<string>('');
+  const [selectedMonth, setSelectedMonth] = useState<string>('');
+  const [selectedYear, setSelectedYear] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'upcoming' | 'finished' | 'live'>('all');
+
   useEffect(() => {
     getLeagues()
       .then((res) => {
@@ -55,39 +96,67 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
         setLeagues(list);
         if (!selectedLeagueId && list.length > 0) {
           setSelectedLeagueId(list[0].league_id);
+          setLeagueTitle(list[0].name);
         }
       })
-      .catch((err) => console.warn('Failed to get leagues:', err));
-  }, []);
+      .catch(() => {});
 
-  useEffect(() => {
     getTournaments()
       .then((res) => setLocalTournaments(res.tournaments || []))
-      .catch((err) => console.warn('Failed to get local competitions:', err));
+      .catch(() => {});
   }, []);
 
-  // Sync if route params change
   useEffect(() => {
     if (route?.params?.leagueId) {
       setSelectedLeagueId(route.params.leagueId);
+      if (route.params.leagueName) setLeagueTitle(route.params.leagueName);
     }
-  }, [route?.params?.leagueId]);
+  }, [route?.params?.leagueId, route?.params?.leagueName]);
 
-  // Load league data when selectedLeagueId changes
-  const loadLeagueData = useCallback(async (id: number) => {
+  // Load seasons when league changes
+  useEffect(() => {
+    if (!selectedLeagueId) return;
+    setSelectedSeasonId(null);
+    setSelectedSeasonLabel('');
+    setSelectedDay('');
+    setSelectedMonth('');
+    setSelectedYear('');
+    setStatusFilter('all');
+
+    getLeagueSeasons(selectedLeagueId)
+      .then((res) => {
+        if (res.league && res.league !== 'Unknown') setLeagueTitle(res.league);
+        if (res.country) setLeagueCountry(res.country);
+        const list = res.seasons || [];
+        setSeasons(list);
+        if (list.length > 0) {
+          const cur = list.find((s) => s.is_current) || list[0];
+          setSelectedSeasonId(cur.id);
+          setSelectedSeasonLabel(cur.label);
+        }
+      })
+      .catch(() => {});
+  }, [selectedLeagueId]);
+
+  const loadLeagueData = useCallback(async (id: number, sId: number | null) => {
     setLoading(true);
     try {
-      const [stdRes, fixRes, topRes] = await Promise.all([
-        getStandings(id).catch(() => ({ standings: [] })),
-        getLeagueFixtures(id).catch(() => ({ matches: [] })),
-        getLeagueTopStats(id).catch(() => ({ scorers: [], assists: [] })),
+      const [stdRes, fixRes, topRes, tmStatsRes] = await Promise.all([
+        getStandings(id, sId).catch(() => ({ league: '', country: '', standings: [], groups: [] })),
+        getLeagueFixtures(id, sId).catch(() => ({ matches: [] })),
+        getLeagueTopStats(id, sId).catch(() => ({ scorers: [], assists: [], ratings: [], cards: [] })),
+        getLeagueTeamStats(id, sId).catch(() => null),
       ]);
+      if (stdRes.league && stdRes.league !== 'Unknown') setLeagueTitle(stdRes.league);
+      if (stdRes.country) setLeagueCountry(stdRes.country);
       setStandings(stdRes.standings || []);
+      setGroups(stdRes.groups || []);
       setFixtures(fixRes.matches || []);
       setTopScorers(topRes.scorers || []);
       setTopAssists(topRes.assists || []);
-    } catch (err) {
-      console.warn('Failed to load league data:', err);
+      setTopRatings(topRes.ratings || []);
+      setTopCards(topRes.cards || []);
+      setTeamStats(tmStatsRes);
     } finally {
       setLoading(false);
     }
@@ -95,44 +164,121 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
 
   useEffect(() => {
     if (selectedLeagueId) {
-      loadLeagueData(selectedLeagueId);
+      loadLeagueData(selectedLeagueId, selectedSeasonId);
     }
-  }, [selectedLeagueId, loadLeagueData]);
+  }, [selectedLeagueId, selectedSeasonId, loadLeagueData]);
 
-  const activeLeague = leagues.find((l) => l.league_id === selectedLeagueId);
+  const pickSeason = (s: LeagueSeason) => {
+    setSelectedSeasonId(s.id);
+    setSelectedSeasonLabel(s.label);
+    setSeasonModalOpen(false);
+  };
+
+  // Fixture Date/Month/Year filtering & grouping
+  const dateKey = (date: Date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+      date.getDate()
+    ).padStart(2, '0')}`;
+
+  const availableYears = Array.from(
+    new Set(
+      fixtures
+        .map((m) => {
+          const date = new Date(m.kickoff || '');
+          return Number.isNaN(date.getTime()) ? '' : String(date.getFullYear());
+        })
+        .filter((y) => /^\d{4}$/.test(y))
+    )
+  ).sort();
+
+  const availableDates = Array.from(
+    new Set(
+      fixtures
+        .filter((m) => {
+          const d = new Date(m.kickoff || '');
+          if (Number.isNaN(d.getTime())) return false;
+          const y = String(d.getFullYear());
+          const mo = String(d.getMonth() + 1).padStart(2, '0');
+          if (selectedYear && y !== selectedYear) return false;
+          if (selectedMonth && mo !== selectedMonth) return false;
+          return true;
+        })
+        .map((m) => dateKey(new Date(m.kickoff || '')))
+    )
+  ).sort();
+
+  const filteredFixtures = fixtures.filter((m) => {
+    const d = new Date(m.kickoff || '');
+    if (Number.isNaN(d.getTime())) return false;
+    const y = String(d.getFullYear());
+    const mo = String(d.getMonth() + 1).padStart(2, '0');
+    const dayIso = dateKey(d);
+
+    if (selectedYear && y !== selectedYear) return false;
+    if (selectedMonth && mo !== selectedMonth) return false;
+    if (selectedDay && dayIso !== selectedDay) return false;
+
+    const st = String(m.status || '').toLowerCase();
+    const isFin = ['finished', 'ended', 'played', 'ft'].includes(st);
+    const isUpc = ['scheduled', 'notstarted', 'postponed', 'cancelled', 'delayed', 'tbd'].includes(st);
+    const isLiv = !isFin && !isUpc;
+
+    if (statusFilter === 'finished' && !isFin) return false;
+    if (statusFilter === 'upcoming' && !isUpc) return false;
+    if (statusFilter === 'live' && !isLiv) return false;
+    return true;
+  });
+
+  const groupedByFullDate: Record<string, MatchSummary[]> = {};
+  filteredFixtures
+    .slice()
+    .sort((a, b) => String(a.kickoff || '').localeCompare(String(b.kickoff || '')))
+    .forEach((m) => {
+      const d = new Date(m.kickoff || '');
+      const key = d.toLocaleDateString('en-GB', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+      (groupedByFullDate[key] ||= []).push(m);
+    });
 
   return (
     <View style={styles.container}>
+      {/* Local Competitions Door */}
       {localTournaments.length > 0 && (
-        <View style={{ paddingHorizontal: 14, paddingTop: 10 }}>
-          <Text style={{ color: COLORS.volt, fontSize: 10, fontWeight: '800', letterSpacing: 1.4, marginBottom: 6 }}>
-            LOCAL COMPETITIONS
-          </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+        <View style={styles.localBar}>
+          <Text style={styles.localHeading}>LOCAL COMPETITIONS</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingHorizontal: 14, gap: 8 }}
+          >
             {localTournaments.map((t) => (
               <TouchableOpacity
                 key={t.id}
-                onPress={() => navigation.navigate('TournamentDetail', {
-                  tournamentId: t.id, tournamentName: t.name,
-                })}
-                style={{
-                  backgroundColor: COLORS.card,
-                  borderColor: COLORS.cardBorderActive,
-                  borderWidth: 1,
-                  borderRadius: 10,
-                  paddingHorizontal: 12,
-                  paddingVertical: 8,
-                }}
+                onPress={() =>
+                  navigation.navigate('TournamentDetail', {
+                    tournamentId: t.id,
+                    tournamentName: t.name,
+                  })
+                }
+                style={styles.localCard}
               >
-                <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: '700' }}>{t.name}</Text>
-                <Text style={{ color: COLORS.textDim, fontSize: 10 }}>{t.organizing_body}</Text>
+                <Text style={styles.localTitle} numberOfLines={1}>
+                  {t.name}
+                </Text>
+                <Text style={styles.localSub} numberOfLines={1}>
+                  {t.organizing_body}
+                </Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
         </View>
       )}
 
-      {/* Horizontal League Pills */}
+      {/* Horizontal League Selector Pills */}
       <View style={styles.pillsContainer}>
         <ScrollView
           horizontal
@@ -145,7 +291,10 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
               <TouchableOpacity
                 key={`league-pill-${l.league_id}`}
                 style={[styles.pill, isSelected && styles.pillActive]}
-                onPress={() => setSelectedLeagueId(l.league_id)}
+                onPress={() => {
+                  setSelectedLeagueId(l.league_id);
+                  setLeagueTitle(l.name);
+                }}
               >
                 <Text style={[styles.pillText, isSelected && styles.pillTextActive]}>
                   {l.name}
@@ -156,37 +305,60 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
         </ScrollView>
       </View>
 
-      {/* Tabs Row: Table | Matches | Stats */}
+      {/* Active League Header + Follow + Clickable Season Picker */}
+      {selectedLeagueId != null && (
+        <View style={styles.leagueHeaderCard}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.leagueHeroTitle} numberOfLines={1}>
+              {leagueTitle || `League #${selectedLeagueId}`}
+            </Text>
+            {!!leagueCountry && (
+              <Text style={styles.leagueHeroCountry}>{leagueCountry.toUpperCase()}</Text>
+            )}
+          </View>
+
+          <FollowButton
+            teamName={leagueTitle || `League #${selectedLeagueId}`}
+            token={`league:${selectedLeagueId}:${leagueTitle || `League #${selectedLeagueId}`}`}
+            size="sm"
+          />
+
+          <TouchableOpacity
+            onPress={() => setSeasonModalOpen(true)}
+            style={styles.seasonBtn}
+            activeOpacity={0.75}
+          >
+            <Text style={styles.seasonBtnText}>{selectedSeasonLabel || '2026/2027'}</Text>
+            <Ionicons name="chevron-down" size={14} color={COLORS.volt} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* 5 Complete Navigation Tabs */}
       <View style={styles.tabRow}>
-        <TouchableOpacity
-          style={[styles.tabBtn, activeTab === 'table' && styles.tabBtnActive]}
-          onPress={() => setActiveTab('table')}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 14, gap: 16 }}
         >
-          <Text style={[styles.tabText, activeTab === 'table' && styles.tabTextActive]}>
-            Standings Table
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.tabBtn, activeTab === 'matches' && styles.tabBtnActive]}
-          onPress={() => setActiveTab('matches')}
-        >
-          <Text style={[styles.tabText, activeTab === 'matches' && styles.tabTextActive]}>
-            Fixtures
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.tabBtn, activeTab === 'stats' && styles.tabBtnActive]}
-          onPress={() => setActiveTab('stats')}
-        >
-          <Text style={[styles.tabText, activeTab === 'stats' && styles.tabTextActive]}>
-            Top Leaders
-          </Text>
-        </TouchableOpacity>
+          {TABS.map((t) => {
+            const active = activeTab === t.id;
+            return (
+              <TouchableOpacity
+                key={t.id}
+                style={[styles.tabBtn, active && styles.tabBtnActive]}
+                onPress={() => setActiveTab(t.id)}
+              >
+                <Text style={[styles.tabText, active && styles.tabTextActive]}>
+                  {t.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
 
-      {/* Main Tab Content */}
+      {/* Tab Body */}
       {loading ? (
         <View style={styles.centerBox}>
           <ActivityIndicator size="large" color={COLORS.volt} />
@@ -194,146 +366,401 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 40 }}
+          contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 44, paddingTop: 10 }}
           showsVerticalScrollIndicator={false}
         >
-          {/* TAB 1: Standings */}
+          {/* TAB 1: TABLE */}
           {activeTab === 'table' && (
             <View>
-              {standings.length > 0 ? (
+              {groups.length > 0 ? (
+                groups.map((g) => (
+                  <View key={g.group} style={{ marginBottom: 12 }}>
+                    <Text style={styles.groupHeading}>{g.group.toUpperCase()}</Text>
+                    <StandingsTable
+                      standings={g.standings}
+                      onSelectTeam={(teamId, teamName) =>
+                        navigation.navigate('TeamDetail', { teamId, teamName })
+                      }
+                    />
+                  </View>
+                ))
+              ) : standings.length > 0 ? (
                 <StandingsTable
                   standings={standings}
-                  onSelectTeam={(teamId, teamName) => {
-                    navigation.navigate('TeamDetail', { teamId, teamName });
-                  }}
+                  onSelectTeam={(teamId, teamName) =>
+                    navigation.navigate('TeamDetail', { teamId, teamName })
+                  }
                 />
               ) : (
                 <View style={styles.centerBox}>
                   <Ionicons name="alert-circle-outline" size={36} color={COLORS.textDim} />
-                  <Text style={styles.emptyText}>No standings data available for this competition.</Text>
+                  <Text style={styles.emptyText}>
+                    No standings available for {selectedSeasonLabel || 'this season'}.
+                  </Text>
                 </View>
               )}
             </View>
           )}
 
-          {/* TAB 2: Matches */}
+          {/* TAB 2: FIXTURES (DATE + MONTH + YEAR + STATUS FILTERING) */}
           {activeTab === 'matches' && (
-            <View style={{ marginTop: 10 }}>
-              {fixtures.length > 0 ? (
-                fixtures.map((m, idx) => (
-                  <MatchCard
-                    key={`league-fix-${m.event_id || idx}`}
-                    match={m}
-                    onPress={() => {
-                      if (m.event_id) {
-                        navigation.navigate('MatchDetail', {
-                          eventId: m.event_id,
-                          matchSummary: m,
-                        });
-                      }
-                    }}
-                  />
-                ))
-              ) : (
+            <View style={{ gap: 10 }}>
+              {/* Status Filter Row */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                {(['all', 'live', 'upcoming', 'finished'] as const).map((st) => {
+                  const on = statusFilter === st;
+                  return (
+                    <TouchableOpacity
+                      key={st}
+                      onPress={() => setStatusFilter(st)}
+                      style={[styles.filterChip, on && styles.filterChipOn]}
+                    >
+                      <Text style={[styles.filterChipText, on && styles.filterChipTextOn]}>
+                        {st.toUpperCase()}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              {/* Year + Month Filter Row */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                <TouchableOpacity
+                  onPress={() => { setSelectedYear(''); setSelectedDay(''); }}
+                  style={[styles.filterChip, !selectedYear && styles.filterChipOn]}
+                >
+                  <Text style={[styles.filterChipText, !selectedYear && styles.filterChipTextOn]}>
+                    All Years
+                  </Text>
+                </TouchableOpacity>
+                {availableYears.map((y) => {
+                  const on = selectedYear === y;
+                  return (
+                    <TouchableOpacity
+                      key={y}
+                      onPress={() => { setSelectedYear(on ? '' : y); setSelectedDay(''); }}
+                      style={[styles.filterChip, on && styles.filterChipOn]}
+                    >
+                      <Text style={[styles.filterChipText, on && styles.filterChipTextOn]}>{y}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+
+                <TouchableOpacity
+                  onPress={() => { setSelectedMonth(''); setSelectedDay(''); }}
+                  style={[styles.filterChip, !selectedMonth && styles.filterChipOn]}
+                >
+                  <Text style={[styles.filterChipText, !selectedMonth && styles.filterChipTextOn]}>
+                    All Months
+                  </Text>
+                </TouchableOpacity>
+                {MONTHS.map((m) => {
+                  const on = selectedMonth === m.val;
+                  return (
+                    <TouchableOpacity
+                      key={m.val}
+                      onPress={() => { setSelectedMonth(on ? '' : m.val); setSelectedDay(''); }}
+                      style={[styles.filterChip, on && styles.filterChipOn]}
+                    >
+                      <Text style={[styles.filterChipText, on && styles.filterChipTextOn]}>
+                        {m.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              {/* Exact Date Strip */}
+              {availableDates.length > 0 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                  <TouchableOpacity
+                    onPress={() => setSelectedDay('')}
+                    style={[styles.filterChip, !selectedDay && styles.filterChipOn]}
+                  >
+                    <Text style={[styles.filterChipText, !selectedDay && styles.filterChipTextOn]}>
+                      All Dates
+                    </Text>
+                  </TouchableOpacity>
+                  {availableDates.map((isoDay) => {
+                    const on = selectedDay === isoDay;
+                    const [year, month, day] = isoDay.split('-').map(Number);
+                    const label = new Date(year, month - 1, day).toLocaleDateString('en-GB', {
+                      day: 'numeric',
+                      month: 'short',
+                    });
+                    return (
+                      <TouchableOpacity
+                        key={isoDay}
+                        onPress={() => setSelectedDay(on ? '' : isoDay)}
+                        style={[styles.filterChip, on && styles.filterChipOn]}
+                      >
+                        <Text style={[styles.filterChipText, on && styles.filterChipTextOn]}>
+                          {label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              )}
+
+              {Object.keys(groupedByFullDate).length === 0 ? (
                 <View style={styles.centerBox}>
                   <Ionicons name="calendar-outline" size={36} color={COLORS.textDim} />
-                  <Text style={styles.emptyText}>No fixtures scheduled.</Text>
+                  <Text style={styles.emptyText}>No fixtures match those date filters.</Text>
                 </View>
+              ) : (
+                Object.keys(groupedByFullDate).map((dayLabel) => (
+                  <View key={dayLabel} style={{ marginTop: 6 }}>
+                    <Text style={styles.groupHeading}>{dayLabel.toUpperCase()}</Text>
+                    {groupedByFullDate[dayLabel].map((m, idx) => (
+                      <MatchCard
+                        key={`league-fix-${m.event_id ?? idx}`}
+                        match={m}
+                        onPress={() => {
+                          if (m.event_id) {
+                            navigation.navigate('MatchDetail', {
+                              eventId: m.event_id,
+                              matchSummary: m,
+                            });
+                          }
+                        }}
+                      />
+                    ))}
+                  </View>
+                ))
               )}
             </View>
           )}
 
-          {/* TAB 3: Stats Leaders */}
-          {activeTab === 'stats' && (
-            <View style={{ marginTop: 10 }}>
-              {/* Top Scorers */}
-              <View style={styles.leaderCard}>
-                <View style={styles.leaderHeader}>
-                  <Ionicons name="football" size={16} color={COLORS.volt} style={{ marginRight: 6 }} />
-                  <Text style={styles.leaderTitle}>TOP GOALSCORERS</Text>
+          {/* TAB 3: PLAYER STATS */}
+          {activeTab === 'player-stats' && (
+            <View style={{ gap: 14 }}>
+              {[
+                { title: 'TOP GOALSCORERS', tag: 'G', rows: topScorers, color: COLORS.volt },
+                { title: 'TOP ASSISTS', tag: 'A', rows: topAssists, color: '#38bdf8' },
+                { title: 'HIGHEST RATED', tag: 'RTG', rows: topRatings, color: COLORS.win },
+                { title: 'DISCIPLINE (CARDS)', tag: 'CRD', rows: topCards, color: COLORS.draw },
+              ].map((board) => (
+                <View key={board.title} style={styles.leaderCard}>
+                  <View style={styles.leaderHeader}>
+                    <Text style={[styles.leaderTitle, { color: board.color }]}>{board.title}</Text>
+                  </View>
+                  {board.rows.length > 0 ? (
+                    board.rows.slice(0, 10).map((p, idx) => (
+                      <TouchableOpacity
+                        key={`${board.title}-${p.player_id ?? idx}`}
+                        style={styles.leaderRow}
+                        disabled={!p.player_id}
+                        onPress={() =>
+                          p.player_id &&
+                          navigation.navigate('PlayerDetail', {
+                            playerId: p.player_id,
+                            playerName: p.player_name,
+                          })
+                        }
+                      >
+                        <Text style={styles.rankNum}>{p.rank ?? idx + 1}</Text>
+                        <View style={styles.playerAvatarWrap}>
+                          {playerImageUrl(p.player_id) ? (
+                            <Image
+                              source={{ uri: playerImageUrl(p.player_id)! }}
+                              style={styles.playerAvatar}
+                            />
+                          ) : (
+                            <Ionicons name="person" size={15} color={COLORS.textDim} />
+                          )}
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.leaderPlayerName} numberOfLines={1}>
+                            {p.player_name}
+                          </Text>
+                          <Text style={styles.leaderTeamName} numberOfLines={1}>
+                            {p.team_name}
+                          </Text>
+                        </View>
+                        <View style={styles.statValBadge}>
+                          <Text style={[styles.statValText, { color: board.color }]}>
+                            {p.value}
+                          </Text>
+                          <Text style={[styles.statValSub, { color: board.color }]}>
+                            {board.tag}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))
+                  ) : (
+                    <Text style={styles.noDataText}>No data published for this category yet.</Text>
+                  )}
                 </View>
-                {topScorers.length > 0 ? (
-                  topScorers.slice(0, 5).map((p, idx) => (
-                    <TouchableOpacity
-                      key={`scorer-${p.player_id || idx}`}
-                      style={styles.leaderRow}
-                      onPress={() => {
-                        navigation.navigate('PlayerDetail', { playerId: p.player_id, playerName: p.player_name });
-                      }}
-                    >
-                      <Text style={styles.rankNum}>{idx + 1}</Text>
-                      <View style={styles.playerAvatarWrap}>
-                        {playerImageUrl(p.player_id) ? (
-                          <Image source={{ uri: playerImageUrl(p.player_id)! }} style={styles.playerAvatar} />
-                        ) : (
-                          <Ionicons name="person" size={16} color={COLORS.textDim} />
-                        )}
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.leaderPlayerName} numberOfLines={1}>{p.player_name}</Text>
-                        <Text style={styles.leaderTeamName} numberOfLines={1}>{p.team_name}</Text>
-                      </View>
-                      <View style={styles.statValBadge}>
-                        <Text style={styles.statValText}>{p.value}</Text>
-                        <Text style={styles.statValSub}>G</Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))
-                ) : (
-                  <Text style={styles.noDataText}>No scorer statistics available.</Text>
-                )}
-              </View>
+              ))}
+            </View>
+          )}
 
-              {/* Top Assists */}
-              <View style={[styles.leaderCard, { marginTop: 14 }]}>
-                <View style={styles.leaderHeader}>
-                  <Ionicons name="flash-outline" size={16} color="#38bdf8" style={{ marginRight: 6 }} />
-                  <Text style={[styles.leaderTitle, { color: '#38bdf8' }]}>TOP ASSISTS / PLAYMAKERS</Text>
-                </View>
-                {topAssists.length > 0 ? (
-                  topAssists.slice(0, 5).map((p, idx) => (
-                    <TouchableOpacity
-                      key={`assist-${p.player_id || idx}`}
-                      style={styles.leaderRow}
-                      onPress={() => {
-                        navigation.navigate('PlayerDetail', { playerId: p.player_id, playerName: p.player_name });
-                      }}
-                    >
-                      <Text style={styles.rankNum}>{idx + 1}</Text>
-                      <View style={styles.playerAvatarWrap}>
-                        {playerImageUrl(p.player_id) ? (
-                          <Image source={{ uri: playerImageUrl(p.player_id)! }} style={styles.playerAvatar} />
-                        ) : (
-                          <Ionicons name="person" size={16} color={COLORS.textDim} />
-                        )}
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.leaderPlayerName} numberOfLines={1}>{p.player_name}</Text>
-                        <Text style={styles.leaderTeamName} numberOfLines={1}>{p.team_name}</Text>
-                      </View>
-                      <View style={[styles.statValBadge, { backgroundColor: 'rgba(56, 189, 248, 0.12)', borderColor: 'rgba(56, 189, 248, 0.3)' }]}>
-                        <Text style={[styles.statValText, { color: '#38bdf8' }]}>{p.value}</Text>
-                        <Text style={[styles.statValSub, { color: '#38bdf8' }]}>A</Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))
-                ) : (
-                  <Text style={styles.noDataText}>No assist statistics available.</Text>
-                )}
+          {/* TAB 4: TEAM STATS */}
+          {activeTab === 'team-stats' && (
+            <View style={{ gap: 14 }}>
+              {[
+                { title: 'GOALS PER MATCH', key: 'goals_per_match', rows: teamStats?.goals_per_match || [], suffix: '' },
+                { title: 'CONCEDED PER MATCH', key: 'conceded_per_match', rows: teamStats?.conceded_per_match || [], suffix: '' },
+                { title: 'CLEAN SHEETS', key: 'clean_sheets', rows: teamStats?.clean_sheets || [], suffix: '' },
+                { title: 'WIN RATE %', key: 'win_rate', rows: teamStats?.win_rate || [], suffix: '%' },
+                { title: 'AVERAGE POSSESSION %', key: 'possession_avg', rows: teamStats?.possession || [], suffix: '%' },
+              ]
+                .filter((c) => c.rows.length > 0)
+                .map((card) => (
+                  <View key={card.title} style={styles.leaderCard}>
+                    <View style={styles.leaderHeader}>
+                      <Text style={styles.leaderTitle}>{card.title}</Text>
+                    </View>
+                    {card.rows.slice(0, 10).map((tm: any, idx: number) => {
+                      const logo = teamLogoUrl(tm.team_id);
+                      return (
+                        <TouchableOpacity
+                          key={`${card.title}-${tm.team_id ?? idx}`}
+                          style={styles.leaderRow}
+                          disabled={!tm.team_id}
+                          onPress={() =>
+                            tm.team_id &&
+                            navigation.navigate('TeamDetail', {
+                              teamId: tm.team_id,
+                              teamName: tm.team,
+                            })
+                          }
+                        >
+                          <Text style={styles.rankNum}>{idx + 1}</Text>
+                          <View style={styles.playerAvatarWrap}>
+                            {logo ? (
+                              <Image source={{ uri: logo }} style={{ width: 20, height: 20 }} resizeMode="contain" />
+                            ) : (
+                              <Ionicons name="shield-outline" size={14} color={COLORS.textDim} />
+                            )}
+                          </View>
+                          <Text style={[styles.leaderPlayerName, { flex: 1 }]} numberOfLines={1}>
+                            {tm.team}
+                          </Text>
+                          <Text style={[styles.statValText, { color: COLORS.volt }]}>
+                            {tm[card.key]}
+                            {card.suffix}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                ))}
+            </View>
+          )}
+
+          {/* TAB 5: SEASON HISTORY & PREVIOUS WINNERS */}
+          {activeTab === 'season' && (
+            <View style={styles.leaderCard}>
+              <View style={styles.leaderHeader}>
+                <Text style={styles.leaderTitle}>SEASONS &amp; PREVIOUS WINNERS</Text>
               </View>
+              {seasons.map((s) => {
+                const isSelected = s.label === selectedSeasonLabel;
+                const winnerLogo = teamLogoUrl(s.winner_id);
+                return (
+                  <TouchableOpacity
+                    key={s.label}
+                    onPress={() => {
+                      pickSeason(s);
+                      setActiveTab('table');
+                    }}
+                    style={[
+                      styles.leaderRow,
+                      isSelected && { backgroundColor: COLORS.voltMuted, borderRadius: 8, paddingHorizontal: 8 },
+                    ]}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.leaderPlayerName}>
+                        {s.label} {s.is_current ? '(Current)' : ''}
+                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                        {winnerLogo ? (
+                          <Image source={{ uri: winnerLogo }} style={{ width: 16, height: 16 }} resizeMode="contain" />
+                        ) : null}
+                        <Text style={styles.leaderTeamName}>
+                          {s.winner_name
+                            ? `Winner: ${s.winner_name}`
+                            : s.is_current
+                            ? 'Season in progress'
+                            : 'Tap to view table'}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={{ color: COLORS.volt, fontSize: 11, fontWeight: '700' }}>
+                      Table →
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           )}
         </ScrollView>
       )}
+
+      {/* Season Year Picker Modal */}
+      <Modal
+        visible={seasonModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSeasonModalOpen(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => setSeasonModalOpen(false)}
+          style={styles.modalBackdrop}
+        >
+          <View style={styles.modalSheet}>
+            <Text style={styles.leaderTitle}>SELECT SEASON</Text>
+            {seasons.map((s) => {
+              const active = s.label === selectedSeasonLabel;
+              return (
+                <TouchableOpacity
+                  key={s.label}
+                  onPress={() => pickSeason(s)}
+                  style={[styles.modalRow, active && { backgroundColor: COLORS.voltMuted }]}
+                >
+                  <Text style={[styles.leaderPlayerName, active && { color: COLORS.volt }]}>
+                    {s.label}
+                  </Text>
+                  {s.winner_name ? (
+                    <Text style={styles.leaderTeamName}>🏆 {s.winner_name}</Text>
+                  ) : s.is_current ? (
+                    <Text style={{ color: COLORS.volt, fontSize: 11, fontWeight: '700' }}>Current</Text>
+                  ) : null}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
+  container: { flex: 1, backgroundColor: COLORS.bg },
+  localBar: { paddingTop: 10, paddingBottom: 4 },
+  localHeading: {
+    color: COLORS.volt,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    paddingHorizontal: 14,
+    marginBottom: 6,
   },
+  localCard: {
+    backgroundColor: COLORS.card,
+    borderColor: COLORS.cardBorderActive,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minWidth: 140,
+  },
+  localTitle: { color: COLORS.text, fontSize: 12, fontWeight: '700' },
+  localSub: { color: COLORS.textDim, fontSize: 10, marginTop: 2 },
   pillsContainer: {
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -347,44 +774,59 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
   },
-  pillActive: {
-    backgroundColor: 'rgba(212, 255, 0, 0.12)',
-    borderColor: COLORS.volt,
-  },
-  pillText: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  pillTextActive: {
-    color: COLORS.volt,
-    fontWeight: '700',
-  },
-  tabRow: {
+  pillActive: { backgroundColor: COLORS.voltMuted, borderColor: COLORS.volt },
+  pillText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600' },
+  pillTextActive: { color: COLORS.volt, fontWeight: '700' },
+  leagueHeaderCard: {
     flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingVertical: 10,
+    backgroundColor: COLORS.card,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.cardBorder,
   },
-  tabBtn: {
-    flex: 1,
+  leagueHeroTitle: { color: COLORS.text, fontSize: 16, fontWeight: '900' },
+  leagueHeroCountry: { color: COLORS.textDim, fontSize: 10, fontWeight: '700', marginTop: 1 },
+  seasonBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
     paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorderActive,
+    backgroundColor: COLORS.cardElevated,
   },
-  tabBtnActive: {
-    borderBottomWidth: 2,
-    borderBottomColor: COLORS.volt,
+  seasonBtnText: { color: COLORS.volt, fontSize: 11, fontWeight: '800' },
+  tabRow: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.cardBorder,
   },
-  tabText: {
-    color: COLORS.textDim,
-    fontSize: 12,
-    fontWeight: '600',
+  tabBtn: { paddingVertical: 10 },
+  tabBtnActive: { borderBottomWidth: 2, borderBottomColor: COLORS.volt },
+  tabText: { color: COLORS.textDim, fontSize: 12, fontWeight: '600' },
+  tabTextActive: { color: COLORS.text, fontWeight: '800' },
+  groupHeading: {
+    color: COLORS.volt,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.3,
+    marginBottom: 6,
   },
-  tabTextActive: {
-    color: COLORS.text,
-    fontWeight: '700',
+  filterChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
   },
+  filterChipOn: { backgroundColor: COLORS.voltMuted, borderColor: COLORS.volt },
+  filterChipText: { color: COLORS.textSecondary, fontSize: 11, fontWeight: '600' },
+  filterChipTextOn: { color: COLORS.volt, fontWeight: '800' },
   centerBox: {
     flex: 1,
     alignItems: 'center',
@@ -392,17 +834,8 @@ const styles = StyleSheet.create({
     padding: 30,
     minHeight: 200,
   },
-  loadingText: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    marginTop: 10,
-  },
-  emptyText: {
-    color: COLORS.textDim,
-    fontSize: 13,
-    marginTop: 8,
-    textAlign: 'center',
-  },
+  loadingText: { color: COLORS.textSecondary, fontSize: 13, marginTop: 10 },
+  emptyText: { color: COLORS.textDim, fontSize: 13, marginTop: 8, textAlign: 'center' },
   leaderCard: {
     backgroundColor: COLORS.card,
     borderRadius: 12,
@@ -411,19 +844,12 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   leaderHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.cardBorder,
     paddingBottom: 8,
     marginBottom: 8,
   },
-  leaderTitle: {
-    color: COLORS.volt,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
+  leaderTitle: { color: COLORS.volt, fontSize: 11, fontWeight: '800', letterSpacing: 1 },
   leaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -431,62 +857,54 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(255, 255, 255, 0.04)',
   },
-  rankNum: {
-    width: 20,
-    color: COLORS.textDim,
-    fontSize: 12,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
+  rankNum: { width: 20, color: COLORS.textDim, fontSize: 12, fontWeight: '700', textAlign: 'center' },
   playerAvatarWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: COLORS.cardElevated,
     alignItems: 'center',
     justifyContent: 'center',
     marginHorizontal: 8,
     overflow: 'hidden',
   },
-  playerAvatar: {
-    width: 32,
-    height: 32,
-  },
-  leaderPlayerName: {
-    color: COLORS.text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  leaderTeamName: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    marginTop: 1,
-  },
+  playerAvatar: { width: 30, height: 30 },
+  leaderPlayerName: { color: COLORS.text, fontSize: 13, fontWeight: '600' },
+  leaderTeamName: { color: COLORS.textSecondary, fontSize: 11, marginTop: 1 },
   statValBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(212, 255, 0, 0.1)',
-    borderColor: 'rgba(212, 255, 0, 0.3)',
+    backgroundColor: COLORS.voltMuted,
+    borderColor: COLORS.cardBorderActive,
     borderWidth: 1,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
     gap: 3,
   },
-  statValText: {
-    color: COLORS.volt,
-    fontSize: 13,
-    fontWeight: '800',
+  statValText: { fontSize: 13, fontWeight: '800' },
+  statValSub: { fontSize: 10, fontWeight: '700' },
+  noDataText: { color: COLORS.textDim, fontSize: 12, paddingVertical: 12, textAlign: 'center' },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    justifyContent: 'center',
+    padding: 24,
   },
-  statValSub: {
-    color: COLORS.volt,
-    fontSize: 10,
-    fontWeight: '700',
+  modalSheet: {
+    backgroundColor: COLORS.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorderActive,
+    padding: 16,
+    gap: 8,
   },
-  noDataText: {
-    color: COLORS.textDim,
-    fontSize: 12,
-    paddingVertical: 12,
-    textAlign: 'center',
+  modalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 8,
   },
 });

@@ -43,6 +43,7 @@ function Live() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pane, setPane] = useState<"match" | "sheet">("match");
+  const [kickoffNow, setKickoffNow] = useState(() => Date.now());
 
   // Structured Event Form State
   const [teamSide, setTeamSide] = useState<"home" | "away">("home");
@@ -64,12 +65,27 @@ function Live() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    if (!fx?.kickoff_at || fx.status !== "scheduled") return;
+    const unlockAt = new Date(fx.kickoff_at).getTime() - 15 * 60_000;
+    const delay = unlockAt - Date.now();
+    if (delay <= 0) {
+      setKickoffNow(Date.now());
+      return;
+    }
+    const timer = window.setTimeout(() => setKickoffNow(Date.now()), delay);
+    return () => window.clearTimeout(timer);
+  }, [fx?.kickoff_at, fx?.status]);
+
   if (error && !fx) return <p className="text-red2 text-sm font-semibold">{error}</p>;
   if (!fx) return <p className="text-mt text-sm">Loading...</p>;
 
   const name = (tid: string) => teams.find((t) => t.id === tid)?.clubs?.name ?? "Unknown";
   const home = fx.home_score ?? 0;
   const away = fx.away_score ?? 0;
+  const kickoffMs = fx.kickoff_at ? new Date(fx.kickoff_at).getTime() : 0;
+  const kickoffReached =
+    fx.status !== "scheduled" || !kickoffMs || kickoffNow + 15 * 60_000 >= kickoffMs;
 
   const activeTeamId = teamSide === "home" ? fx.home_team_id : fx.away_team_id;
   const opposingTeamId = teamSide === "home" ? fx.away_team_id : fx.home_team_id;
@@ -174,21 +190,40 @@ function Live() {
 
       {pane === "match" && (
         <>
+          {!kickoffReached && (
+            <div className="card border-amber/40 bg-amber/5 space-y-1">
+              <p className="text-amber text-sm font-semibold">
+                Match hasn&apos;t kicked off yet
+              </p>
+              <p className="text-mt text-xs">
+                Scheduled for{" "}
+                {new Date(fx.kickoff_at!).toLocaleString("en-GB", {
+                  weekday: "short", day: "numeric", month: "short",
+                  hour: "2-digit", minute: "2-digit",
+                })}
+                . Score and event logging unlock automatically at kickoff. You can still set the{" "}
+                <button type="button" onClick={() => setPane("sheet")} className="text-volt underline font-semibold">
+                  Team sheet
+                </button>{" "}
+                now.
+              </p>
+            </div>
+          )}
           {/* Scoreboard */}
           <div className="card">
             <div className="grid grid-cols-3 items-center gap-2">
-              <Side label={name(fx.home_team_id)} score={home} busy={busy}
+              <Side label={name(fx.home_team_id)} score={home} disabled={busy || !kickoffReached}
                     onUp={() => bump("home", 1)} onDown={() => bump("home", -1)} />
               <p className="text-center text-mt text-xs font-mono uppercase">
                 {fx.status}
               </p>
-              <Side label={name(fx.away_team_id)} score={away} busy={busy}
+              <Side label={name(fx.away_team_id)} score={away} disabled={busy || !kickoffReached}
                     onUp={() => bump("away", 1)} onDown={() => bump("away", -1)} />
             </div>
 
             <div className="flex flex-wrap gap-2 mt-5 justify-center">
               {["live", "ht", "ft", "postponed"].map((s) => (
-                <button key={s} disabled={busy}
+                <button key={s} disabled={busy || !kickoffReached}
                         onClick={() => push({ status: s })}
                         className={clsx("tab-pill",
                           fx.status === s ? "tab-pill-active" : "tab-pill-inactive")}>
@@ -414,7 +449,7 @@ function Live() {
 
             {error && <p className="text-red2 text-sm font-semibold">{error}</p>}
 
-            <button type="submit" disabled={busy} className="btn-volt w-full sm:w-auto">
+            <button type="submit" disabled={busy || !kickoffReached} className="btn-volt w-full sm:w-auto">
               {busy ? "Recording..." : "Record Event"}
             </button>
           </form>
@@ -423,7 +458,7 @@ function Live() {
           <div className="card space-y-2">
             <p className="section-label">Tactica Player of the Match (POTM)</p>
             <select
-              disabled={busy}
+              disabled={busy || !kickoffReached}
               value={(fx as any).official_motm_player_id ?? ""}
               onChange={(e) => push({ official_motm_player_id: e.target.value || null })}
               className="input-select text-sm"
@@ -499,8 +534,8 @@ function Live() {
   );
 }
 
-function Side({ label, score, busy, onUp, onDown }: {
-  label: string; score: number; busy: boolean;
+function Side({ label, score, disabled, onUp, onDown }: {
+  label: string; score: number; disabled: boolean;
   onUp: () => void; onDown: () => void;
 }) {
   return (
@@ -508,11 +543,11 @@ function Side({ label, score, busy, onUp, onDown }: {
       <p className="text-white text-sm font-semibold truncate mb-2">{label}</p>
       <p className="font-display font-black text-5xl text-volt leading-none">{score}</p>
       <div className="flex justify-center gap-2 mt-3">
-        <button disabled={busy} onClick={onDown}
+        <button disabled={disabled} onClick={onDown}
                 className="w-11 h-11 rounded-lg bg-sur2 hover:bg-bd text-white text-xl">
           &minus;
         </button>
-        <button disabled={busy} onClick={onUp}
+        <button disabled={disabled} onClick={onUp}
                 className="w-11 h-11 rounded-lg bg-volt text-bg font-bold text-xl">
           +
         </button>

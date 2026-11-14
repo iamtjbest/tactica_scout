@@ -163,6 +163,14 @@ export type StandingsRow = {
 
 export type StandingsGroup = { group: string; standings: StandingsRow[] };
 
+export type LeagueSeason = {
+  id: number | null;
+  label: string;
+  is_current: boolean;
+  winner_name: string | null;
+  winner_id: number | null;
+};
+
 export type TopStatPlayer = {
   rank: number;
   player_id: number;
@@ -172,6 +180,17 @@ export type TopStatPlayer = {
   team_name: string;
   value: number;
   matches: number;
+};
+
+export type LeagueTeamStat = {
+  team_id: number | null;
+  team: string;
+  played: number;
+  goals_per_match: number;
+  conceded_per_match: number;
+  clean_sheets: number;
+  win_rate: number;
+  possession_avg: number | null;
 };
 
 export type PlayerSummary = {
@@ -286,29 +305,75 @@ export async function getLeagues(): Promise<{ leagues: { league_id: number; name
   return res.json();
 }
 
-export async function getStandings(leagueId: number): Promise<{
+export async function getLeagueSeasons(leagueId: number): Promise<{
   league_id: number;
   league: string;
+  country: string;
+  seasons: LeagueSeason[];
+}> {
+  const base = await getApiBase();
+  const res = await fetch(`${base}/api/leagues/${leagueId}/seasons`);
+  if (!res.ok) throw new Error(`seasons failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getStandings(leagueId: number, seasonId?: number | null): Promise<{
+  league_id: number;
+  league: string;
+  country?: string;
   standings: StandingsRow[] | null;
   groups: StandingsGroup[] | null;
 }> {
   const base = await getApiBase();
-  const res = await fetch(`${base}/api/standings?league_id=${leagueId}`);
+  const qs = seasonId != null ? `&season_id=${seasonId}` : '';
+  const res = await fetch(`${base}/api/standings?league_id=${leagueId}${qs}`);
   if (!res.ok) throw new Error(`standings failed: ${res.status}`);
   return res.json();
 }
 
-export async function getLeagueFixtures(leagueId: number): Promise<{ league_id: number; matches: MatchSummary[] }> {
+export async function getLeagueFixtures(
+  leagueId: number,
+  seasonId?: number | null
+): Promise<{ league_id: number; matches: MatchSummary[] }> {
   const base = await getApiBase();
-  const res = await fetch(`${base}/api/leagues/${leagueId}/fixtures`);
+  const qs = seasonId != null ? `?season_id=${seasonId}` : '';
+  const res = await fetch(`${base}/api/leagues/${leagueId}/fixtures${qs}`);
   if (!res.ok) throw new Error(`league fixtures failed: ${res.status}`);
   return res.json();
 }
 
-export async function getLeagueTopStats(leagueId: number): Promise<{ league_id: number; scorers: TopStatPlayer[]; assists: TopStatPlayer[] }> {
+export async function getLeagueTopStats(
+  leagueId: number,
+  seasonId?: number | null
+): Promise<{
+  league_id: number;
+  scorers: TopStatPlayer[];
+  assists: TopStatPlayer[];
+  ratings: TopStatPlayer[];
+  cards: TopStatPlayer[];
+}> {
   const base = await getApiBase();
-  const res = await fetch(`${base}/api/leagues/${leagueId}/top-stats`);
+  const qs = seasonId != null ? `?season_id=${seasonId}` : '';
+  const res = await fetch(`${base}/api/leagues/${leagueId}/top-stats${qs}`);
   if (!res.ok) throw new Error(`top stats failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getLeagueTeamStats(
+  leagueId: number,
+  seasonId?: number | null
+): Promise<{
+  league_id: number;
+  goals_per_match: LeagueTeamStat[];
+  conceded_per_match: LeagueTeamStat[];
+  clean_sheets: LeagueTeamStat[];
+  win_rate: LeagueTeamStat[];
+  possession: LeagueTeamStat[];
+}> {
+  const base = await getApiBase();
+  const qs = seasonId != null ? `?season_id=${seasonId}` : '';
+  const res = await fetch(`${base}/api/leagues/${leagueId}/team-stats${qs}`);
+  if (!res.ok) throw new Error(`team stats failed: ${res.status}`);
   return res.json();
 }
 

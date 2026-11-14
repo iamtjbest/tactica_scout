@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl,
   Alert,
@@ -8,10 +8,12 @@ import { COLORS } from "../theme";
 import Crest from "../components/Crest";
 import {
   getTournament, getReadiness, submitForReview, sortRounds,
-  addFixture, generateFixtures, clearFixtures,
+  addFixture, deleteFixture, generateFixtures, clearFixtures,
+  listSubCompetitions, listVenues,
   type Tournament, type TeamRow, type Fixture, type Readiness,
+  type SubCompetition, type Venue,
 } from "../services/api";
-import { LockedNote, Field, Btn, Choice } from "../sections/kit";
+import { LockedNote, Field, Btn } from "../sections/kit";
 import { SeasonStrip, MatchFilters, EmptyMatches } from "../sections/Season";
 import { Venues, Structure, Suspensions } from "../sections/Structure";
 import {
@@ -60,19 +62,43 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
   const [t, setT] = useState<Tournament | null>(null);
   const [teams, setTeams] = useState<TeamRow[]>([]);
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
+  const [subCompetitions, setSubCompetitions] = useState<SubCompetition[]>([]);
+  const [venues, setVenues] = useState<Venue[]>([]);
+  const [fixtureOptionsError, setFixtureOptionsError] = useState<string | null>(null);
   const [ready, setReady] = useState<Readiness | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [deletingFixtureId, setDeletingFixtureId] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [section, setSection] = useState<Section>("matches");
   const [fSub, setFSub] = useState("");
   const [fRound, setFRound] = useState("");
   const [fTeam, setFTeam] = useState("");
 
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
   const load = useCallback(() => {
     getTournament(id)
       .then((d) => {
         setT(d.tournament); setTeams(d.teams); setFixtures(d.fixtures); setError(null);
+        const role = (d.tournament as any)._role ?? "owner";
+        if (role === "owner") {
+          setFixtureOptionsError(null);
+          listSubCompetitions(id)
+            .then((result) => setSubCompetitions(result.sub_competitions))
+            .catch((e) => setFixtureOptionsError(e.message));
+          listVenues(id)
+            .then((result) => setVenues(result.venues))
+            .catch((e) => setFixtureOptionsError(e.message));
+        } else {
+          setSubCompetitions([]);
+          setVenues([]);
+          setFixtureOptionsError(null);
+        }
       })
       .catch((e) => setError(e.message))
       .finally(() => setRefreshing(false));
@@ -103,6 +129,26 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
     catch (e: any) { setError(e.message); }
     finally { setBusy(false); }
   };
+
+  const confirmDeleteFixture = (fixture: Fixture) => Alert.alert(
+    "Delete fixture?",
+    "This permanently removes the fixture and its match data.",
+    [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => {
+          setDeletingFixtureId(fixture.id);
+          setError(null);
+          void deleteFixture(fixture.id)
+            .then(load)
+            .catch((e) => setError(e.message))
+            .finally(() => setDeletingFixtureId(null));
+        },
+      },
+    ]
+  );
 
   if (error && !t) return <Text style={s.error}>{error}</Text>;
   if (!t) return <Text style={s.muted}>Loading...</Text>;
@@ -165,7 +211,10 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
         {SECTIONS.map((x) => {
           const on = x.id === section;
           return (
-            <TouchableOpacity key={x.id} onPress={() => setSection(x.id)}
+            <TouchableOpacity key={x.id} onPress={() => {
+              setSection(x.id);
+              if (x.id === "matches") load();
+            }}
                               style={[s.pill, on && s.pillOn]}>
               <Text style={[s.pillText, on && s.pillTextOn]}>{x.label}</Text>
             </TouchableOpacity>
@@ -177,6 +226,8 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
         {section === "matches" ? (
           <>
             <FixtureTools tid={id} teams={teams} fixtures={fixtures}
+                          subCompetitions={subCompetitions} venues={venues}
+                          optionsError={fixtureOptionsError}
                           editable={editable && isOwner} onChanged={load} />
             <SeasonStrip t={t} fixtures={fixtures} />
             <MatchFilters
@@ -197,34 +248,64 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
                   <Text style={s.round}>{heading}</Text>
                   {list.map((fx) => {
                     const h = info(fx.home_team_id), a = info(fx.away_team_id);
+                    const kickoffMs = new Date(fx.kickoff_at).getTime();
+                    const beforeKickoff = fx.status === "scheduled" &&
+                      Number.isFinite(kickoffMs) && now < kickoffMs;
                     return (
-                      <TouchableOpacity
-                        key={fx.id} style={s.card}
-                        onPress={() => navigation.navigate("Live", {
-                          tournamentId: id, fixtureId: fx.id,
-                        })}
-                      >
-                        <View style={s.rowTop}>
-                          <View style={s.teamsLine}>
-                            <Crest url={h.crest} name={h.name} size={18} />
-                            <Text style={s.title} numberOfLines={1}>{h.name}</Text>
-                            <Text style={s.vs}>v</Text>
-                            <Crest url={a.crest} name={a.name} size={18} />
-                            <Text style={s.title} numberOfLines={1}>{a.name}</Text>
-                          </View>
-                          <Text style={s.score}>
-                            {fx.home_score ?? "-"}:{fx.away_score ?? "-"}
-                          </Text>
-                        </View>
-                        <Text style={s.mono}>
-                          {new Date(fx.kickoff_at).toLocaleString("en-GB", {
-                            day: "numeric", month: "short",
-                            hour: "2-digit", minute: "2-digit",
+                      <View key={fx.id} style={s.card}>
+                        <TouchableOpacity
+                          onPress={() => navigation.navigate("Live", {
+                            tournamentId: id, fixtureId: fx.id,
                           })}
-                          {"  \u2022  "}{String(fx.status).toUpperCase()}
-                        </Text>
-                      </TouchableOpacity>
-                    );
+                        >
+                          <View style={s.rowTop}>
+                            <View style={s.teamsLine}>
+                              <Crest url={h.crest} name={h.name} size={18} />
+                              <Text style={s.title} numberOfLines={1}>{h.name}</Text>
+                              <Text style={s.vs}>v</Text>
+                              <Crest url={a.crest} name={a.name} size={18} />
+                              <Text style={s.title} numberOfLines={1}>{a.name}</Text>
+                            </View>
+                            <Text style={s.score}>
+                              {fx.home_score ?? "-"}:{fx.away_score ?? "-"}
+                            </Text>
+                          </View>
+                          <Text style={s.mono}>
+                            {new Date(fx.kickoff_at).toLocaleString("en-GB", {
+                              day: "numeric", month: "short",
+                              hour: "2-digit", minute: "2-digit",
+                            })}
+                            {"  \u2022  "}{String(fx.status).toUpperCase()}
+                          </Text>
+                        </TouchableOpacity>
+                        {(beforeKickoff || (editable && isOwner)) ? (
+                          <View style={s.actions}>
+                            {beforeKickoff ? (
+                              <TouchableOpacity
+                                style={s.pill}
+                                onPress={() => navigation.navigate("Live", {
+                                  tournamentId: id, fixtureId: fx.id, pane: "sheet",
+                                })}
+                              >
+                                <Text style={s.pillText}>Team sheet</Text>
+                              </TouchableOpacity>
+                            ) : null}
+                            {editable && isOwner ? (
+                              <TouchableOpacity
+                                disabled={deletingFixtureId === fx.id}
+                                style={[s.pill, { borderColor: "rgba(255,68,68,0.4)" },
+                                  deletingFixtureId === fx.id && { opacity: 0.5 }]}
+                                onPress={() => confirmDeleteFixture(fx)}
+                              >
+                                <Text style={{ color: "#FF4444", fontSize: 12, fontWeight: "700" }}>
+                                  Delete
+                                </Text>
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+                        ) : null}
+                      </View>
+                      );
                   })}
                 </View>
               ))
@@ -262,8 +343,11 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
   );
 }
 
-function FixtureTools({ tid, teams, fixtures, editable, onChanged }: {
+function FixtureTools({
+  tid, teams, fixtures, subCompetitions, venues, optionsError, editable, onChanged,
+}: {
   tid: string; teams: TeamRow[]; fixtures: Fixture[];
+  subCompetitions: SubCompetition[]; venues: Venue[]; optionsError: string | null;
   editable: boolean; onChanged: () => void;
 }) {
   const [firstKickoff, setFirstKickoff] = useState(
@@ -279,7 +363,7 @@ function FixtureTools({ tid, teams, fixtures, editable, onChanged }: {
     defaultKickoff()
   );
   const [round, setRound] = useState("");
-  const [groupName, setGroupName] = useState("");
+  const [groupId, setGroupId] = useState("");
   const [manualVenue, setManualVenue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -287,10 +371,14 @@ function FixtureTools({ tid, teams, fixtures, editable, onChanged }: {
 
   if (!editable) return null;
 
-  const teamOptions = [
-    { id: "", label: "Choose a team" },
-    ...teams.map((team) => ({ id: team.id, label: team.clubs?.name ?? "Unknown" })),
-  ];
+  const groups = subCompetitions.filter((sub) => sub.kind === "group");
+  const selectedGroup = groups.find((group) => group.id === groupId);
+  const groupTeamIds = new Set((selectedGroup?.teams ?? []).map((team) => team.id));
+  const availableTeams = selectedGroup
+    ? teams.filter((team) => groupTeamIds.has(team.id))
+    : teams;
+  const groupLabel = (name: string) =>
+    /^group\s/i.test(name) ? name : `Group ${name}`;
 
   const run = async (action: () => Promise<unknown>, success: string) => {
     setBusy(true);
@@ -337,7 +425,7 @@ function FixtureTools({ tid, teams, fixtures, editable, onChanged }: {
       away_team_id: awayTeamId,
       kickoff_at: kickoff.toISOString(),
       round: round.trim() || null,
-      group_name: groupName.trim() || null,
+      group_name: selectedGroup?.name || null,
       venue: manualVenue.trim() || null,
     }), "Fixture added.");
   };
@@ -384,15 +472,76 @@ function FixtureTools({ tid, teams, fixtures, editable, onChanged }: {
       ) : null}
 
       <Text style={[s.muted, { marginTop: 6 }]}>Or add one fixture manually</Text>
-      <Choice value={homeTeamId} options={teamOptions} onChange={setHomeTeamId} />
-      <Choice value={awayTeamId} options={teamOptions} onChange={setAwayTeamId} />
+      {optionsError ? <Text style={s.error}>{optionsError}</Text> : null}
+      <Text style={s.muted}>Group</Text>
+      <View style={s.chips}>
+        {[{ id: "", name: "All" }, ...groups.map((group) => ({
+          id: group.id, name: groupLabel(group.name),
+        }))].map((group) => (
+          <TouchableOpacity
+            key={group.id || "all"}
+            style={[s.pill, groupId === group.id && s.pillOn]}
+            onPress={() => {
+              setGroupId(group.id);
+              setHomeTeamId("");
+              setAwayTeamId("");
+            }}
+          >
+            <Text style={[s.pillText, groupId === group.id && s.pillTextOn]}>{group.name}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <Text style={s.muted}>Home team</Text>
+      <View style={s.chips}>
+        {availableTeams.map((team) => (
+          <TouchableOpacity key={team.id} style={[s.pill, homeTeamId === team.id && s.pillOn]}
+                            onPress={() => {
+                              setHomeTeamId(team.id);
+                              if (awayTeamId === team.id) setAwayTeamId("");
+                            }}>
+            <Text style={[s.pillText, homeTeamId === team.id && s.pillTextOn]}>
+              {team.clubs?.name ?? "Unknown"}
+            </Text>
+          </TouchableOpacity>
+        ))}
+        {availableTeams.length === 0 ? <Text style={s.muted}>No teams in this group yet.</Text> : null}
+      </View>
+
+      <Text style={s.muted}>Away team</Text>
+      <View style={s.chips}>
+        {availableTeams.filter((team) => team.id !== homeTeamId).map((team) => (
+          <TouchableOpacity key={team.id} style={[s.pill, awayTeamId === team.id && s.pillOn]}
+                            onPress={() => setAwayTeamId(team.id)}>
+            <Text style={[s.pillText, awayTeamId === team.id && s.pillTextOn]}>
+              {team.clubs?.name ?? "Unknown"}
+            </Text>
+          </TouchableOpacity>
+        ))}
+        {availableTeams.filter((team) => team.id !== homeTeamId).length === 0
+          ? <Text style={s.muted}>No away teams available in this group.</Text> : null}
+      </View>
       <Field label="Kickoff (YYYY-MM-DDTHH:mm)" value={manualKickoff}
              onChangeText={setManualKickoff} />
       <View style={[s.rowTop, { alignItems: "flex-start" }]}>
         <Field label="Round (optional)" value={round} onChangeText={setRound} />
-        <Field label="Group (optional)" value={groupName} onChangeText={setGroupName} />
       </View>
-      <Field label="Venue (optional)" value={manualVenue} onChangeText={setManualVenue} />
+      <Text style={s.muted}>Venue</Text>
+      <View style={s.chips}>
+        <TouchableOpacity style={[s.pill, !manualVenue && s.pillOn]}
+                          onPress={() => setManualVenue("")}>
+          <Text style={[s.pillText, !manualVenue && s.pillTextOn]}>No venue</Text>
+        </TouchableOpacity>
+        {venues.map((item) => (
+          <TouchableOpacity key={item.id} style={[s.pill, manualVenue === item.name && s.pillOn]}
+                            onPress={() => setManualVenue(item.name)}>
+            <Text style={[s.pillText, manualVenue === item.name && s.pillTextOn]}>
+              {item.name}
+            </Text>
+          </TouchableOpacity>
+        ))}
+        {venues.length === 0 ? <Text style={s.muted}>Add venues in the Venues tab to choose one.</Text> : null}
+      </View>
       <Btn label="Add fixture" busy={busy} onPress={() => { void createOne(); }} />
     </View>
   );
@@ -442,4 +591,6 @@ const s = StyleSheet.create({
   pillOn: { borderColor: COLORS.cardBorderActive, backgroundColor: COLORS.voltMuted },
   pillText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: "600" },
   pillTextOn: { color: COLORS.volt, fontWeight: "800" },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  actions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 6 },
 });

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet,
 } from "react-native";
@@ -71,6 +71,7 @@ export default function LiveScreen({ route }: any) {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [queueCount, setQueueCount] = useState(0);
+  const [kickoffNow, setKickoffNow] = useState(() => Date.now());
   const [teamSide, setTeamSide] = useState<TeamSide>("home");
   const [primaryType, setPrimaryType] = useState<PrimaryEvent>("goal");
   const [penaltyOutcome, setPenaltyOutcome] = useState<PenaltyOutcome>("penalty_scored");
@@ -79,7 +80,13 @@ export default function LiveScreen({ route }: any) {
   const [syncScore, setSyncScore] = useState(true);
   // Score and events first: that is what someone at the pitch needs in
   // the second after a goal. The sheet is filled in before kickoff.
-  const [pane, setPane] = useState<"match" | "sheet">("match");
+  const [pane, setPane] = useState<"match" | "sheet">(
+    route.params?.pane === "sheet" ? "sheet" : "match"
+  );
+
+  useEffect(() => {
+    setPane(route.params?.pane === "sheet" ? "sheet" : "match");
+  }, [fixtureId, route.params?.pane]);
 
   const refreshQueueCount = useCallback(async () => {
     try {
@@ -165,6 +172,18 @@ export default function LiveScreen({ route }: any) {
     };
   }, [load, queueCount, syncOfflineActions]));
 
+  useEffect(() => {
+    if (!fx?.kickoff_at || fx.status !== "scheduled") return;
+    const unlockAt = new Date(fx.kickoff_at).getTime() - 15 * 60_000;
+    const delay = unlockAt - Date.now();
+    if (delay <= 0) {
+      setKickoffNow(Date.now());
+      return;
+    }
+    const timer = setTimeout(() => setKickoffNow(Date.now()), delay);
+    return () => clearTimeout(timer);
+  }, [fx?.kickoff_at, fx?.status]);
+
   if (error && !fx) return <Text style={s.error}>{error}</Text>;
   if (!fx) return <Text style={s.muted}>Loading...</Text>;
 
@@ -172,6 +191,8 @@ export default function LiveScreen({ route }: any) {
   const home = fx.home_score ?? 0;
   const away = fx.away_score ?? 0;
   const noScores = fx.home_score == null || fx.away_score == null;
+  const kickoffReached = fx.status !== "scheduled" || !fx.kickoff_at ||
+    kickoffNow + 15 * 60_000 >= new Date(fx.kickoff_at).getTime();
 
   const activeTeamId = teamSide === "home" ? fx.home_team_id : fx.away_team_id;
   const opposingTeamId = teamSide === "home" ? fx.away_team_id : fx.home_team_id;
@@ -379,18 +400,33 @@ export default function LiveScreen({ route }: any) {
         />
       ) : (
       <>
+      {!kickoffReached ? (
+        <View style={[s.card, { borderColor: "rgba(255,184,48,0.4)", backgroundColor: "rgba(255,184,48,0.05)" }]}>
+          <Text style={{ color: "#FFB830", fontSize: 13, fontWeight: "700" }}>
+            Match hasn&apos;t kicked off yet
+          </Text>
+          <Text style={s.muted}>
+            Scheduled for{" "}
+            {new Date(fx.kickoff_at!).toLocaleString("en-GB", {
+              weekday: "short", day: "numeric", month: "short",
+              hour: "2-digit", minute: "2-digit",
+            })}
+            . Score and event logging unlock automatically at kickoff. You can still edit the team sheet now.
+          </Text>
+        </View>
+      ) : null}
       <View style={s.card}>
         <View style={s.board}>
-          <Side label={name(fx.home_team_id)} score={home} busy={busy}
+          <Side label={name(fx.home_team_id)} score={home} disabled={busy || !kickoffReached}
                 onUp={() => bump("home", 1)} onDown={() => bump("home", -1)} />
           <Text style={s.status}>{String(fx.status).toUpperCase()}</Text>
-          <Side label={name(fx.away_team_id)} score={away} busy={busy}
+          <Side label={name(fx.away_team_id)} score={away} disabled={busy || !kickoffReached}
                 onUp={() => bump("away", 1)} onDown={() => bump("away", -1)} />
         </View>
 
         <View style={s.statusRow}>
           {STATUSES.map((st) => (
-            <TouchableOpacity key={st} disabled={busy} onPress={() => push({ status: st })}
+            <TouchableOpacity key={st} disabled={busy || !kickoffReached} onPress={() => push({ status: st })}
               style={[s.chip, fx.status === st && s.chipOn]}>
               <Text style={[s.chipText, fx.status === st && { color: COLORS.volt }]}>
                 {st.toUpperCase()}
@@ -582,8 +618,8 @@ export default function LiveScreen({ route }: any) {
         {error ? <Text style={s.error}>{error}</Text> : null}
         {notice ? <Text style={s.notice}>{notice}</Text> : null}
         <TouchableOpacity
-          disabled={busy}
-          style={[s.recordBtn, busy && { opacity: 0.5 }]}
+          disabled={busy || !kickoffReached}
+          style={[s.recordBtn, (busy || !kickoffReached) && { opacity: 0.5 }]}
           onPress={() => { void submitEvent(); }}
         >
           <Text style={s.recordBtnText}>{busy ? "Recording..." : "4. Record Event"}</Text>
@@ -623,18 +659,18 @@ export default function LiveScreen({ route }: any) {
   );
 }
 
-function Side({ label, score, busy, onUp, onDown }: {
-  label: string; score: number; busy: boolean; onUp: () => void; onDown: () => void;
+function Side({ label, score, disabled, onUp, onDown }: {
+  label: string; score: number; disabled: boolean; onUp: () => void; onDown: () => void;
 }) {
   return (
     <View style={{ flex: 1, alignItems: "center" }}>
       <Text style={s.sideName} numberOfLines={1}>{label}</Text>
       <Text style={s.score}>{score}</Text>
       <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
-        <TouchableOpacity disabled={busy} onPress={onDown} style={s.minus}>
+        <TouchableOpacity disabled={disabled} onPress={onDown} style={s.minus}>
           <Text style={s.minusText}>−</Text>
         </TouchableOpacity>
-        <TouchableOpacity disabled={busy} onPress={onUp} style={s.plus}>
+        <TouchableOpacity disabled={disabled} onPress={onUp} style={s.plus}>
           <Text style={s.plusText}>+</Text>
         </TouchableOpacity>
       </View>
