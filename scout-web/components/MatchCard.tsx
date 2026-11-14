@@ -12,11 +12,11 @@ function formatKickoff(iso?: string): string {
 }
 
 function isMatchFinished(s: string) {
-  return ["finished", "ended", "played"].includes(s);
+  return ["finished", "ended", "played", "ft"].includes(String(s).toLowerCase());
 }
 
 function isMatchLive(s: string) {
-  return !isMatchFinished(s) && !["notstarted", "postponed", "cancelled", "delayed"].includes(s);
+  return !isMatchFinished(s) && !["notstarted", "postponed", "cancelled", "delayed"].includes(String(s).toLowerCase());
 }
 
 export default function MatchCard({ match, targetTeamId, showCompetition }: { match: MatchSummary, targetTeamId?: number, showCompetition?: boolean }) {

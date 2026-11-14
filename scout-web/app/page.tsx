@@ -16,11 +16,11 @@ const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
 ];
 
 function isMatchFinished(s: string) {
-  return ["finished", "ended", "played"].includes(s);
+  return ["finished", "ended", "played", "ft"].includes(String(s).toLowerCase());
 }
 
 function isMatchLive(s: string) {
-  return !isMatchFinished(s) && !["notstarted", "postponed", "cancelled", "delayed"].includes(s);
+  return !isMatchFinished(s) && !["notstarted", "postponed", "cancelled", "delayed"].includes(String(s).toLowerCase());
 }
 
 function matchPasses(m: MatchSummary, filter: StatusFilter): boolean {
@@ -32,18 +32,17 @@ function matchPasses(m: MatchSummary, filter: StatusFilter): boolean {
 
 function isFollowed(m: MatchSummary, leagueId: number | null | undefined, followedTokens: string[]): boolean {
   if (!followedTokens || followedTokens.length === 0) return false;
-  return followedTokens.some(token => {
+  return followedTokens.some((token) => {
     const parts = token.split(':');
     if (parts.length >= 2) {
-      const type = parts[0];
-      const id = Number(parts[1]);
-      if (type === "team" && (m.home_team_id === id || m.away_team_id === id)) return true;
-      if (type === "league" && leagueId === id) return true;
-    } else {
-       // fallback to old plain text team names
-       if (m.home_team.toLowerCase() === token.toLowerCase()) return true;
-       if (m.away_team.toLowerCase() === token.toLowerCase()) return true;
+      const [type, rawId] = parts;
+      if (type === "tournament" && String(leagueId ?? "") === rawId) return true;
+      if (type === "league" && String(leagueId) === rawId) return true;
+      if (type === "team" && (String(m.home_team_id) === rawId || String(m.away_team_id) === rawId)) return true;
+      return false;
     }
+    if (m.home_team.toLowerCase() === token.toLowerCase()) return true;
+    if (m.away_team.toLowerCase() === token.toLowerCase()) return true;
     return false;
   });
 }

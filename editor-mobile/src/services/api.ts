@@ -404,7 +404,7 @@ export type Invite = {
 export type AccessRequest = {
   id: string; user_id: string; message: string | null;
   role_requested: TRole; status: string;
-  profiles?: { email?: string; full_name?: string } | null;
+  profiles?: { email?: string; display_name?: string | null } | null;
 };
 
 export const listInvites = (tid: string) =>

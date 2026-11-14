@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet,
 } from "react-native";
@@ -9,6 +9,9 @@ import {
   getTournament, setScore, listEvents, addEvent, deleteEvent,
   type Fixture, type TeamRow, type MatchEvent,
 } from "../services/api";
+import {
+  enqueueOfflineAction, flushOfflineQueue, isRetryableNetworkError,
+} from "../services/offlineQueue";
 
 /**
  * The reason the mobile editor exists. One thumb, at the side of a
@@ -39,9 +42,19 @@ export default function LiveScreen({ route }: any) {
   const [minute, setMinute] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [queueCount, setQueueCount] = useState(0);
   // Score and events first: that is what someone at the pitch needs in
   // the second after a goal. The sheet is filled in before kickoff.
   const [pane, setPane] = useState<"match" | "sheet">("match");
+
+  const refreshQueueCount = useCallback(async () => {
+    try {
+      const queue = await (await import("../services/offlineQueue")).readOfflineQueue();
+      setQueueCount(queue.filter((item) => item.fixtureId === fixtureId).length);
+    } catch {
+      setQueueCount(0);
+    }
+  }, [fixtureId]);
 
   const load = useCallback(() => {
     getTournament(tournamentId).then((d) => {
@@ -49,9 +62,12 @@ export default function LiveScreen({ route }: any) {
       setFx(d.fixtures.find((f) => f.id === fixtureId) ?? null);
     }).catch((e) => setError(e.message));
     listEvents(fixtureId).then((d) => setEvents(d.events)).catch(() => {});
-  }, [tournamentId, fixtureId]);
+    refreshQueueCount();
+  }, [tournamentId, fixtureId, refreshQueueCount]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  useEffect(() => { refreshQueueCount(); }, [refreshQueueCount]);
 
   if (error && !fx) return <Text style={s.error}>{error}</Text>;
   if (!fx) return <Text style={s.muted}>Loading...</Text>;
@@ -63,9 +79,27 @@ export default function LiveScreen({ route }: any) {
 
   const push = async (patch: Record<string, unknown>) => {
     setBusy(true); setError(null);
-    try { setFx(await setScore(fixtureId, patch)); }
-    catch (e: any) { setError(e.message); }
-    finally { setBusy(false); }
+    try {
+      const next = await setScore(fixtureId, patch);
+      setFx(next);
+      await refreshQueueCount();
+    } catch (e: any) {
+      if (await isRetryableNetworkError(e)) {
+        await enqueueOfflineAction({
+          id: `${fixtureId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          fixtureId,
+          kind: "score",
+          payload: patch,
+          createdAt: Date.now(),
+          tries: 0,
+        });
+        setError("Saved offline. It will sync when the connection returns.");
+      } else {
+        setError(e.message);
+      }
+    } finally {
+      setBusy(false);
+    }
   };
 
   const bump = (side: "home" | "away", by: number) =>
@@ -85,7 +119,25 @@ export default function LiveScreen({ route }: any) {
       setImplied(r.score_from_events);
       setMinute("");
       load();
-    } catch (e: any) { setError(e.message); }
+    } catch (e: any) {
+      if (await isRetryableNetworkError(e)) {
+        await enqueueOfflineAction({
+          id: `${fixtureId}-event-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          fixtureId,
+          kind: "event",
+          payload: {
+            tournament_team_id: teamId,
+            type,
+            minute: minute.trim() === "" ? null : Number(minute),
+          },
+          createdAt: Date.now(),
+          tries: 0,
+        });
+        setError("Event queued offline. It will sync once you reconnect.");
+      } else {
+        setError(e.message);
+      }
+    }
   };
 
   const mismatch = implied && (implied.home !== home || implied.away !== away);
@@ -102,6 +154,10 @@ export default function LiveScreen({ route }: any) {
           </TouchableOpacity>
         ))}
       </View>
+
+      {queueCount > 0 ? (
+        <Text style={[s.muted, { color: "#FFB830" }]}>Offline queue: {queueCount} pending update{queueCount === 1 ? "" : "s"}</Text>
+      ) : null}
 
       {pane === "sheet" ? (
         <TeamSheet

@@ -81,6 +81,7 @@ class ScoreIn(BaseModel):
     ht_home_score: int | None = Field(default=None, ge=0, le=99)
     ht_away_score: int | None = Field(default=None, ge=0, le=99)
     status: str | None = None
+    official_motm_player_id: str | None = None
 
 
 class EventIn(BaseModel):
@@ -442,7 +443,11 @@ def set_score(fixture_id: str, body: ScoreIn, user: dict = Depends(require_user)
     """
     _fixture_with_tournament(fixture_id, user, need="editor")
 
-    patch = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
+    raw = body.model_dump(exclude_unset=True)
+    patch = {
+        k: v for k, v in raw.items()
+        if v is not None or k == "official_motm_player_id"
+    }
     if not patch:
         raise HTTPException(status_code=400, detail="Nothing to update")
 

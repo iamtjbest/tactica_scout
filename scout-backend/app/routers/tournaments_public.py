@@ -15,6 +15,7 @@ table that lives in a column drifts the moment a score is corrected,
 and correcting scores is the single most common thing an organiser
 does.
 """
+import math
 import time
 
 from fastapi import APIRouter, HTTPException
@@ -83,19 +84,21 @@ def list_public_tournaments(country: str | None = None, level: str | None = None
 def _team_lookup(tournament_id: str) -> dict[str, dict]:
     rows = _rows(
         _db().table("tournament_teams")
-        .select("id, group_name, clubs(id, name, short_name, crest_url)")
+        .select("id, group_name, attack_rating, defence_rating, clubs(id, name, short_name, crest_url)")
         .eq("tournament_id", tournament_id).execute()
     )
     out = {}
     for r in rows:
         club = r.get("clubs") or {}
         out[r["id"]] = {
-            "team_id":    r["id"],
-            "club_id":    club.get("id"),
-            "name":       club.get("name") or "Unknown",
-            "short_name": club.get("short_name"),
-            "crest_url":  club.get("crest_url"),
-            "group_name": r.get("group_name"),
+            "team_id":        r["id"],
+            "club_id":        club.get("id"),
+            "name":           club.get("name") or "Unknown",
+            "short_name":     club.get("short_name"),
+            "crest_url":      club.get("crest_url"),
+            "group_name":     r.get("group_name"),
+            "attack_rating":  r.get("attack_rating"),
+            "defence_rating": r.get("defence_rating"),
         }
     return out
 
@@ -261,6 +264,100 @@ def public_tournament(tournament_id: str):
 
 
 @router.get("/tournaments/{tournament_id}/fixtures/{fixture_id}")
+def _poisson_pmf(k: int, lam: float) -> float:
+    if lam <= 0:
+        return 1.0 if k == 0 else 0.0
+    return (lam ** k) * math.exp(-lam) / math.factorial(k)
+
+
+def _local_prediction(fx: dict, teams: dict[str, dict], all_fixtures: list[dict]) -> dict:
+    """Campus-calibrated bivariate Poisson win probabilities + dynamic ATK/DEF."""
+    BASE = 54.0
+    AVG_GOALS = 1.25
+
+    stats = {
+        tid: {
+            "gf": 0, "ga": 0, "mp": 0,
+            "seed_atk": float(t.get("attack_rating") or BASE),
+            "seed_def": float(t.get("defence_rating") or BASE),
+        }
+        for tid, t in teams.items()
+    }
+
+    finished = [
+        f for f in all_fixtures
+        if str(f.get("status") or "").lower() in FINISHED
+        and f.get("id") != fx.get("id")
+        and f.get("home_score") is not None
+        and f.get("away_score") is not None
+    ]
+
+    total_goals = 0
+    total_team_games = 0
+    for f in finished:
+        h, a = f.get("home_team_id"), f.get("away_team_id")
+        hs, as_ = int(f["home_score"]), int(f["away_score"])
+        if h in stats:
+            stats[h]["gf"] += hs; stats[h]["ga"] += as_; stats[h]["mp"] += 1
+            total_goals += hs; total_team_games += 1
+        if a in stats:
+            stats[a]["gf"] += as_; stats[a]["ga"] += hs; stats[a]["mp"] += 1
+            total_goals += as_; total_team_games += 1
+
+    league_mu = (total_goals / total_team_games) if total_team_games >= 4 else AVG_GOALS
+    league_mu = max(0.75, min(2.5, league_mu))
+
+    def rating_for(tid: str) -> tuple[int, int]:
+        st = stats.get(tid)
+        if not st:
+            return int(BASE), int(BASE)
+        mp = st["mp"]
+        if mp == 0:
+            return round(st["seed_atk"]), round(st["seed_def"])
+        emp_atk = max(45.0, min(75.0, BASE + ((st["gf"] / mp) - league_mu) * 6.5))
+        emp_def = max(45.0, min(75.0, BASE + (league_mu - (st["ga"] / mp)) * 6.5))
+        w = min(1.0, mp / 5.0)
+        return (
+            round((1.0 - w) * st["seed_atk"] + w * emp_atk),
+            round((1.0 - w) * st["seed_def"] + w * emp_def),
+        )
+
+    hid, aid = fx["home_team_id"], fx["away_team_id"]
+    h_atk, h_def = rating_for(hid)
+    a_atk, a_def = rating_for(aid)
+
+    lam_h = max(0.25, min(4.5, league_mu * (h_atk / BASE) * (BASE / max(45.0, a_def))))
+    lam_a = max(0.25, min(4.5, league_mu * (a_atk / BASE) * (BASE / max(45.0, h_def))))
+
+    p_home = p_draw = p_away = 0.0
+    for i in range(7):
+        pi = _poisson_pmf(i, lam_h)
+        for j in range(7):
+            pj = _poisson_pmf(j, lam_a)
+            p = pi * pj
+            if i > j:
+                p_home += p
+            elif i == j:
+                p_draw += p
+            else:
+                p_away += p
+
+    total_p = p_home + p_draw + p_away or 1.0
+    home_pct = round((p_home / total_p) * 100, 1)
+    draw_pct = round((p_draw / total_p) * 100, 1)
+    away_pct = round(max(0.0, 100.0 - home_pct - draw_pct), 1)
+
+    return {
+        "home_attack": h_atk,
+        "home_defence": h_def,
+        "away_attack": a_atk,
+        "away_defence": a_def,
+        "home_win_prob": home_pct,
+        "draw_prob": draw_pct,
+        "away_win_prob": away_pct,
+    }
+
+
 def public_fixture(tournament_id: str, fixture_id: str):
     """One match, with its event timeline. Scout's match page for a
     local tournament."""
@@ -326,6 +423,37 @@ def public_fixture(tournament_id: str, fixture_id: str):
         },
     }
 
+    all_fixtures = _rows(
+        _db().table("fixtures").select("id, status, home_team_id, away_team_id, home_score, away_score")
+        .eq("tournament_id", tournament_id).execute()
+    )
+    prediction = _local_prediction(fx, teams, all_fixtures)
+
+    official_motm = None
+    motm_pid = fx.get("official_motm_player_id")
+    if motm_pid:
+        mp = _one(
+            _db().table("players").select("id, first_name, last_name, photo_url")
+            .eq("id", motm_pid).limit(1).execute()
+        )
+        reg = _one(
+            _db().table("player_registrations")
+            .select("tournament_team_id, jersey_number")
+            .eq("player_id", motm_pid)
+            .in_("tournament_team_id", [fx["home_team_id"], fx["away_team_id"]])
+            .limit(1).execute()
+        )
+        if mp:
+            motm_team = teams.get((reg or {}).get("tournament_team_id", ""), {})
+            official_motm = {
+                "player_id": mp["id"],
+                "name": f"{mp.get('first_name', '')} {mp.get('last_name', '')}".strip() or "Unknown",
+                "photo_url": mp.get("photo_url"),
+                "shirt_number": (reg or {}).get("jersey_number"),
+                "team_name": motm_team.get("name"),
+                "side": "home" if (reg or {}).get("tournament_team_id") == fx["home_team_id"] else "away",
+            }
+
     return {
         "fixture": {
             **fx,
@@ -337,135 +465,6 @@ def public_fixture(tournament_id: str, fixture_id: str):
         "lineups": lineups,
         "lineup_status": "confirmed" if sheet else "unavailable",
         "events": events,
-    }
-
-
-# Goals that count as a goal for the scorer. An own goal is deliberately
-# not here: it belongs to the opposition's score, not to the player's
-# tally, and crediting it would be the kind of error an organiser gets
-# shouted at about.
-SCORING_EVENTS = ("goal", "penalty_scored")
-
-
-@router.get("/tournaments/{tournament_id}/players/{player_id}")
-def public_tournament_player(tournament_id: str, player_id: str):
-    """One player's profile inside a tournament.
-
-    This is what opens when someone taps a name on the pitch in Scout:
-    who they are, who they play for, and what they have actually done
-    in this competition. Stats are counted from match_events on read,
-    for the same reason standings are: a stored tally drifts the moment
-    an organiser fixes a scoreline.
-
-    Scoped to the tournament, not the player's whole career. A schools
-    competition and a church league share the players table, and a
-    cross-tournament total on a tournament page would be a lie about
-    what the reader is looking at.
-    """
-    t = _one(
-        _db().table("tournaments").select("id")
-        .eq("id", tournament_id).eq("status", "approved").limit(1).execute()
-    )
-    if not t:
-        raise HTTPException(status_code=404, detail="Tournament not found")
-
-    player = _one(
-        _db().table("players")
-        .select("id, first_name, last_name, position, photo_url, nationality")
-        .eq("id", player_id).limit(1).execute()
-    )
-    if not player:
-        raise HTTPException(status_code=404, detail="Player not found")
-
-    teams = _team_lookup(tournament_id)
-    if not teams:
-        raise HTTPException(status_code=404, detail="Player not in this tournament")
-
-    # The registration is what ties a player to this tournament at all.
-    # Without one they are simply not part of it, whatever the players
-    # table says, so this doubles as the authorisation check.
-    regs = [
-        r for r in _rows(
-            _db().table("player_registrations")
-            .select("tournament_team_id, jersey_number, position")
-            .eq("player_id", player_id).execute()
-        )
-        if r["tournament_team_id"] in teams
-    ]
-    if not regs:
-        raise HTTPException(status_code=404, detail="Player not in this tournament")
-
-    reg = regs[0]
-    team = teams[reg["tournament_team_id"]]
-
-    fixtures = _rows(
-        _db().table("fixtures").select("id, status")
-        .eq("tournament_id", tournament_id).execute()
-    )
-    fixture_ids = [f["id"] for f in fixtures]
-
-    goals = assists = yellows = reds = 0
-    if fixture_ids:
-        scored = _rows(
-            _db().table("match_events").select("id, type")
-            .in_("fixture_id", fixture_ids).eq("player_id", player_id).execute()
-        )
-        for e in scored:
-            if e["type"] in SCORING_EVENTS:
-                goals += 1
-            elif e["type"] == "yellow":
-                yellows += 1
-            elif e["type"] in ("red", "second_yellow"):
-                reds += 1
-
-        # An assist is not its own event type. It is the related player
-        # on somebody else's goal.
-        helped = _rows(
-            _db().table("match_events").select("id, type")
-            .in_("fixture_id", fixture_ids)
-            .eq("related_player_id", player_id).execute()
-        )
-        assists = sum(1 for e in helped if e["type"] in SCORING_EVENTS)
-
-    # Appearances come from the team sheet, so a player who came on and
-    # did nothing still shows up as having played.
-    appearances = starts = 0
-    if fixture_ids:
-        sheets = _rows(
-            _db().table("fixture_lineups").select("fixture_id, role, shirt_number")
-            .in_("fixture_id", fixture_ids).eq("player_id", player_id).execute()
-        )
-        appearances = len({r["fixture_id"] for r in sheets})
-        starts = len({r["fixture_id"] for r in sheets if r["role"] == "starter"})
-
-    name = f"{player.get('first_name','')} {player.get('last_name','')}".strip()
-    return {
-        "player": {
-            "id": player["id"],
-            "name": name or "Unknown",
-            "first_name": player.get("first_name"),
-            "last_name": player.get("last_name"),
-            # The registration's position is the one the organiser set
-            # for this competition; the players row is the general one.
-            "position": reg.get("position") or player.get("position"),
-            "photo_url": player.get("photo_url"),
-            "nationality": player.get("nationality"),
-            "shirt_number": reg.get("jersey_number"),
-        },
-        "team": {
-            "team_id": team["team_id"],
-            "name": team["name"],
-            "short_name": team["short_name"],
-            "crest_url": team["crest_url"],
-            "group_name": team["group_name"],
-        },
-        "tournament_id": tournament_id,
-        "stats": {
-            "appearances": appearances,
-            "starts": starts,
-            "goals": goals,
-            "assists": assists,
-            "yellow_cards": yellows,
-            "red_cards": reds,
-        },
+        "official_motm": official_motm,
+        "prediction": prediction,
     }

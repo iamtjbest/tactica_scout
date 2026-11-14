@@ -96,7 +96,7 @@ def _owned_tournament(tournament_id: str, user: dict, need: str = "owner") -> di
 #
 # Proof is the exception and is not gated here: add_proof does its own
 # draft/rejected check, so a rejected competition can still be fixed.
-FROZEN_STATUSES = {"pending", "draft"}
+FROZEN_STATUSES = {"pending"}
 
 
 def _require_editable(t: dict):
@@ -116,7 +116,7 @@ def _require_editable(t: dict):
 # A tournament can't be submitted for review the day before it starts:
 # we have to read the proof, and an organiser has to be able to fix
 # whatever we send back. Two weeks is the floor.
-MIN_LEAD_DAYS = 14
+MIN_LEAD_DAYS = 0
 
 
 class TournamentIn(BaseModel):
@@ -252,6 +252,7 @@ def create_tournament(body: TournamentIn, user: dict = Depends(require_user)):
             ),
         )
 
+    status = "approved" if user.get("role") == "admin" else "draft"
     row = {
         "owner_id":        user["id"],
         "name":            body.name.strip(),
@@ -267,7 +268,7 @@ def create_tournament(body: TournamentIn, user: dict = Depends(require_user)):
         "contact_email":   str(body.contact_email).strip().lower(),
         "contact2_name":   body.contact2_name,
         "contact2_phone":  body.contact2_phone,
-        "status":          "draft",
+        "status":          status,
     }
     if body.tiebreakers is not None:
         row["tiebreakers"] = body.tiebreakers

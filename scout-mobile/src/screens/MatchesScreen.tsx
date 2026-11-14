@@ -93,27 +93,41 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
   };
 
   // Filter matches
-  const filterMatch = (m: MatchSummary): boolean => {
+  const filterMatch = (m: MatchSummary, leagueGroup: LeagueMatches): boolean => {
+    const status = String(m.status || '').toLowerCase();
     const isLive =
-      m.status?.toLowerCase().includes('live') ||
-      m.status?.toLowerCase().includes('in_progress') ||
-      (m.minute != null && m.minute > 0 && m.status !== 'finished');
+      status.includes('live') ||
+      status.includes('in_progress') ||
+      status === 'ht' ||
+      (m.minute != null && m.minute > 0 && !['finished', 'ft', 'ended'].includes(status));
 
-    const isFinished =
-      m.status?.toLowerCase() === 'finished' ||
-      m.status?.toLowerCase() === 'ft' ||
-      m.status?.toLowerCase() === 'ended';
-
+    const isFinished = ['finished', 'ft', 'ended'].includes(status);
     const isUpcoming = !isLive && !isFinished;
 
     if (activeFilter === 'live') return isLive;
     if (activeFilter === 'finished') return isFinished;
     if (activeFilter === 'upcoming') return isUpcoming;
     if (activeFilter === 'following') {
-      return (
-        followedTeams.includes(m.home_team) ||
-        followedTeams.includes(m.away_team)
-      );
+      if (!followedTeams || followedTeams.length === 0) return false;
+      return followedTeams.some((token) => {
+        const parts = token.split(':');
+        if (parts.length >= 2) {
+          const [kind, rawId] = parts;
+          if (kind === 'tournament' && leagueGroup.tournament_id === rawId) return true;
+          if (kind === 'league' && String(leagueGroup.league_id) === rawId) return true;
+          if (
+            kind === 'team' &&
+            (String(m.home_team_id) === rawId || String(m.away_team_id) === rawId)
+          ) {
+            return true;
+          }
+          return false;
+        }
+        return (
+          m.home_team?.toLowerCase() === token.toLowerCase() ||
+          m.away_team?.toLowerCase() === token.toLowerCase()
+        );
+      });
     }
     return true; // 'all'
   };
@@ -122,7 +136,7 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
   const filteredLeagues = leagues
     .map((l) => ({
       ...l,
-      matches: l.matches.filter(filterMatch),
+      matches: l.matches.filter((m) => filterMatch(m, l)),
     }))
     .filter((l) => l.matches.length > 0);
 

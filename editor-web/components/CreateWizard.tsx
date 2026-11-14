@@ -57,7 +57,7 @@ const PROOF_TYPES = [
  *  backend. Shown in the input's `min` so the picker won't even offer
  *  an earlier day, rather than rejecting it after they've filled in
  *  the whole form. */
-const MIN_LEAD_DAYS = 14;
+const MIN_LEAD_DAYS = 0;
 function earliestStart(): string {
   const d = new Date();
   d.setDate(d.getDate() + MIN_LEAD_DAYS);

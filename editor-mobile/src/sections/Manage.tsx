@@ -467,7 +467,7 @@ export function Collaborators({ tid, isOwner }: { tid: string; isOwner: boolean 
         <View key={m.id} style={S.card}>
           <View style={S.row}>
             <View style={{ flex: 1 }}>
-              <Text style={S.title}>{m.full_name || m.email || "Member"}</Text>
+              <Text style={S.title}>{m.profiles?.display_name || m.profiles?.email || m.user_id || "Member"}</Text>
               <Text style={S.dim}>{m.role}</Text>
             </View>
             {isOwner && m.role !== "owner" ? (
@@ -488,7 +488,7 @@ export function Collaborators({ tid, isOwner }: { tid: string; isOwner: boolean 
                 <View key={r.id} style={[S.row, { marginTop: 8 }]}>
                   <View style={{ flex: 1 }}>
                     <Text style={S.body}>
-                      {r.profiles?.full_name || r.profiles?.email || "Someone"}
+                      {r.profiles?.display_name || r.profiles?.email || "Someone"}
                     </Text>
                     {r.message ? <Text style={S.dim}>{r.message}</Text> : null}
                   </View>

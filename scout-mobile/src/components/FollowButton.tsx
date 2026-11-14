@@ -16,13 +16,16 @@ import { isSignedIn } from '../services/auth';
 
 interface FollowButtonProps {
   teamName: string;
+  token?: string;
   size?: 'sm' | 'md';
 }
 
 export const FollowButton: React.FC<FollowButtonProps> = ({
   teamName,
+  token,
   size = 'md',
 }) => {
+  const storageKey = token || teamName;
   const [isFollowed, setIsFollowed] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -41,7 +44,7 @@ export const FollowButton: React.FC<FollowButtonProps> = ({
         if (!active) return;
         setIsAuthenticated(true);
         const followed = res.user?.followed_teams || [];
-        setIsFollowed(followed.includes(teamName));
+        setIsFollowed(followed.some((t: string) => t === storageKey || t === teamName));
       } catch {
         // Session exists but the request failed (expired, network error etc.)
         if (active) setIsAuthenticated(false);
@@ -50,7 +53,7 @@ export const FollowButton: React.FC<FollowButtonProps> = ({
     return () => {
       active = false;
     };
-  }, [teamName]);
+  }, [storageKey, teamName]);
 
   const handleToggle = async () => {
     // Guard: if not authenticated, show prompt — don't silently flip UI
@@ -79,8 +82,8 @@ export const FollowButton: React.FC<FollowButtonProps> = ({
       const res = await getMe();
       const current = res.user?.followed_teams || [];
       const updated = isFollowed
-        ? current.filter((t) => t !== teamName)
-        : [...current, teamName];
+        ? current.filter((t: string) => t !== storageKey && t !== teamName)
+        : [...current, storageKey];
       await updateFollowedTeams(updated);
       setIsFollowed(!isFollowed);
     } catch (err: any) {
