@@ -1,13 +1,4 @@
 // src/services/api.ts — the editor's client for the Scout backend.
-//
-// Mirrors editor-web/lib/api.ts endpoint for endpoint, so the two
-// editors can never drift into disagreeing about the API. The only
-// difference is that the base URL is resolved per request (getApiBase),
-// because the mobile app lets you repoint it at a local backend at
-// runtime.
-//
-// Authorization is enforced server-side in app/routers/editor.py.
-// Hiding a button here is a courtesy, never a security boundary.
 import { authHeaders } from "./auth";
 import { getApiBase } from "./base";
 
@@ -88,6 +79,7 @@ export type Fixture = {
   status: "scheduled" | "live" | "ht" | "ft" | "postponed" | "cancelled";
   home_score: number | null; away_score: number | null;
   ht_home_score: number | null; ht_away_score: number | null;
+  official_motm_player_id?: string | null;
 };
 
 export type Proof = {
@@ -239,13 +231,13 @@ export const addFixture = (tid: string, body: Record<string, unknown>) =>
     method: "POST", body: JSON.stringify(body),
   });
 
-export const deleteFixture = (fixtureId: string) =>
-  req<void>(`/api/editor/fixtures/${fixtureId}`, { method: "DELETE" });
-
 export const updateFixture = (fid: string, body: Record<string, unknown>) =>
   req<Fixture>(`/api/editor/fixtures/${fid}`, {
     method: "PATCH", body: JSON.stringify(body),
   });
+
+export const deleteFixture = (fid: string) =>
+  req<void>(`/api/editor/fixtures/${fid}`, { method: "DELETE" });
 
 export const setScore = (fid: string, body: Record<string, unknown>) =>
   req<Fixture>(`/api/editor/fixtures/${fid}/score`, {
@@ -319,10 +311,6 @@ export const canGenerate = () =>
   );
 
 // ── standings and round ordering ──────────────────────────────────────
-// Crest UPLOAD is deliberately web-only: setting a club up is desk
-// work, and the mobile editor is for running the match. Mobile still
-// renders whatever crest the web editor set.
-
 export type StandingRow = {
   team_id: string; name: string; crest_url: string | null;
   position: number; played: number; won: number; drawn: number; lost: number;
@@ -337,9 +325,6 @@ export const getStandings = (tid: string) =>
     group_tables?: Record<string, StandingRow[]>;
   }>(`/api/editor/tournaments/${tid}/standings`);
 
-/** Knockout rounds biggest-first, so rounds read in playing order.
- *  Must match editor-web's list exactly: the two editors showing a
- *  bracket in different orders would be its own bug. */
 export const KNOCKOUT_ORDER = [
   "Round of 64", "Round of 32", "Round of 16",
   "Quarter-final", "Semi-final", "Final",
@@ -359,10 +344,6 @@ export function sortRounds(rounds: string[]): string[] {
 }
 
 // ── joining someone else's tournament ─────────────────────────────────
-// Mobile is where a match commissioner lives, so redeeming a code is
-// here. Creating and managing codes is web-only: that's the owner at a
-// desk, not someone at the side of a pitch.
-
 export type TRole = "owner" | "editor";
 
 export const joinWithCode = (code: string) =>
@@ -380,10 +361,6 @@ export const listMembers = (tid: string) =>
   req<{ count: number; members: Member[] }>(`/api/editor/tournaments/${tid}/members`);
 
 // ── parity with the web editor ────────────────────────────────────────
-// Everything below mirrors editor-web/lib/api.ts one for one. Same
-// names, same shapes: if the two drift, the mobile app quietly stops
-// showing something the web app has.
-
 export type PointsRules = { win: number; draw: number; loss: number };
 
 export const TIEBREAKERS: { id: string; label: string; implemented: boolean }[] = [
@@ -493,23 +470,24 @@ export const createInvite = (tid: string, role: TRole = "editor") =>
   });
 
 export const revokeInvite = (tid: string, inviteId: string) =>
-  req<Invite>(`/api/editor/tournaments/${tid}/invites/${inviteId}/revoke`,
-    { method: "POST" });
+  req<{ revoked: boolean }>(`/api/editor/tournaments/${tid}/invites/${inviteId}`, {
+    method: "DELETE",
+  });
 
 export const listRequests = (tid: string, status = "pending") =>
   req<{ requests: AccessRequest[] }>(
     `/api/editor/tournaments/${tid}/requests?status=${status}`);
 
-export const decideRequest = (tid: string, reqId: string, approve: boolean) =>
-  req<AccessRequest>(`/api/editor/tournaments/${tid}/requests/${reqId}/decide`, {
-    method: "POST", body: JSON.stringify({ approve }),
-  });
+export const decideRequest = (tid: string, reqId: string, approve: boolean, role?: TRole) =>
+  req<{ request: AccessRequest; granted_role: TRole | null }>(
+    `/api/editor/tournaments/${tid}/requests/${reqId}`,
+    { method: "POST", body: JSON.stringify({ approve, role }) }
+  );
 
 export const removeMember = (tid: string, memberId: string) =>
   req<void>(`/api/editor/tournaments/${tid}/members/${memberId}`, { method: "DELETE" });
 
 // ── dashboard & inbox ─────────────────────────────────────────────────
-
 export type DashFixture = {
   id: string; tournament_id: string; tournament_name: string | null;
   round: string | null; group_name: string | null;
@@ -544,10 +522,6 @@ export const getDashboard = () => req<Dashboard>("/api/editor/dashboard");
 export const getInbox = () => req<InboxData>("/api/editor/inbox");
 
 // ── team sheets ───────────────────────────────────────────────────────
-// Who actually played in a fixture. Mirrors editor-web/lib/api.ts. The
-// sheet is what Scout rates: before it existed the only rateable
-// players were the ones who picked up a goal or a card.
-
 export type SheetEntry = {
   id: string;
   player_id: string;

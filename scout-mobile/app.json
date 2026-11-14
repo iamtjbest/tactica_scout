@@ -9,14 +9,21 @@
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0c0e12",
     "splash": {
+      "image": "./assets/splash-icon.png",
       "backgroundColor": "#0c0e12",
       "resizeMode": "contain"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tacticaengine.scout"
     },
     "android": {
+      "package": "com.tacticaengine.scout",
+      "versionCode": 1,
       "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png",
         "backgroundColor": "#0c0e12"
       }
     },
