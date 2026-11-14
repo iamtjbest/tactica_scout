@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import BottomNav from "@/components/BottomNav";
 import TopBar from "@/components/TopBar";
 import "./globals.css";
@@ -56,6 +57,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <TopBar />
         <main className="max-w-screen-md mx-auto px-4 pt-4">{children}</main>
         <BottomNav />
+        <Analytics />
       </body>
     </html>
   );

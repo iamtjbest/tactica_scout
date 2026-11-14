@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import Chrome from "@/components/Chrome";
 import "./globals.css";
 
@@ -51,6 +52,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Chrome decides between the public (bare) pages and the
             signed-in shell, and wraps the content either way. */}
         <Chrome>{children}</Chrome>
+        <Analytics />
       </body>
     </html>
   );
