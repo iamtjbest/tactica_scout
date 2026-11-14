@@ -1,14 +1,17 @@
+/**
+ * src/screens/TournamentDetailScreen.tsx
+ */
 import React, { useCallback, useEffect, useState } from "react";
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl,
-  Alert,
+  Alert, TextInput,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { COLORS } from "../theme";
 import Crest from "../components/Crest";
 import {
   getTournament, getReadiness, submitForReview, sortRounds,
-  addFixture, deleteFixture, generateFixtures, clearFixtures,
+  addFixture, deleteFixture, clearFixtures,
   listSubCompetitions, listVenues,
   type Tournament, type TeamRow, type Fixture, type Readiness,
   type SubCompetition, type Venue,
@@ -19,18 +22,6 @@ import { Venues, Structure, Suspensions } from "../sections/Structure";
 import {
   Standings, Teams, Players, Info, Regulations, ProofSection, Collaborators,
 } from "../sections/Manage";
-
-/**
- * The competition workspace, with the same sections as the web editor:
- * Run (matches, standings, brackets), Build (teams, players, venues,
- * format) and Settings (info, regulations, suspensions, proof,
- * collaborators).
- *
- * On a phone the web sidebar becomes a horizontal strip of pills, kept
- * in the same order and grouping so the two apps teach the same shape.
- * Matches opens first, because that is what someone standing at a pitch
- * came for.
- */
 
 type Section =
   | "matches" | "standings" | "teams" | "players" | "venues"
@@ -95,9 +86,7 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
             .then((result) => setVenues(result.venues))
             .catch((e) => setFixtureOptionsError(e.message));
         } else {
-          setSubCompetitions([]);
-          setVenues([]);
-          setFixtureOptionsError(null);
+          setSubCompetitions([]); setVenues([]); setFixtureOptionsError(null);
         }
       })
       .catch((e) => setError(e.message))
@@ -119,8 +108,8 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
   });
 
   const info = (tid: string) => {
-    const t = teams.find((x) => x.id === tid);
-    return { name: t?.clubs?.name ?? "Unknown", crest: t?.clubs?.crest_url ?? null };
+    const tm = teams.find((x) => x.id === tid);
+    return { name: tm?.clubs?.name ?? "Unknown", crest: tm?.clubs?.crest_url ?? null };
   };
 
   const submit = async () => {
@@ -153,9 +142,6 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
   if (error && !t) return <Text style={s.error}>{error}</Text>;
   if (!t) return <Text style={s.muted}>Loading...</Text>;
 
-  // Mirrors FROZEN_STATUSES on the backend and the web editor: review is
-  // the only thing that locks a competition, and it unlocks whichever way
-  // the decision goes.
   const role = (t as any)._role ?? "owner";
   const editable = t.status !== "pending" && (role === "owner" || role === "editor");
   const isOwner = role === "owner";
@@ -163,7 +149,7 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
   return (
     <ScrollView
       style={s.wrap}
-      contentContainerStyle={{ padding: 16, gap: 12 }}
+      contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 16 }}
       refreshControl={
         <RefreshControl refreshing={refreshing} tintColor={COLORS.volt}
                         onRefresh={() => { setRefreshing(true); load(); }} />
@@ -200,12 +186,10 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
 
       {error ? <Text style={s.error}>{error}</Text> : null}
 
-      {/* The web sidebar, flattened. Same order and grouping so the two
-          apps teach the same shape. */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ gap: 6, paddingVertical: 4 }}
+        contentContainerStyle={{ gap: 8, paddingVertical: 6 }}
         style={{ marginHorizontal: -16, paddingHorizontal: 16 }}
       >
         {SECTIONS.map((x) => {
@@ -222,7 +206,7 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
         })}
       </ScrollView>
 
-      <View style={{ gap: 10 }}>
+      <View style={{ gap: 14 }}>
         {section === "matches" ? (
           <>
             <FixtureTools tid={id} teams={teams} fixtures={fixtures}
@@ -240,11 +224,8 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
             ) : shownFixtures.length === 0 ? (
               <Text style={s.muted}>Nothing matches those filters.</Text>
             ) : (
-              // Grouped by round or group, same ordering rule as the web
-              // editor. A flat list of 30 league fixtures is unusable on a
-              // phone, and the round is what tells you where you are.
               groupFixtures(shownFixtures).map(([heading, list]) => (
-                <View key={heading} style={{ gap: 8 }}>
+                <View key={heading} style={{ gap: 10, marginTop: 4 }}>
                   <Text style={s.round}>{heading}</Text>
                   {list.map((fx) => {
                     const h = info(fx.home_team_id), a = info(fx.away_team_id);
@@ -260,10 +241,10 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
                         >
                           <View style={s.rowTop}>
                             <View style={s.teamsLine}>
-                              <Crest url={h.crest} name={h.name} size={18} />
+                              <Crest url={h.crest} name={h.name} size={20} />
                               <Text style={s.title} numberOfLines={1}>{h.name}</Text>
                               <Text style={s.vs}>v</Text>
-                              <Crest url={a.crest} name={a.name} size={18} />
+                              <Crest url={a.crest} name={a.name} size={20} />
                               <Text style={s.title} numberOfLines={1}>{a.name}</Text>
                             </View>
                             <Text style={s.score}>
@@ -305,7 +286,7 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
                           </View>
                         ) : null}
                       </View>
-                      );
+                    );
                   })}
                 </View>
               ))
@@ -350,18 +331,10 @@ function FixtureTools({
   subCompetitions: SubCompetition[]; venues: Venue[]; optionsError: string | null;
   editable: boolean; onChanged: () => void;
 }) {
-  const [firstKickoff, setFirstKickoff] = useState(
-    defaultKickoff()
-  );
-  const [minutesBetween, setMinutesBetween] = useState("120");
-  const [matchesPerDay, setMatchesPerDay] = useState("4");
-  const [venue, setVenue] = useState("");
-  const [doubleRound, setDoubleRound] = useState(false);
   const [homeTeamId, setHomeTeamId] = useState("");
   const [awayTeamId, setAwayTeamId] = useState("");
-  const [manualKickoff, setManualKickoff] = useState(
-    defaultKickoff()
-  );
+  const [manualDate, setManualDate] = useState(() => new Date(Date.now() + 86400000).toISOString().slice(0, 10));
+  const [manualTime, setManualTime] = useState("16:00");
   const [round, setRound] = useState("");
   const [groupId, setGroupId] = useState("");
   const [manualVenue, setManualVenue] = useState("");
@@ -381,43 +354,24 @@ function FixtureTools({
     /^group\s/i.test(name) ? name : `Group ${name}`;
 
   const run = async (action: () => Promise<unknown>, success: string) => {
-    setBusy(true);
-    setError(null);
-    setMessage("");
+    setBusy(true); setError(null); setMessage("");
     try {
       await action();
       setMessage(success);
       onChanged();
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const generate = () => {
-    const kickoff = new Date(firstKickoff);
-    if (Number.isNaN(kickoff.getTime())) {
-      setError("Enter a valid first kickoff date and time.");
-      return;
-    }
-    return run(() => generateFixtures(tid, {
-      first_kickoff: kickoff.toISOString(),
-      minutes_between: Number(minutesBetween),
-      matches_per_day: Number(matchesPerDay),
-      venue: venue.trim() || null,
-      double_round: doubleRound,
-    }), "Fixtures generated.");
+    } catch (e: any) { setError(e.message); }
+    finally { setBusy(false); }
   };
 
   const createOne = () => {
-    const kickoff = new Date(manualKickoff);
+    const combined = `${manualDate.trim()}T${manualTime.trim()}:00Z`;
+    const kickoff = new Date(combined);
     if (!homeTeamId || !awayTeamId || homeTeamId === awayTeamId) {
       setError("Choose two different teams.");
       return;
     }
     if (Number.isNaN(kickoff.getTime())) {
-      setError("Enter a valid kickoff date and time.");
+      setError("Enter a valid date (YYYY-MM-DD) and time (HH:mm).");
       return;
     }
     return run(() => addFixture(tid, {
@@ -432,7 +386,7 @@ function FixtureTools({
 
   const confirmClear = () => Alert.alert(
     "Clear all fixtures?",
-    "This permanently removes the competition's fixtures and their match data.",
+    "This permanently removes unplayed fixtures.",
     [
       { text: "Cancel", style: "cancel" },
       { text: "Clear fixtures", style: "destructive",
@@ -442,74 +396,40 @@ function FixtureTools({
 
   return (
     <View style={s.card}>
-      <Text style={s.label}>FIXTURE TOOLS</Text>
+      <Text style={s.label}>ENTER YOUR DRAW</Text>
       {error ? <Text style={s.error}>{error}</Text> : null}
       {message ? <Text style={[s.body, { color: "#00E676" }]}>{message}</Text> : null}
-
-      <Text style={s.muted}>Generate a round-robin schedule</Text>
-      <Field label="First kickoff (YYYY-MM-DDTHH:mm)" value={firstKickoff}
-             onChangeText={setFirstKickoff} />
-      <View style={[s.rowTop, { alignItems: "flex-start" }]}>
-        <Field label="Minutes between" value={minutesBetween} keyboardType="number-pad"
-               onChangeText={setMinutesBetween} />
-        <Field label="Matches per day" value={matchesPerDay} keyboardType="number-pad"
-               onChangeText={setMatchesPerDay} />
-      </View>
-      <Field label="Venue (optional)" value={venue} onChangeText={setVenue} />
-      <TouchableOpacity onPress={() => setDoubleRound(!doubleRound)} style={s.rowTop}>
-        <Text style={s.body}>Home and away</Text>
-        <Text style={s.score}>{doubleRound ? "ON" : "OFF"}</Text>
-      </TouchableOpacity>
-      {fixtures.length > 0 ? (
-        <Text style={s.muted}>Clear existing fixtures before generating a new draw.</Text>
-      ) : null}
-      <Btn label="Generate fixtures" busy={busy}
-           disabled={teams.length < 2 || fixtures.length > 0}
-           onPress={() => { void generate(); }} />
-
-      {fixtures.length > 0 ? (
-        <Btn label="Clear all fixtures" tone="danger" busy={busy} onPress={confirmClear} />
-      ) : null}
-
-      <Text style={[s.muted, { marginTop: 6 }]}>Or add one fixture manually</Text>
       {optionsError ? <Text style={s.error}>{optionsError}</Text> : null}
-      <Text style={s.muted}>Group</Text>
-      <View style={s.chips}>
-        {[{ id: "", name: "All" }, ...groups.map((group) => ({
-          id: group.id, name: groupLabel(group.name),
-        }))].map((group) => (
+
+      <Text style={[s.muted, { marginTop: 4 }]}>Select Group / Stage</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+        {[{ id: "", name: "All / No group" }, ...groups.map((g) => ({
+          id: g.id, name: groupLabel(g.name),
+        }))].map((g) => (
           <TouchableOpacity
-            key={group.id || "all"}
-            style={[s.pill, groupId === group.id && s.pillOn]}
-            onPress={() => {
-              setGroupId(group.id);
-              setHomeTeamId("");
-              setAwayTeamId("");
-            }}
+            key={g.id || "all"}
+            style={[s.pill, groupId === g.id && s.pillOn]}
+            onPress={() => { setGroupId(g.id); setHomeTeamId(""); setAwayTeamId(""); }}
           >
-            <Text style={[s.pillText, groupId === group.id && s.pillTextOn]}>{group.name}</Text>
+            <Text style={[s.pillText, groupId === g.id && s.pillTextOn]}>{g.name}</Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
-      <Text style={s.muted}>Home team</Text>
-      <View style={s.chips}>
+      <Text style={[s.muted, { marginTop: 6 }]}>Home team ({availableTeams.length})</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
         {availableTeams.map((team) => (
           <TouchableOpacity key={team.id} style={[s.pill, homeTeamId === team.id && s.pillOn]}
-                            onPress={() => {
-                              setHomeTeamId(team.id);
-                              if (awayTeamId === team.id) setAwayTeamId("");
-                            }}>
+                            onPress={() => { setHomeTeamId(team.id); if (awayTeamId === team.id) setAwayTeamId(""); }}>
             <Text style={[s.pillText, homeTeamId === team.id && s.pillTextOn]}>
               {team.clubs?.name ?? "Unknown"}
             </Text>
           </TouchableOpacity>
         ))}
-        {availableTeams.length === 0 ? <Text style={s.muted}>No teams in this group yet.</Text> : null}
-      </View>
+      </ScrollView>
 
-      <Text style={s.muted}>Away team</Text>
-      <View style={s.chips}>
+      <Text style={[s.muted, { marginTop: 6 }]}>Away team</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
         {availableTeams.filter((team) => team.id !== homeTeamId).map((team) => (
           <TouchableOpacity key={team.id} style={[s.pill, awayTeamId === team.id && s.pillOn]}
                             onPress={() => setAwayTeamId(team.id)}>
@@ -518,37 +438,40 @@ function FixtureTools({
             </Text>
           </TouchableOpacity>
         ))}
-        {availableTeams.filter((team) => team.id !== homeTeamId).length === 0
-          ? <Text style={s.muted}>No away teams available in this group.</Text> : null}
+      </ScrollView>
+
+      <View style={[s.rowTop, { alignItems: "flex-start", marginTop: 4 }]}>
+        <Field label="Date (YYYY-MM-DD)" value={manualDate} onChangeText={setManualDate} />
+        <Field label="Time (HH:mm)" value={manualTime} onChangeText={setManualTime} />
       </View>
-      <Field label="Kickoff (YYYY-MM-DDTHH:mm)" value={manualKickoff}
-             onChangeText={setManualKickoff} />
-      <View style={[s.rowTop, { alignItems: "flex-start" }]}>
-        <Field label="Round (optional)" value={round} onChangeText={setRound} />
-      </View>
-      <Text style={s.muted}>Venue</Text>
-      <View style={s.chips}>
-        <TouchableOpacity style={[s.pill, !manualVenue && s.pillOn]}
-                          onPress={() => setManualVenue("")}>
+      <Field label="Round (optional)" value={round} placeholder="Matchday 1" onChangeText={setRound} />
+
+      <Text style={[s.muted, { marginTop: 6 }]}>Venue</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+        <TouchableOpacity style={[s.pill, !manualVenue && s.pillOn]} onPress={() => setManualVenue("")}>
           <Text style={[s.pillText, !manualVenue && s.pillTextOn]}>No venue</Text>
         </TouchableOpacity>
-        {venues.map((item) => (
-          <TouchableOpacity key={item.id} style={[s.pill, manualVenue === item.name && s.pillOn]}
-                            onPress={() => setManualVenue(item.name)}>
-            <Text style={[s.pillText, manualVenue === item.name && s.pillTextOn]}>
-              {item.name}
-            </Text>
+        {venues.map((v) => (
+          <TouchableOpacity key={v.id} style={[s.pill, manualVenue === v.name && s.pillOn]}
+                            onPress={() => setManualVenue(v.name)}>
+            <Text style={[s.pillText, manualVenue === v.name && s.pillTextOn]}>{v.name}</Text>
           </TouchableOpacity>
         ))}
-        {venues.length === 0 ? <Text style={s.muted}>Add venues in the Venues tab to choose one.</Text> : null}
+      </ScrollView>
+
+      <View style={{ marginTop: 12 }}>
+        <Btn label="Add fixture" busy={busy} onPress={() => { void createOne(); }} />
       </View>
-      <Btn label="Add fixture" busy={busy} onPress={() => { void createOne(); }} />
+
+      {fixtures.length > 0 ? (
+        <View style={{ marginTop: 8 }}>
+          <Btn label="Clear unplayed fixtures" tone="danger" busy={busy} onPress={confirmClear} />
+        </View>
+      ) : null}
     </View>
   );
 }
 
-/** Group by group name first, then round. Returns entries already in
- *  playing order so the caller just maps over them. */
 function groupFixtures(fixtures: Fixture[]): [string, Fixture[]][] {
   const grouped: Record<string, Fixture[]> = {};
   for (const fx of fixtures) {
@@ -565,32 +488,31 @@ function groupFixtures(fixtures: Fixture[]): [string, Fixture[]][] {
 const s = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: COLORS.bg },
   card: {
-    backgroundColor: COLORS.card, borderRadius: 12, padding: 14,
-    borderWidth: 1, borderColor: COLORS.cardBorder, gap: 4,
+    backgroundColor: COLORS.card, borderRadius: 16, padding: 16,
+    borderWidth: 1, borderColor: COLORS.cardBorder, gap: 10,
   },
-  rowTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
-  title: { color: COLORS.text, fontSize: 13, fontWeight: "700", flexShrink: 1 },
-  teamsLine: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 1 },
-  vs: { color: COLORS.textDim, fontSize: 11 },
-  round: { color: COLORS.volt, fontSize: 10, fontWeight: "800", letterSpacing: 1.6, marginTop: 10 },
-  score: { color: COLORS.volt, fontSize: 16, fontWeight: "900" },
-  label: { color: COLORS.volt, fontSize: 10, fontWeight: "800", letterSpacing: 1.6 },
+  rowTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  title: { color: COLORS.text, fontSize: 14, fontWeight: "700", flexShrink: 1 },
+  teamsLine: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 },
+  vs: { color: COLORS.textDim, fontSize: 12 },
+  round: { color: COLORS.volt, fontSize: 11, fontWeight: "800", letterSpacing: 1.6, marginTop: 12 },
+  score: { color: COLORS.volt, fontSize: 18, fontWeight: "900" },
+  label: { color: COLORS.volt, fontSize: 11, fontWeight: "800", letterSpacing: 1.6 },
   body: { color: COLORS.text, fontSize: 14, marginTop: 4 },
   muted: { color: COLORS.textSecondary, fontSize: 13, marginTop: 4 },
   mono: { color: COLORS.textDim, fontSize: 11, marginTop: 4 },
-  error: { color: "#FF4444", fontSize: 13, fontWeight: "600", padding: 16 },
+  error: { color: "#FF4444", fontSize: 13, fontWeight: "600", padding: 12 },
   btn: {
-    backgroundColor: COLORS.volt, borderRadius: 10, paddingVertical: 12,
+    backgroundColor: COLORS.volt, borderRadius: 12, paddingVertical: 14,
     alignItems: "center", marginTop: 12,
   },
   btnText: { color: COLORS.bg, fontWeight: "800", fontSize: 14 },
   pill: {
-    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999,
+    paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999,
     borderWidth: 1, borderColor: COLORS.cardBorder, backgroundColor: COLORS.card,
   },
   pillOn: { borderColor: COLORS.cardBorderActive, backgroundColor: COLORS.voltMuted },
   pillText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: "600" },
   pillTextOn: { color: COLORS.volt, fontWeight: "800" },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  actions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 6 },
+  actions: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 10 },
 });

@@ -1,10 +1,3 @@
-/**
- * src/sections/kit.tsx
- *
- * The small shared pieces every manage-section uses: card, label,
- * input, button, empty state. Collected here so the ten sections look
- * like one app rather than ten, and so a spacing change happens once.
- */
 import React from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator,
@@ -13,36 +6,36 @@ import { COLORS } from "../theme";
 
 export const S = StyleSheet.create({
   card: {
-    backgroundColor: COLORS.card, borderRadius: 12, padding: 14,
-    borderWidth: 1, borderColor: COLORS.cardBorder, gap: 6,
+    backgroundColor: COLORS.card, borderRadius: 16, padding: 16,
+    borderWidth: 1, borderColor: COLORS.cardBorder, gap: 10,
   },
-  label: { color: COLORS.volt, fontSize: 10, fontWeight: "800", letterSpacing: 1.6 },
-  title: { color: COLORS.text, fontSize: 14, fontWeight: "700" },
+  label: { color: COLORS.volt, fontSize: 11, fontWeight: "800", letterSpacing: 1.6 },
+  title: { color: COLORS.text, fontSize: 15, fontWeight: "700" },
   body:  { color: COLORS.text, fontSize: 14 },
-  muted: { color: COLORS.textSecondary, fontSize: 13 },
-  dim:   { color: COLORS.textDim, fontSize: 11 },
+  muted: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 18 },
+  dim:   { color: COLORS.textDim, fontSize: 11, fontWeight: "700", letterSpacing: 0.8 },
   error: { color: "#FF4444", fontSize: 13, fontWeight: "600" },
   ok:    { color: COLORS.win, fontSize: 13, fontWeight: "600" },
-  row:   { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
-  wrapRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  row:   { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  wrapRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   input: {
-    backgroundColor: COLORS.cardElevated, borderRadius: 10, borderWidth: 1,
-    borderColor: COLORS.cardBorder, paddingHorizontal: 12, paddingVertical: 10,
+    backgroundColor: COLORS.cardElevated, borderRadius: 12, borderWidth: 1,
+    borderColor: COLORS.cardBorder, paddingHorizontal: 14, paddingVertical: 12,
     color: COLORS.text, fontSize: 14, marginTop: 6,
   },
   btn: {
-    backgroundColor: COLORS.volt, borderRadius: 10, paddingVertical: 12,
-    paddingHorizontal: 16, alignItems: "center",
+    backgroundColor: COLORS.volt, borderRadius: 12, paddingVertical: 14,
+    paddingHorizontal: 18, alignItems: "center",
   },
-  btnText: { color: COLORS.bg, fontWeight: "800", fontSize: 14 },
+  btnText: { color: COLORS.bg, fontWeight: "900", fontSize: 14 },
   chip: {
-    backgroundColor: COLORS.cardElevated, borderRadius: 8, borderWidth: 1,
-    borderColor: COLORS.cardBorder, paddingHorizontal: 10, paddingVertical: 6,
+    backgroundColor: COLORS.cardElevated, borderRadius: 10, borderWidth: 1,
+    borderColor: COLORS.cardBorder, paddingHorizontal: 12, paddingVertical: 8,
     flexDirection: "row", alignItems: "center", gap: 6,
   },
-  chipText: { color: COLORS.textSecondary, fontSize: 12 },
+  chipText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: "600" },
   danger: { color: "#FF4444", fontSize: 13, fontWeight: "700" },
-  link:   { color: COLORS.volt, fontSize: 13, fontWeight: "700" },
+  link:   { color: COLORS.volt, fontSize: 13, fontWeight: "800" },
 });
 
 export function Field({ label, ...rest }: any) {
@@ -65,7 +58,7 @@ export function Btn({ label, onPress, disabled, busy, tone = "volt" }: {
   const base =
     tone === "volt" ? { backgroundColor: COLORS.volt }
     : tone === "danger" ? { backgroundColor: "transparent", borderWidth: 1, borderColor: "#FF4444" }
-    : { backgroundColor: "transparent", borderWidth: 1, borderColor: COLORS.cardBorder };
+    : { backgroundColor: COLORS.cardElevated, borderWidth: 1, borderColor: COLORS.cardBorder };
   const text =
     tone === "volt" ? { color: COLORS.bg }
     : tone === "danger" ? { color: "#FF4444" }
@@ -82,8 +75,6 @@ export function Btn({ label, onPress, disabled, busy, tone = "volt" }: {
   );
 }
 
-/** Choose one of a small set. A native picker per platform is a lot of
- *  weight for what is usually four options, so these are pills. */
 export function Choice<T extends string>({ value, options, onChange }: {
   value: T; options: { id: T; label: string }[]; onChange: (v: T) => void;
 }) {
@@ -98,7 +89,7 @@ export function Choice<T extends string>({ value, options, onChange }: {
               borderColor: COLORS.cardBorderActive, backgroundColor: COLORS.voltMuted,
             }]}
           >
-            <Text style={[S.chipText, on && { color: COLORS.volt, fontWeight: "700" }]}>
+            <Text style={[S.chipText, on && { color: COLORS.volt, fontWeight: "800" }]}>
               {o.label}
             </Text>
           </TouchableOpacity>
@@ -119,14 +110,13 @@ export function Empty({ title, body }: { title: string; body: string }) {
 
 export function Loading() {
   return (
-    <View style={{ paddingVertical: 24, alignItems: "center" }}>
-      <ActivityIndicator color={COLORS.volt} />
+    <View style={[S.card, { paddingVertical: 28, alignItems: "center", gap: 10 }]}>
+      <ActivityIndicator size="large" color={COLORS.volt} />
+      <Text style={S.dim}>Loading live data...</Text>
     </View>
   );
 }
 
-/** Shown wherever a section is read-only because the competition is
- *  with us for review. Same sentence as the web editor. */
 export function LockedNote({ status }: { status: string }) {
   if (status !== "pending") return null;
   return (

@@ -5,8 +5,6 @@ import {
 import { COLORS } from "../theme";
 import { signInWithEmail } from "../services/auth";
 
-/** One account across Scout and the editor: same Supabase project.
- *  Signing up happens in Scout, so this is sign-in only. */
 export default function SignInScreen({ navigation }: any) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -17,7 +15,7 @@ export default function SignInScreen({ navigation }: any) {
     setBusy(true); setError(null);
     try {
       await signInWithEmail(email.trim(), password);
-      navigation.replace("Tournaments");
+      navigation.replace("Dashboard");
     } catch (e: any) {
       setError(e.message || "Could not sign in.");
     } finally {
@@ -30,8 +28,11 @@ export default function SignInScreen({ navigation }: any) {
       style={s.wrap}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
+      <View style={s.badge}>
+        <Text style={s.badgeText}>TACTICA ENGINE</Text>
+      </View>
       <Text style={s.brand}>Tactica <Text style={{ color: COLORS.volt }}>Editor</Text></Text>
-      <Text style={s.sub}>Same account as Scout.</Text>
+      <Text style={s.sub}>Same account as Scout. Sign in to manage your competitions pitchside.</Text>
 
       <TextInput style={s.input} placeholder="Email" placeholderTextColor={COLORS.textDim}
                  autoCapitalize="none" keyboardType="email-address"
@@ -42,7 +43,7 @@ export default function SignInScreen({ navigation }: any) {
       {error ? <Text style={s.error}>{error}</Text> : null}
 
       <TouchableOpacity style={[s.btn, busy && { opacity: 0.6 }]} onPress={submit} disabled={busy}>
-        <Text style={s.btnText}>{busy ? "Signing in..." : "Sign in"}</Text>
+        <Text style={s.btnText}>{busy ? "Signing in..." : "Sign in to Dashboard"}</Text>
       </TouchableOpacity>
     </KeyboardAvoidingView>
   );
@@ -50,16 +51,22 @@ export default function SignInScreen({ navigation }: any) {
 
 const s = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: COLORS.bg, padding: 24, justifyContent: "center" },
-  brand: { color: COLORS.text, fontSize: 28, fontWeight: "900" },
-  sub: { color: COLORS.textSecondary, fontSize: 14, marginTop: 6, marginBottom: 24 },
+  badge: {
+    alignSelf: "flex-start", backgroundColor: COLORS.voltMuted,
+    borderWidth: 1, borderColor: COLORS.cardBorderActive,
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, marginBottom: 14,
+  },
+  badgeText: { color: COLORS.volt, fontSize: 10, fontWeight: "900", letterSpacing: 1.5 },
+  brand: { color: COLORS.text, fontSize: 32, fontWeight: "900" },
+  sub: { color: COLORS.textSecondary, fontSize: 13, marginTop: 6, marginBottom: 24, lineHeight: 18 },
   input: {
     backgroundColor: COLORS.cardElevated, borderRadius: 12, paddingHorizontal: 16,
     paddingVertical: 14, color: COLORS.text, marginBottom: 12,
-    borderWidth: 1, borderColor: COLORS.cardBorder,
+    borderWidth: 1, borderColor: COLORS.cardBorder, fontSize: 14,
   },
   error: { color: "#ff6b6b", fontSize: 13, marginBottom: 12, fontWeight: "600" },
   btn: {
-    backgroundColor: COLORS.volt, borderRadius: 12, paddingVertical: 15, alignItems: "center",
+    backgroundColor: COLORS.volt, borderRadius: 12, paddingVertical: 16, alignItems: "center", marginTop: 4,
   },
-  btnText: { color: COLORS.bg, fontWeight: "800", fontSize: 15 },
+  btnText: { color: COLORS.bg, fontWeight: "900", fontSize: 15 },
 });

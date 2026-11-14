@@ -187,10 +187,14 @@ export async function uploadPlayerPhoto(
 ): Promise<{ photo_url: string }> {
   const base = await getApiBase();
   const form = new FormData();
-  form.append("file", image as unknown as Blob);
+  form.append("file", image as any);
+
+  const auth = await authHeaders();
   const res = await fetch(`${base}/api/editor/players/${playerId}/photo`, {
     method: "POST",
-    headers: await authHeaders(),
+    headers: {
+      Authorization: auth.Authorization || "",
+    },
     body: form,
   });
   const body = await res.json().catch(() => null) as { detail?: string } | null;
@@ -203,10 +207,14 @@ export async function uploadTournamentCrest(
 ): Promise<{ crest_url: string }> {
   const base = await getApiBase();
   const form = new FormData();
-  form.append("file", image as unknown as Blob);
+  form.append("file", image as any);
+
+  const auth = await authHeaders();
   const res = await fetch(`${base}/api/editor/tournaments/${tournamentId}/crest`, {
     method: "POST",
-    headers: await authHeaders(),
+    headers: {
+      Authorization: auth.Authorization || "",
+    },
     body: form,
   });
   const body = await res.json().catch(() => null) as { detail?: string } | null;
@@ -473,10 +481,6 @@ export const revokeInvite = (tid: string, inviteId: string) =>
   req<{ revoked: boolean }>(`/api/editor/tournaments/${tid}/invites/${inviteId}`, {
     method: "DELETE",
   });
-
-export const listRequests = (tid: string, status = "pending") =>
-  req<{ requests: AccessRequest[] }>(
-    `/api/editor/tournaments/${tid}/requests?status=${status}`);
 
 export const decideRequest = (tid: string, reqId: string, approve: boolean, role?: TRole) =>
   req<{ request: AccessRequest; granted_role: TRole | null }>(

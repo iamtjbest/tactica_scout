@@ -7,23 +7,17 @@ import TabBar from "../components/TabBar";
 import { S, Empty, Loading } from "../sections/kit";
 import { getDashboard, type Dashboard, type DashFixture } from "../services/api";
 
-/**
- * The screen after sign-in, matching the web dashboard.
- *
- * A list of competitions was the wrong landing: it answers "what do I
- * have" when the question on opening the app is "what is happening and
- * what needs me". One request, assembled server-side, because a round
- * trip per competition on mobile data is the organiser's airtime.
- */
 export default function DashboardScreen({ navigation }: any) {
   const [d, setD] = useState<Dashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
-    getDashboard().then((x) => { setD(x); setError(null); })
+    getDashboard()
+      .then((x) => { setD(x); setError(null); })
       .catch((e) => setError(e.message))
-      .finally(() => setRefreshing(false));
+      .finally(() => { setLoading(false); setRefreshing(false); });
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -38,9 +32,9 @@ export default function DashboardScreen({ navigation }: any) {
         }
       >
         {error ? <Text style={S.error}>{error}</Text> : null}
-        {!d && !error ? <Loading /> : null}
+        {loading && !d ? <Loading /> : null}
 
-        {d && d.total === 0 ? (
+        {!loading && d && d.total === 0 ? (
           <Empty title="Nothing running yet"
                  body="Create a competition, or join one with a code an organiser sent you." />
         ) : null}
@@ -86,11 +80,6 @@ export default function DashboardScreen({ navigation }: any) {
               <Section title="LATEST RESULTS">
                 {d.recent.map((fx) => <Row key={fx.id} fx={fx} navigation={navigation} />)}
               </Section>
-            ) : null}
-
-            {d.live.length === 0 && d.upcoming.length === 0 && d.recent.length === 0 ? (
-              <Empty title="No matches in the next fortnight"
-                     body="Fixtures appear here once they're generated or uploaded." />
             ) : null}
           </>
         ) : null}

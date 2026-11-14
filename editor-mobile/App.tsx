@@ -57,28 +57,27 @@ export default function App() {
           headerTintColor: COLORS.text,
           headerTitleStyle: { fontWeight: "800" },
           contentStyle: { backgroundColor: COLORS.bg },
+          headerBackVisible: false,
         }}
       >
         <Stack.Screen name="SignIn" component={SignInScreen}
                       options={{ title: "Sign in", headerShown: false }} />
-        {/* The four tab destinations. They carry their own TabBar, so
-            the header is just a title. */}
         <Stack.Screen name="Dashboard" component={DashboardScreen}
-                      options={{ title: "Dashboard" }} />
+                      options={{ title: "Dashboard", headerLeft: () => null }} />
         <Stack.Screen name="Tournaments" component={TournamentsScreen}
-                      options={{ title: "My competitions" }} />
+                      options={{ title: "My competitions", headerLeft: () => null }} />
         <Stack.Screen name="Inbox" component={InboxScreen}
-                      options={{ title: "Inbox" }} />
+                      options={{ title: "Inbox", headerLeft: () => null }} />
         <Stack.Screen name="Settings" component={SettingsScreen}
-                      options={{ title: "Settings" }} />
+                      options={{ title: "Settings", headerLeft: () => null }} />
         <Stack.Screen name="TournamentDetail" component={TournamentDetailScreen}
-                      options={{ title: "Tournament" }} />
+                      options={{ title: "Tournament", headerBackVisible: true }} />
         <Stack.Screen name="Live" component={LiveScreen}
-                      options={{ title: "Live" }} />
+                      options={{ title: "Live", headerBackVisible: true }} />
         <Stack.Screen name="Billing" component={BillingScreen}
-                      options={{ title: "Billing" }} />
+                      options={{ title: "Billing", headerBackVisible: true }} />
         <Stack.Screen name="Join" component={JoinScreen}
-                      options={{ title: "Join a tournament" }} />
+                      options={{ title: "Join a tournament", headerBackVisible: true }} />
       </Stack.Navigator>
     </NavigationContainer>
   );
