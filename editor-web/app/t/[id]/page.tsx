@@ -20,7 +20,7 @@ import {
   type PlayerRegistration,
   searchClubs, addTeam, removeTeam,
   updateClub, updateTournamentTeam, updateRegisteredPlayer, uploadPlayerPhoto,
-  generateFixtures, clearFixtures, setScore,
+  deleteFixture, clearFixtures, setScore,
   addProof, deleteProof,
   listSquad, registerPlayer, unregisterPlayer, searchPlayers,
   uploadCrest, removeCrest, bulkFixtures, getStandings, sortRounds,
@@ -902,6 +902,12 @@ function Squad({ teamId, editable }: { teamId: string; editable: boolean }) {
 }
 
 // ── fixtures ──────────────────────────────────────────────────────────
+function isFixtureKickoffReached(fx: Fixture): boolean {
+  if (fx.status !== "scheduled" || !fx.kickoff_at) return true;
+  const kickoff = new Date(fx.kickoff_at).getTime();
+  return !Number.isFinite(kickoff) || Date.now() + 15 * 60_000 >= kickoff;
+}
+
 function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
   tid: string; t: Tournament; teams: TeamRow[]; fixtures: Fixture[];
   format: string; editable: boolean; onChanged: () => void;
@@ -911,15 +917,11 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
   const [filterTeam, setFilterTeam] = useState("");
   const [view, setView] = useState<"list" | "calendar">("list");
   const [error, setError] = useState<string | null>(null);
-  const [notes, setNotes] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  // Two ways in. An organiser who already has a draw from a ceremony
-  // shouldn't have to let a generator overwrite it.
-  const [mode, setMode] = useState<"generate" | "own">("generate");
-  const [opts, setOpts] = useState({
-    first_kickoff: new Date(Date.now() + 86400000).toISOString().slice(0, 16),
-    minutes_between: "120", matches_per_day: "4", venue: "", double_round: false,
-  });
+  const [showAddForm, setShowAddForm] = useState(fixtures.length === 0);
+
+  useEffect(() => {
+    if (fixtures.length === 0) setShowAddForm(true);
+  }, [fixtures.length]);
 
   const info = (teamId: string) => {
     const t = teams.find((x) => x.id === teamId);
@@ -927,20 +929,14 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
   };
   const teamMap = Object.fromEntries(teams.map((t) => [t.id, info(t.id)]));
 
-  const generate = async () => {
-    setBusy(true); setError(null); setNotes([]);
+  const removeOneFixture = async (fixtureId: string) => {
+    setError(null);
     try {
-      const r = await generateFixtures(tid, {
-        first_kickoff: new Date(opts.first_kickoff).toISOString(),
-        minutes_between: Number(opts.minutes_between),
-        matches_per_day: Number(opts.matches_per_day),
-        venue: opts.venue || null,
-        double_round: opts.double_round,
-      });
-      setNotes(r.notes || []);
+      await deleteFixture(fixtureId);
       onChanged();
-    } catch (e: any) { setError(e.message); }
-    finally { setBusy(false); }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete fixture.");
+    }
   };
 
   const isKnockout = format === "knockout";
@@ -959,8 +955,6 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
   const rounds = sortRounds(
     Array.from(new Set(fixtures.map((f) => f.round).filter(Boolean))) as string[]
   );
-  const filtering = Boolean(filterSub || filterRound || filterTeam);
-
   return (
     <div className="space-y-4">
       <SeasonStrip t={t} fixtures={fixtures} />
@@ -971,7 +965,9 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
             <select className="input-select w-auto" value={filterSub}
                     onChange={(e) => setFilterSub(e.target.value)}>
               <option value="">All sub-competitions</option>
-              {subs.map((g) => <option key={g} value={g}>Group {g}</option>)}
+              {subs.map((g) => (
+                <option key={g} value={g}>{/^group\b/i.test(g) ? g : `Group ${g}`}</option>
+              ))}
             </select>
           )}
           {rounds.length > 0 && (
@@ -1002,68 +998,24 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
         </div>
       )}
 
-      {editable && (
-        <>
-          <div className="flex gap-2">
-            <button onClick={() => setMode("generate")}
-              className={clsx("tab-pill", mode === "generate" ? "tab-pill-active" : "tab-pill-inactive")}>
-              Generate for me
-            </button>
-            <button onClick={() => setMode("own")}
-              className={clsx("tab-pill", mode === "own" ? "tab-pill-active" : "tab-pill-inactive")}>
-              I already have the draw
-            </button>
-          </div>
-
-          {mode === "generate" ? (
-            <div className="card space-y-3">
-              <p className="section-label">Generate the fixture list</p>
-              {fixtures.length > 0 && (
-                <p className="text-amber text-sm">
-                  Clear the existing fixtures before generating a new list. Current results are preserved.
-                </p>
-              )}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <label className="block">
-                  <span className="text-mt text-xs uppercase tracking-wide">First kickoff</span>
-                  <input type="datetime-local" className="input-select mt-1" value={opts.first_kickoff}
-                         onChange={(e) => setOpts({ ...opts, first_kickoff: e.target.value })} />
-                </label>
-                <label className="block">
-                  <span className="text-mt text-xs uppercase tracking-wide">Venue</span>
-                  <input className="input-select mt-1" value={opts.venue} placeholder="Main pitch"
-                         onChange={(e) => setOpts({ ...opts, venue: e.target.value })} />
-                </label>
-                <label className="block">
-                  <span className="text-mt text-xs uppercase tracking-wide">Minutes between</span>
-                  <input type="number" className="input-select mt-1" value={opts.minutes_between}
-                         onChange={(e) => setOpts({ ...opts, minutes_between: e.target.value })} />
-                </label>
-                <label className="block">
-                  <span className="text-mt text-xs uppercase tracking-wide">Matches per day</span>
-                  <input type="number" className="input-select mt-1" value={opts.matches_per_day}
-                         onChange={(e) => setOpts({ ...opts, matches_per_day: e.target.value })} />
-                </label>
-              </div>
-              <label className="flex items-center gap-2 text-sm text-mt">
-                <input type="checkbox" checked={opts.double_round}
-                       onChange={(e) => setOpts({ ...opts, double_round: e.target.checked })} />
-                Home and away (league only)
-              </label>
-              <p className="text-mt2 text-xs">
-                Kickoffs go on a simple grid. Move any of them afterwards.
-              </p>
-              <button className="btn-volt" disabled={busy || fixtures.length > 0} onClick={generate}>
-                {busy ? "Generating..." : "Generate"}
-              </button>
-            </div>
-          ) : (
-            <OwnDraw tid={tid} teams={teams} onChanged={onChanged} />
-          )}
-        </>
+      {editable && fixtures.length > 0 && (
+        <button type="button" className="text-volt2 text-sm font-semibold"
+                onClick={() => setShowAddForm((previous) => !previous)}>
+          {showAddForm ? "Hide fixture form" : "+ Add fixture(s)"}
+        </button>
       )}
 
-      {notes.map((n) => <p key={n} className="text-amber text-sm">{n}</p>)}
+      {editable && showAddForm && (
+        <OwnDraw
+          tid={tid}
+          teams={teams}
+          onChanged={() => {
+            setShowAddForm(false);
+            onChanged();
+          }}
+        />
+      )}
+
       {error && <p className="text-red2 text-sm font-semibold">{error}</p>}
 
       {fixtures.length > 0 && editable && (
@@ -1076,7 +1028,6 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
                   }}>
             Clear all fixtures
           </button>
-          <AddOne tid={tid} teams={teams} onChanged={onChanged} />
         </div>
       )}
 
@@ -1085,10 +1036,10 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
           league fixtures with no grouping is unusable. */}
       {fixtures.length > 0 && shown.length > 0 && (
         view === "calendar"
-          ? <Calendar fixtures={shown} tid={tid} info={info} />
+          ? <Calendar fixtures={shown} tid={tid} info={info} editable={editable} onDelete={removeOneFixture} />
           : isKnockout
             ? <Bracket fixtures={shown} teams={teamMap} />
-            : <ByRound fixtures={shown} tid={tid} info={info} />
+            : <ByRound fixtures={shown} tid={tid} info={info} editable={editable} onDelete={removeOneFixture} />
       )}
 
       {fixtures.length > 0 && shown.length === 0 && (
@@ -1104,7 +1055,6 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
       {fixtures.length === 0 && !editable && (
         <EmptyMatches />
       )}
-      {fixtures.length === 0 && editable && filtering === false && null}
     </div>
   );
 }
@@ -1187,9 +1137,11 @@ function EmptyMatches() {
    The same fixtures by day rather than by round. Useful when the
    question is "what is on Saturday" rather than "who plays in the
    semi-final". */
-function Calendar({ fixtures, tid, info }: {
+function Calendar({ fixtures, tid, info, editable, onDelete }: {
   fixtures: Fixture[]; tid: string;
   info: (id: string) => { name: string; crest_url: string | null };
+  editable: boolean;
+  onDelete: (fixtureId: string) => void;
 }) {
   const byDay: Record<string, Fixture[]> = {};
   for (const fx of fixtures) {
@@ -1214,11 +1166,10 @@ function Calendar({ fixtures, tid, info }: {
             .sort((a, b) => (a.kickoff_at || "").localeCompare(b.kickoff_at || ""))
             .map((fx) => {
               const h = info(fx.home_team_id), a = info(fx.away_team_id);
+              const unlocked = isFixtureKickoffReached(fx);
               return (
-                <Link key={fx.id} href={`/t/${tid}/live/${fx.id}`}
-                      className="card block hover:border-volt/40 transition-colors">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-2 min-w-0">
+                <div key={fx.id} className="card flex items-center justify-between gap-4">
+                  <Link href={`/t/${tid}/live/${fx.id}`} className="flex items-center gap-2 min-w-0 flex-1">
                       <span className="font-mono text-[11px] text-mt w-11 shrink-0">
                         {fx.kickoff_at
                           ? new Date(fx.kickoff_at).toLocaleTimeString("en-GB",
@@ -1230,12 +1181,23 @@ function Calendar({ fixtures, tid, info }: {
                       <span className="text-mt2 text-xs">v</span>
                       <Crest url={a.crest_url} name={a.name} size={18} />
                       <span className="text-white text-sm truncate">{a.name}</span>
-                    </div>
-                    <span className="font-display font-black text-white shrink-0">
+                  </Link>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="font-display font-black text-white">
                       {fx.home_score ?? "–"}:{fx.away_score ?? "–"}
                     </span>
+                    <Link href={`/t/${tid}/live/${fx.id}`}
+                          className={clsx("text-xs font-semibold", unlocked ? "text-volt2" : "text-mt hover:text-white")}>
+                      {fx.status === "ft" ? "Edit" : unlocked ? "Go live" : "Team sheet"}
+                    </Link>
+                    {editable && (
+                      <button type="button" onClick={() => onDelete(fx.id)}
+                              className="text-mt hover:text-red2 text-xs">
+                        Delete
+                      </button>
+                    )}
                   </div>
-                </Link>
+                </div>
               );
             })}
         </div>
@@ -1244,9 +1206,11 @@ function Calendar({ fixtures, tid, info }: {
   );
 }
 
-function ByRound({ fixtures, tid, info }: {
+function ByRound({ fixtures, tid, info, editable, onDelete }: {
   fixtures: Fixture[]; tid: string;
   info: (id: string) => { name: string; crest_url: string | null };
+  editable: boolean;
+  onDelete: (fixtureId: string) => void;
 }) {
   const grouped: Record<string, Fixture[]> = {};
   for (const fx of fixtures) {
@@ -1266,6 +1230,7 @@ function ByRound({ fixtures, tid, info }: {
               .sort((a, b) => (a.kickoff_at || "").localeCompare(b.kickoff_at || ""))
               .map((fx) => {
                 const h = info(fx.home_team_id), a = info(fx.away_team_id);
+                const unlocked = isFixtureKickoffReached(fx);
                 return (
                   <div key={fx.id} className="card flex items-center justify-between gap-3">
                     <div className="min-w-0 flex-1">
@@ -1288,9 +1253,16 @@ function ByRound({ fixtures, tid, info }: {
                       <span className="font-mono font-bold text-white">
                         {fx.home_score ?? "-"}:{fx.away_score ?? "-"}
                       </span>
-                      <Link href={`/t/${tid}/live/${fx.id}`} className="text-volt2 text-sm font-semibold">
-                        {fx.status === "ft" ? "Edit" : "Go live"}
+                      <Link href={`/t/${tid}/live/${fx.id}`}
+                            className={clsx("text-sm font-semibold", unlocked ? "text-volt2" : "text-mt hover:text-white")}>
+                        {fx.status === "ft" ? "Edit" : unlocked ? "Go live" : "Team sheet"}
                       </Link>
+                      {editable && (
+                        <button type="button" onClick={() => onDelete(fx.id)}
+                                className="text-mt hover:text-red2 text-xs font-semibold">
+                          Delete
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -1309,57 +1281,106 @@ function OwnDraw({ tid, teams, onChanged }: {
   tid: string; teams: TeamRow[]; onChanged: () => void;
 }) {
   type Row = {
-    home_team_id: string; away_team_id: string;
-    kickoff_at: string; round: string; group_name: string; venue: string;
+    group_name: string; home_team_id: string; away_team_id: string;
+    kickoff_at: string; round: string; venue: string;
   };
-  const blank = (): Row => ({
-    home_team_id: "", away_team_id: "",
-    kickoff_at: new Date(Date.now() + 86400000).toISOString().slice(0, 16),
-    round: "", group_name: "", venue: "",
-  });
-  const [rows, setRows] = useState<Row[]>([blank()]);
+  const [subs, setSubs] = useState<SubCompetition[]>([]);
+  const [venues, setVenues] = useState<Venue[]>([]);
+  const [optionsError, setOptionsError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const set = (i: number, k: keyof Row, v: string) =>
-    setRows(rows.map((r, idx) => (idx === i ? { ...r, [k]: v } : r)));
+  useEffect(() => {
+    let active = true;
+    setOptionsError(null);
+    listSubCompetitions(tid)
+      .then((result) => { if (active) setSubs(result.sub_competitions || []); })
+      .catch((e) => {
+        if (active) setOptionsError(e instanceof Error ? e.message : "Could not load groups.");
+      });
+    listVenues(tid)
+      .then((result) => { if (active) setVenues(result.venues || []); })
+      .catch((e) => {
+        if (active) {
+          setOptionsError((previous) =>
+            [previous, e instanceof Error ? e.message : "Could not load venues."]
+              .filter(Boolean)
+              .join(" ")
+          );
+        }
+      });
+    return () => { active = false; };
+  }, [tid]);
 
-  const pickTeam = (i: number, side: "home_team_id" | "away_team_id", teamId: string) => {
-    const team = teams.find((x) => x.id === teamId);
-    const otherSide = side === "home_team_id" ? "away_team_id" : "home_team_id";
-    setRows(rows.map((r, idx) => {
-      if (idx !== i) return r;
-      const next = {
-        ...r,
-        [side]: teamId,
-        group_name: r.group_name || team?.group_name || "",
-      };
-      if (teamId && next[otherSide] === teamId) next[otherSide] = "";
-      return next;
-    }));
+  const normalizeGroup = (name: string) =>
+    name.replace(/^group\s*/i, "").trim().toLowerCase();
+  const groupNames = [
+    ...subs.filter((sub) => sub.kind !== "league").map((sub) => sub.name),
+    ...(teams.map((team) => team.group_name).filter(Boolean) as string[]),
+  ].filter((name, index, names) =>
+    names.findIndex((candidate) => normalizeGroup(candidate) === normalizeGroup(name)) === index
+  );
+  const groupLabel = (name: string) => {
+    if (/^(group|stage|round|quarter|semi|final)\b/i.test(name)) return name;
+    const sub = subs.find((item) => normalizeGroup(item.name) === normalizeGroup(name));
+    if (sub?.kind === "knockout" || sub?.kind === "playoff") return `Stage ${name}`;
+    return `Group ${name}`;
+  };
+  const teamBelongsToGroup = (team: TeamRow, name: string) => {
+    const sub = subs.find((item) => normalizeGroup(item.name) === normalizeGroup(name));
+    if (sub && (sub.teams.some((member) => member.id === team.id) ||
+      team.sub_competition_id === sub.id)) return true;
+    return normalizeGroup(team.group_name || "") === normalizeGroup(name);
   };
 
-  const groups = Array.from(
-    new Set(teams.map((team) => team.group_name).filter((group): group is string => Boolean(group)))
-  ).sort();
+  const blank = (): Row => ({
+    group_name: "",
+    home_team_id: "", away_team_id: "",
+    kickoff_at: new Date(Date.now() + 86400000).toISOString().slice(0, 16),
+    round: "", venue: venues[0]?.name ?? "",
+  });
+  const [rows, setRows] = useState<Row[]>([blank()]);
+
+  const setGroup = (rowIndex: number, groupName: string) => {
+    const validIds = new Set(teams
+      .filter((team) => !groupName || teamBelongsToGroup(team, groupName))
+      .map((team) => team.id));
+    setRows((current) => current.map((row, index) => index === rowIndex ? {
+      ...row,
+      group_name: groupName,
+      home_team_id: validIds.has(row.home_team_id) ? row.home_team_id : "",
+      away_team_id: validIds.has(row.away_team_id) ? row.away_team_id : "",
+    } : row));
+  };
+
+  const setField = (rowIndex: number, key: keyof Row, value: string) =>
+    setRows((current) => current.map((row, index) =>
+      index === rowIndex ? { ...row, [key]: value } : row
+    ));
 
   const save = async () => {
     setBusy(true); setError(null);
     try {
-      const complete = rows.filter((r) => r.home_team_id && r.away_team_id);
-      if (complete.length === 0) throw new Error("Fill in at least one fixture.");
-      await bulkFixtures(tid, complete.map((r) => ({
-        home_team_id: r.home_team_id,
-        away_team_id: r.away_team_id,
-        kickoff_at: new Date(r.kickoff_at).toISOString(),
-        round: r.round || null,
-        group_name: r.group_name || null,
-        venue: r.venue || null,
+      const complete = rows.filter((row) => row.home_team_id && row.away_team_id);
+      if (complete.length === 0) throw new Error("Select both Home and Away teams first.");
+      if (complete.some((row) => row.home_team_id === row.away_team_id)) {
+        throw new Error("Home and Away must be different teams.");
+      }
+      await bulkFixtures(tid, complete.map((row) => ({
+        home_team_id: row.home_team_id,
+        away_team_id: row.away_team_id,
+        kickoff_at: new Date(row.kickoff_at).toISOString(),
+        round: row.round.trim() || null,
+        group_name: row.group_name || null,
+        venue: row.venue || null,
       })));
       setRows([blank()]);
       onChanged();
-    } catch (e: any) { setError(e.message); }
-    finally { setBusy(false); }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save fixtures.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (teams.length < 2) {
@@ -1368,77 +1389,75 @@ function OwnDraw({ tid, teams, onChanged }: {
 
   return (
     <div className="card space-y-3">
-      <p className="section-label">Enter your draw</p>
-      <p className="text-mt2 text-xs">
-        Round is free text, so use whatever your draw calls it: Matchday 1,
-        Quarter-final, Group A.
-      </p>
-      {rows.map((r, i) => (
+      <div>
+        <p className="section-label">Enter your draw</p>
+        <p className="text-mt2 text-xs mt-1">
+          Pick a group or stage first to filter its teams, then choose Home, Away, Kickoff, and Venue.
+        </p>
+      </div>
+      {optionsError && <p className="text-red2 text-xs font-semibold">{optionsError}</p>}
+      {rows.map((row, i) => {
+        const eligibleTeams = row.group_name
+          ? teams.filter((team) => teamBelongsToGroup(team, row.group_name))
+          : teams;
+        return (
         <div key={i} className="grid grid-cols-2 sm:grid-cols-6 gap-2">
-          <select className="input-select" value={r.home_team_id}
-                  onChange={(e) => pickTeam(i, "home_team_id", e.target.value)}>
-            <option value="">Home</option>
-            {teams.map((t) => <option key={t.id} value={t.id}>{t.clubs?.name}</option>)}
-          </select>
-          <select className="input-select" value={r.away_team_id}
-                  onChange={(e) => pickTeam(i, "away_team_id", e.target.value)}>
-            <option value="">Away</option>
-            {teams.filter((team) => team.id !== r.home_team_id).map((t) => (
-              <option key={t.id} value={t.id}>{t.clubs?.name}</option>
+          <select className="input-select" value={row.group_name}
+                  onChange={(e) => setGroup(i, e.target.value)}>
+            <option value="">All / No group</option>
+            {groupNames.map((group) => (
+              <option key={group} value={group}>{groupLabel(group)}</option>
             ))}
           </select>
-          <input type="datetime-local" className="input-select" value={r.kickoff_at}
-                 onChange={(e) => set(i, "kickoff_at", e.target.value)} />
-          <input className="input-select" placeholder="Round" value={r.round}
-                 onChange={(e) => set(i, "round", e.target.value)} />
-          <select className="input-select" value={r.group_name}
-                  onChange={(e) => set(i, "group_name", e.target.value)}>
-            <option value="">No group</option>
-            {r.group_name && !groups.includes(r.group_name) && (
-              <option value={r.group_name}>{r.group_name}</option>
-            )}
-            {groups.map((group) => <option key={group} value={group}>{group}</option>)}
+          <select className="input-select" value={row.home_team_id}
+                  onChange={(e) => setField(i, "home_team_id", e.target.value)}>
+            <option value="">Home ({eligibleTeams.length})</option>
+            {eligibleTeams.map((team) => (
+              <option key={team.id} value={team.id}>{team.clubs?.name ?? "Unknown"}</option>
+            ))}
           </select>
-          <input className="input-select" placeholder="Venue" value={r.venue}
-                 onChange={(e) => set(i, "venue", e.target.value)} />
+          <select className="input-select" value={row.away_team_id}
+                  onChange={(e) => setField(i, "away_team_id", e.target.value)}>
+            <option value="">Away</option>
+            {eligibleTeams.filter((team) => team.id !== row.home_team_id).map((team) => (
+              <option key={team.id} value={team.id}>{team.clubs?.name ?? "Unknown"}</option>
+            ))}
+          </select>
+          <input type="datetime-local" className="input-select" value={row.kickoff_at}
+                 onChange={(e) => setField(i, "kickoff_at", e.target.value)} />
+          <input className="input-select" placeholder="Round (e.g. MD 1)" value={row.round}
+                 onChange={(e) => setField(i, "round", e.target.value)} />
+          {venues.length > 0 ? (
+            <select className="input-select" value={row.venue}
+                    onChange={(e) => setField(i, "venue", e.target.value)}>
+              <option value="">Select venue...</option>
+              {venues.map((venue) => (
+                <option key={venue.id} value={venue.name}>{venue.name}</option>
+              ))}
+            </select>
+          ) : (
+            <input className="input-select" placeholder="Venue (add in Venues tab)" value={row.venue}
+                   onChange={(e) => setField(i, "venue", e.target.value)} />
+          )}
         </div>
-      ))}
+        );
+      })}
       <div className="flex items-center gap-4">
-        <button className="text-volt2 text-sm font-semibold"
-                onClick={() => setRows([...rows, blank()])}>
-          Add another fixture
+        <button type="button" className="text-volt2 text-sm font-semibold"
+                onClick={() => setRows((current) => [...current, blank()])}>
+          + Add another fixture
         </button>
         {rows.length > 1 && (
-          <button className="text-mt hover:text-red2 text-sm"
-                  onClick={() => setRows(rows.slice(0, -1))}>
+          <button type="button" className="text-mt hover:text-red2 text-sm"
+                  onClick={() => setRows((current) => current.slice(0, -1))}>
             Remove last
           </button>
         )}
       </div>
       {error && <p className="text-red2 text-sm font-semibold">{error}</p>}
-      <button className="btn-volt" disabled={busy} onClick={save}>
-        {busy ? "Saving..." : `Save ${rows.filter((r) => r.home_team_id && r.away_team_id).length} fixture(s)`}
+      <button type="button" className="btn-volt" disabled={busy} onClick={save}>
+        {busy ? "Saving..." : `Save ${rows.filter((row) => row.home_team_id && row.away_team_id).length} fixture(s)`}
       </button>
-    </div>
-  );
-}
-
-/** Add one fixture to an existing list. This is also how knockout
- *  rounds after the first get created, once you know who advanced. */
-function AddOne({ tid, teams, onChanged }: {
-  tid: string; teams: TeamRow[]; onChanged: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  if (!open) {
-    return (
-      <button className="text-volt2 text-sm font-semibold" onClick={() => setOpen(true)}>
-        Add a fixture
-      </button>
-    );
-  }
-  return (
-    <div className="w-full">
-      <OwnDraw tid={tid} teams={teams} onChanged={() => { setOpen(false); onChanged(); }} />
     </div>
   );
 }

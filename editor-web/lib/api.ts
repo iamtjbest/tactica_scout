@@ -266,6 +266,9 @@ export const clearFixtures = (tid: string) =>
     method: "DELETE",
   });
 
+export const deleteFixture = (fixtureId: string) =>
+  req<void>(`/api/editor/fixtures/${fixtureId}`, { method: "DELETE" });
+
 export const addFixture = (tid: string, body: Record<string, unknown>) =>
   req<Fixture>(`/api/editor/tournaments/${tid}/fixtures`, {
     method: "POST", body: JSON.stringify(body),
