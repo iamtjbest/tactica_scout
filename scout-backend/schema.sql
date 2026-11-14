@@ -243,7 +243,13 @@ create table tournament_teams (
   group_name     text,
   home_color     text,
   away_color     text,
+  attack_rating  numeric,
+  defence_rating numeric,
   created_at     timestamptz not null default now(),
+  constraint tournament_teams_ratings_sane check (
+    (attack_rating is null or attack_rating between 40 and 90) and
+    (defence_rating is null or defence_rating between 40 and 90)
+  ),
   unique (tournament_id, club_id)
 );
 create index tournament_teams_tournament_idx on tournament_teams (tournament_id);

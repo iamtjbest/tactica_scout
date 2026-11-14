@@ -663,11 +663,14 @@ export type TournamentTopStat = {
 export type TournamentMatchEvent = {
   id: string; type: string; minute: number | null;
   tournament_team_id: string; side: 'home' | 'away';
-  players: { id: string; first_name: string; last_name: string } | null;
+  players: {
+    id: string; first_name: string; last_name: string; photo_url: string | null;
+  } | null;
+  related_player?: { id: string; first_name: string; last_name: string } | null;
 };
 
 export type TournamentSheetPlayer = {
-  player_id: string; name: string;
+  player_id: string; name: string; photo_url: string | null;
   shirt_number: number | null; position: string | null;
 };
 

@@ -11,12 +11,17 @@ function formatKickoff(iso?: string): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+const FINISHED_STATUSES = ["finished", "ended", "played", "ft"];
+const UPCOMING_STATUSES = ["scheduled", "notstarted", "postponed", "cancelled", "delayed", "tbd"];
+
 function isMatchFinished(s: string) {
-  return ["finished", "ended", "played", "ft"].includes(String(s).toLowerCase());
+  return FINISHED_STATUSES.includes(String(s || "").toLowerCase());
 }
 
 function isMatchLive(s: string) {
-  return !isMatchFinished(s) && !["notstarted", "postponed", "cancelled", "delayed"].includes(String(s).toLowerCase());
+  const norm = String(s || "").toLowerCase();
+  if (!norm || isMatchFinished(norm) || UPCOMING_STATUSES.includes(norm)) return false;
+  return true;
 }
 
 export default function MatchCard({ match, targetTeamId, showCompetition }: { match: MatchSummary, targetTeamId?: number, showCompetition?: boolean }) {

@@ -1,16 +1,18 @@
 """
 app/routers/editor_media.py
 
-Club crests. Uploaded to Supabase Storage through this backend rather
-than straight from the browser, for the same reason everything else
-goes through here: Storage policies are not set up, the service role
-key is what has write access, and that key must never reach a client.
+Club crests and player photos. Uploaded to Supabase Storage through
+this backend rather than straight from the browser, for the same reason
+everything else goes through here: Storage policies are not set up, the
+service role key is what has write access, and that key must never reach
+a client.
 
 The bucket must exist and be PUBLIC, because a crest is rendered by an
 <img> tag in Scout, the editor, and anywhere a fixture is shown. Create
 it once in the Supabase dashboard (Storage > New bucket > name
 "club-crests", Public on), or let ensure_bucket() below make it on
-first upload.
+first upload. Club files use `{club_id}/...`; player photos use
+`players/{player_id}/...`.
 
 Crests are small on purpose. A 2 MB PNG of a department badge costs a
 student on mobile data every single time a fixture list renders.
@@ -20,16 +22,15 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
-from app.access import RANK
 from app.deps import require_user
-from app.routers.editor import _db, _one, _rows
+from app.routers.editor import _db, _may_edit_club, _may_edit_player, _one
 
 router = APIRouter()
 
 BUCKET = os.environ.get("CREST_BUCKET", "club-crests")
 
-# 1 MB. A crest renders at 16-40px in most places; anything bigger is
-# being paid for by the viewer and seen by nobody.
+# 1 MB. Crests and headshots render small in most places; anything
+# bigger is being paid for by the viewer and seen by nobody.
 MAX_BYTES = 1_000_000
 
 # Checked by sniffing the actual bytes, not by trusting the filename or
@@ -101,40 +102,6 @@ def _ensure_bucket():
         # Already exists, or the key can't create buckets. Either way the
         # upload below will tell us plainly if there's a real problem.
         pass
-
-
-def _may_edit_club(club: dict, user: dict) -> bool:
-    """May this user change this global club's crest?
-
-    Clubs are shared across tournaments, so "whoever is signed in" is
-    too loose: it would let any account replace any club's badge with
-    anything. The rule is a connection to the club:
-
-      - platform admin, or
-      - they created the club, or
-      - they own a tournament this club plays in.
-
-    That keeps a genuinely shared club editable by the people actually
-    running its competitions, and closed to everyone else.
-    """
-    if user.get("role") == "admin":
-        return True
-    if club.get("created_by") == user["id"]:
-        return True
-
-    entries = _rows(
-        _db().table("tournament_teams").select("tournament_id")
-        .eq("club_id", club["id"]).execute()
-    )
-    if not entries:
-        return False
-    tournament_ids = list({e["tournament_id"] for e in entries})
-
-    mine = _rows(
-        _db().table("tournament_members").select("tournament_id, role")
-        .eq("user_id", user["id"]).in_("tournament_id", tournament_ids).execute()
-    )
-    return any(RANK.get(m["role"], 0) >= RANK["owner"] for m in mine)
 
 
 @router.post("/editor/clubs/{club_id}/crest")
@@ -256,3 +223,45 @@ def remove_tournament_crest(tournament_id: str, user: dict = Depends(require_use
         .eq("id", tournament_id).execute()
     )
     return {"tournament": updated}
+
+
+@router.post("/editor/players/{player_id}/photo")
+async def upload_player_photo(
+    player_id: str,
+    file: UploadFile = File(...),
+    user: dict = Depends(require_user),
+):
+    """Attach a headshot to a global player in Supabase Storage."""
+    player = _one(
+        _db().table("players")
+        .select("id, first_name, last_name, photo_url, created_by")
+        .eq("id", player_id).limit(1).execute()
+    )
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    if not _may_edit_player(player, user):
+        raise HTTPException(
+            status_code=403,
+            detail="You can only change a player photo if you created the player or own one of their tournaments.",
+        )
+
+    data = await file.read()
+    kind = _validated(data)
+    _ensure_bucket()
+    path = f"players/{player_id}/{uuid.uuid4().hex}.{EXT[kind]}"
+    try:
+        _db().storage.from_(BUCKET).upload(
+            path, data, {"content-type": f"image/{kind}", "upsert": "false"}
+        )
+        public_url = _db().storage.from_(BUCKET).get_public_url(path)
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not store player photo ({type(e).__name__}). Check '{BUCKET}' bucket is public.",
+        )
+
+    updated = _one(
+        _db().table("players").update({"photo_url": public_url})
+        .eq("id", player_id).execute()
+    )
+    return {"player": updated, "photo_url": public_url}

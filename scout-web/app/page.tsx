@@ -16,12 +16,17 @@ const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
   { id: "finished", label: "Finished" },
 ];
 
+const FINISHED_STATUSES = ["finished", "ended", "played", "ft"];
+const UPCOMING_STATUSES = ["scheduled", "notstarted", "postponed", "cancelled", "delayed", "tbd"];
+
 function isMatchFinished(s: string) {
-  return ["finished", "ended", "played", "ft"].includes(String(s).toLowerCase());
+  return FINISHED_STATUSES.includes(String(s || "").toLowerCase());
 }
 
 function isMatchLive(s: string) {
-  return !isMatchFinished(s) && !["notstarted", "postponed", "cancelled", "delayed"].includes(String(s).toLowerCase());
+  const norm = String(s || "").toLowerCase();
+  if (!norm || isMatchFinished(norm) || UPCOMING_STATUSES.includes(norm)) return false;
+  return true;
 }
 
 function matchPasses(m: MatchSummary, filter: StatusFilter): boolean {
@@ -34,12 +39,17 @@ function matchPasses(m: MatchSummary, filter: StatusFilter): boolean {
 function isFollowed(m: MatchSummary, lg: LeagueMatches, followedTokens: string[]): boolean {
   if (!followedTokens || followedTokens.length === 0) return false;
   return followedTokens.some((token) => {
-    const parts = token.split(':');
+    const parts = token.split(":");
     if (parts.length >= 2) {
       const [type, rawId] = parts;
-      if (type === "tournament" && String(lg.tournament_id ?? "") === rawId) return true;
-      if (type === "league" && String(lg.league_id ?? "") === rawId) return true;
-      if (type === "team" && (String(m.home_team_id) === rawId || String(m.away_team_id) === rawId)) return true;
+      if (type === "tournament" && lg.tournament_id === rawId) return true;
+      if (type === "league" && String(lg.league_id) === rawId) return true;
+      if (
+        type === "team" &&
+        (String(m.home_team_id) === rawId || String(m.away_team_id) === rawId)
+      ) {
+        return true;
+      }
       return false;
     }
     if (m.home_team.toLowerCase() === token.toLowerCase()) return true;
@@ -109,13 +119,17 @@ export default function HomePage() {
        
        let filteredMatches = lg.matches;
        if (statusFilter === "following") {
-         filteredMatches = filteredMatches.filter(m => isFollowed(m, lg, followedTeams));
+          filteredMatches = filteredMatches.filter((m) => isFollowed(m, lg, followedTeams));
        } else {
          filteredMatches = filteredMatches.filter((m) => matchPasses(m, statusFilter));
        }
        return { ...lg, matches: filteredMatches };
     })
-    .filter((lg) => lg.matches.length > 0);
+    .filter((lg) => lg.matches.length > 0)
+    .sort((a, b) => {
+      if (statusFilter !== "following") return 0;
+      return Number(b.source === "local") - Number(a.source === "local");
+    });
 
   return (
     <div className="space-y-6">

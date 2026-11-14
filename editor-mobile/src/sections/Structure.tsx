@@ -107,6 +107,7 @@ export function Structure({ tid, editable, onChanged }: {
 }) {
   const [subs, setSubs] = useState<SubCompetition[] | null>(null);
   const [loose, setLoose] = useState<TeamRow[]>([]);
+  const [selectedLoose, setSelectedLoose] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState("");
@@ -114,7 +115,12 @@ export function Structure({ tid, editable, onChanged }: {
 
   const load = useCallback(() => {
     listSubCompetitions(tid)
-      .then((d) => { setSubs(d.sub_competitions); setLoose(d.unassigned); setError(null); })
+      .then((d) => {
+        setSubs(d.sub_competitions);
+        setLoose(d.unassigned);
+        setSelectedLoose((current) => current.filter((id) => d.unassigned.some((tm) => tm.id === id)));
+        setError(null);
+      })
       .catch((e) => setError(e.message));
   }, [tid]);
   useEffect(() => { load(); }, [load]);
@@ -175,19 +181,47 @@ export function Structure({ tid, editable, onChanged }: {
         <View style={S.card}>
           <Text style={S.label}>NOT PLACED YET ({loose.length})</Text>
           <Text style={S.muted}>
-            These sit outside every table until they are put somewhere.
+            Select one or more teams, then assign them to a group or stage.
           </Text>
           <View style={[S.wrapRow, { marginTop: 8 }]}>
-            {loose.map((tm) => (
-              <View key={tm.id} style={[S.chip, { borderColor: "rgba(255,184,48,0.4)" }]}>
-                <Text style={[S.chipText, { color: "#FFB830" }]}>
-                  {tm.clubs?.name ?? "Unknown"}
-                </Text>
-              </View>
-            ))}
+            {loose.map((tm) => {
+              const selected = selectedLoose.includes(tm.id);
+              return (
+                <TouchableOpacity
+                  key={tm.id}
+                  onPress={() => setSelectedLoose((current) =>
+                    selected ? current.filter((id) => id !== tm.id) : [...current, tm.id]
+                  )}
+                  style={[S.chip, {
+                    borderColor: selected ? COLORS.cardBorderActive : "rgba(255,184,48,0.4)",
+                    backgroundColor: selected ? COLORS.voltMuted : undefined,
+                  }]}
+                >
+                  <Text style={[S.chipText, { color: selected ? COLORS.volt : "#FFB830" }]}>
+                    {tm.clubs?.name ?? "Unknown"}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
           {editable && (subs || []).length > 0 ? (
             <View style={{ gap: 8, marginTop: 10 }}>
+              {selectedLoose.length > 0 ? (
+                <>
+                  <Text style={S.dim}>{selectedLoose.length} TEAM(S) SELECTED</Text>
+                  {(subs || []).map((sc) => (
+                    <Btn
+                      key={`selected-${sc.id}`}
+                      label={`Assign selected to ${sc.name}`}
+                      busy={busy}
+                      onPress={() => run(async () => {
+                        await assignTeams(tid, sc.id, selectedLoose);
+                        setSelectedLoose([]);
+                      })}
+                    />
+                  ))}
+                </>
+              ) : null}
               <Text style={S.dim}>PLACE ALL IN</Text>
               {(subs || []).map((sc) => (
                 <TouchableOpacity key={sc.id} disabled={busy} style={S.chip}

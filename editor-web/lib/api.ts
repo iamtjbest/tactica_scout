@@ -121,8 +121,30 @@ export type Club = {
 
 export type TeamRow = {
   id: string; club_id: string; group_name: string | null;
+  sub_competition_id?: string | null;
   home_color: string | null; away_color: string | null;
+  attack_rating?: number | null; defence_rating?: number | null;
   clubs: Club | null;
+};
+
+export type TournamentTeamUpdate = Omit<TeamRow, "clubs"> & {
+  tournament_id: string;
+};
+
+export type PlayerRegistration = {
+  id: string;
+  player_id: string;
+  tournament_team_id: string;
+  jersey_number: number | null;
+  position: string | null;
+  players?: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    dob?: string;
+    position: string | null;
+    photo_url: string | null;
+  } | null;
 };
 
 export type Fixture = {
@@ -148,7 +170,10 @@ export type Readiness = {
 export type MatchEvent = {
   id: string; type: string; minute: number | null;
   tournament_team_id: string;
+  player_id?: string | null;
+  related_player_id?: string | null;
   players?: { id: string; first_name: string; last_name: string } | null;
+  related_player?: { id: string; first_name: string; last_name: string } | null;
 };
 
 export type Billing = {
@@ -193,6 +218,18 @@ export const addTeam = (tid: string, body: Record<string, unknown>) =>
     method: "POST", body: JSON.stringify(body),
   });
 
+export const updateClub = (clubId: string, body: Record<string, unknown>) =>
+  req<Club>(`/api/editor/clubs/${clubId}`, {
+    method: "PATCH", body: JSON.stringify(body),
+  });
+
+export const updateTournamentTeam = (
+  tid: string, teamId: string, body: Record<string, unknown>
+) =>
+  req<TournamentTeamUpdate>(`/api/editor/tournaments/${tid}/teams/${teamId}`, {
+    method: "PATCH", body: JSON.stringify(body),
+  });
+
 export const removeTeam = (tid: string, teamId: string) =>
   req<void>(`/api/editor/tournaments/${tid}/teams/${teamId}`, { method: "DELETE" });
 
@@ -200,11 +237,18 @@ export const searchPlayers = (q: string) =>
   req<{ players: any[] }>(`/api/editor/players?q=${encodeURIComponent(q)}`);
 
 export const listSquad = (teamId: string) =>
-  req<{ count: number; squad: any[] }>(`/api/editor/teams/${teamId}/players`);
+  req<{ count: number; squad: PlayerRegistration[] }>(`/api/editor/teams/${teamId}/players`);
 
 export const registerPlayer = (teamId: string, body: Record<string, unknown>) =>
-  req<any>(`/api/editor/teams/${teamId}/players`, {
+  req<PlayerRegistration>(`/api/editor/teams/${teamId}/players`, {
     method: "POST", body: JSON.stringify(body),
+  });
+
+export const updateRegisteredPlayer = (
+  teamId: string, regId: string, body: Record<string, unknown>
+) =>
+  req<PlayerRegistration>(`/api/editor/teams/${teamId}/players/${regId}`, {
+    method: "PATCH", body: JSON.stringify(body),
   });
 
 export const unregisterPlayer = (teamId: string, regId: string) =>
@@ -322,6 +366,23 @@ export async function uploadCrest(clubId: string, file: File) {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as any)?.detail || `Upload failed (${res.status})`);
   return body as { crest_url: string };
+}
+
+export async function uploadPlayerPhoto(
+  playerId: string, file: File
+): Promise<{ photo_url: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/api/editor/players/${playerId}/photo`, {
+    method: "POST",
+    headers: { ...(await authHeaders()) },
+    body: form,
+  });
+  const body = await res.json().catch(() => null) as { detail?: string } | null;
+  if (!res.ok) {
+    throw new Error(body?.detail || `Upload failed (${res.status})`);
+  }
+  return body as { photo_url: string };
 }
 
 export const removeCrest = (clubId: string) =>

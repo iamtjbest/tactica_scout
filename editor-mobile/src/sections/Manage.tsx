@@ -6,7 +6,8 @@
  * editor's equivalents, laid out for a phone.
  */
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, TouchableOpacity, ScrollView } from "react-native";
+import { View, Text, TouchableOpacity, ScrollView, Image } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import { COLORS } from "../theme";
 import Crest from "../components/Crest";
 import { S, Field, Btn, Empty, Loading } from "./kit";
@@ -14,8 +15,9 @@ import {
   getStandings, listSquad, listProofs, addProof, deleteProof,
   listMembers, listInvites, createInvite, revokeInvite,
   listRequests, decideRequest, removeMember,
-  updateTournament, TIEBREAKERS,
-  type Tournament, type TeamRow, type StandingRow, type Proof,
+  updateTournament, updateClub, updateTournamentTeam, updateRegisteredPlayer,
+  uploadPlayerPhoto, TIEBREAKERS,
+  type Tournament, type TeamRow, type StandingRow, type Proof, type PlayerRegistration,
   type Member, type Invite, type AccessRequest,
 } from "../services/api";
 
@@ -82,11 +84,82 @@ export function Standings({ tid }: { tid: string }) {
 }
 
 /* ── teams ──────────────────────────────────────────────────────── */
-export function Teams({ teams }: { teams: TeamRow[] }) {
+export function Teams({ tid, teams, editable, onChanged }: {
+  tid: string; teams: TeamRow[]; editable: boolean; onChanged: () => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState({
+    name: "", short_name: "", institution: "",
+    home_color: "", away_color: "", attack_rating: "", defence_rating: "",
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   if (teams.length === 0) {
     return <Empty title="No teams yet"
                   body="Add the teams taking part, then generate or upload the fixtures." />;
   }
+
+  const edit = (tm: TeamRow) => {
+    setError(null);
+    setEditingId(editingId === tm.id ? null : tm.id);
+    setDraft({
+      name: tm.clubs?.name ?? "",
+      short_name: tm.clubs?.short_name ?? "",
+      institution: tm.clubs?.institution ?? "",
+      home_color: tm.home_color ?? "",
+      away_color: tm.away_color ?? "",
+      attack_rating: tm.attack_rating == null ? "" : String(tm.attack_rating),
+      defence_rating: tm.defence_rating == null ? "" : String(tm.defence_rating),
+    });
+  };
+
+  const save = async (tm: TeamRow) => {
+    const attack = draft.attack_rating.trim() ? Number(draft.attack_rating) : null;
+    const defence = draft.defence_rating.trim() ? Number(draft.defence_rating) : null;
+    if (draft.name.trim().length < 2) {
+      setError("Team name must be at least 2 characters.");
+      return;
+    }
+    if ([attack, defence].some((x) => x !== null && (!Number.isFinite(x) || x < 40 || x > 90))) {
+      setError("Seed ratings must be between 40 and 90.");
+      return;
+    }
+    if ([draft.home_color, draft.away_color].some(
+      (color) => color.trim() && !/^#[0-9a-f]{6}$/i.test(color.trim())
+    )) {
+      setError("Kit colors must use the #RRGGBB format.");
+      return;
+    }
+    if (!tm.club_id) {
+      setError("This team is not linked to a club.");
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      await updateClub(tm.club_id, {
+        name: draft.name.trim(),
+        short_name: draft.short_name.trim() || null,
+        institution: draft.institution.trim() || null,
+      });
+      await updateTournamentTeam(tid, tm.id, {
+        home_color: draft.home_color.trim() || null,
+        away_color: draft.away_color.trim() || null,
+        attack_rating: attack,
+        defence_rating: defence,
+      });
+      setEditingId(null);
+      onChanged();
+    } catch (e: any) {
+      setError(e.message);
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <View style={{ gap: 8 }}>
       {teams.map((tm) => (
@@ -97,7 +170,38 @@ export function Teams({ teams }: { teams: TeamRow[] }) {
               {tm.clubs?.name ?? "Unknown"}
             </Text>
             {tm.group_name ? <Text style={S.dim}>Group {tm.group_name}</Text> : null}
+            {editable ? (
+              <TouchableOpacity onPress={() => edit(tm)}>
+                <Text style={S.link}>{editingId === tm.id ? "Cancel" : "Edit"}</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
+          {editingId === tm.id ? (
+            <View style={{ gap: 8, marginTop: 10 }}>
+              <Field label="Team name" value={draft.name}
+                     onChangeText={(name: string) => setDraft({ ...draft, name })} />
+              <Field label="Short name" value={draft.short_name}
+                     onChangeText={(short_name: string) => setDraft({ ...draft, short_name })} />
+              <Field label="Institution / faculty" value={draft.institution}
+                     onChangeText={(institution: string) => setDraft({ ...draft, institution })} />
+              <View style={[S.row, { alignItems: "flex-start" }]}>
+                <Field label="Home kit (#RRGGBB)" value={draft.home_color}
+                       onChangeText={(home_color: string) => setDraft({ ...draft, home_color })} />
+                <Field label="Away kit (#RRGGBB)" value={draft.away_color}
+                       onChangeText={(away_color: string) => setDraft({ ...draft, away_color })} />
+              </View>
+              <View style={[S.row, { alignItems: "flex-start" }]}>
+                <Field label="Seed ATK (40–90)" value={draft.attack_rating}
+                       keyboardType="decimal-pad"
+                       onChangeText={(attack_rating: string) => setDraft({ ...draft, attack_rating })} />
+                <Field label="Seed DEF (40–90)" value={draft.defence_rating}
+                       keyboardType="decimal-pad"
+                       onChangeText={(defence_rating: string) => setDraft({ ...draft, defence_rating })} />
+              </View>
+              {error ? <Text style={S.error}>{error}</Text> : null}
+              <Btn label="Save team details" busy={busy} onPress={() => save(tm)} />
+            </View>
+          ) : null}
         </View>
       ))}
     </View>
@@ -105,7 +209,7 @@ export function Teams({ teams }: { teams: TeamRow[] }) {
 }
 
 /* ── players ────────────────────────────────────────────────────── */
-export function Players({ teams }: { teams: TeamRow[] }) {
+export function Players({ teams, editable }: { teams: TeamRow[]; editable: boolean }) {
   const [open, setOpen] = useState<string | null>(teams[0]?.id ?? null);
 
   if (teams.length === 0) {
@@ -126,18 +230,31 @@ export function Players({ teams }: { teams: TeamRow[] }) {
               <Text style={S.dim}>{open === tm.id ? "Hide" : "Show"}</Text>
             </View>
           </TouchableOpacity>
-          {open === tm.id ? <Squad teamId={tm.id} /> : null}
+          {open === tm.id ? <Squad teamId={tm.id} editable={editable} /> : null}
         </View>
       ))}
     </View>
   );
 }
 
-function Squad({ teamId }: { teamId: string }) {
-  const [squad, setSquad] = useState<any[] | null>(null);
-  useEffect(() => {
-    listSquad(teamId).then((d: any) => setSquad(d.squad || [])).catch(() => setSquad([]));
+function Squad({ teamId, editable }: { teamId: string; editable: boolean }) {
+  const [squad, setSquad] = useState<PlayerRegistration[] | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState({
+    first_name: "", last_name: "", dob: "", position: "", jersey_number: "",
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    listSquad(teamId)
+      .then((d) => { setSquad(d.squad); setError(null); })
+      .catch((e) => setError(e.message));
   }, [teamId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   if (squad === null) return <Loading />;
   if (squad.length === 0) {
@@ -145,16 +262,117 @@ function Squad({ teamId }: { teamId: string }) {
   }
   return (
     <View style={{ marginTop: 10, gap: 6 }}>
-      {squad.map((r: any) => (
-        <View key={r.id} style={[S.row, { paddingVertical: 2 }]}>
-          <Text style={[S.dim, { width: 34 }]}>
-            {r.jersey_number ? `#${r.jersey_number}` : ""}
-          </Text>
-          <Text style={[S.body, { flex: 1 }]} numberOfLines={1}>
-            {r.players?.first_name} {r.players?.last_name}
-          </Text>
-        </View>
-      ))}
+      {error ? <Text style={S.error}>{error}</Text> : null}
+      {squad.map((r) => {
+        const player = r.players;
+        if (!player) return null;
+        const isEditing = editingId === r.id;
+        return (
+          <View key={r.id} style={{ gap: 8, paddingVertical: 6 }}>
+            <View style={S.row}>
+              {player.photo_url ? (
+                <Image source={{ uri: player.photo_url }}
+                       style={{ width: 38, height: 38, borderRadius: 19 }} />
+              ) : null}
+              <Text style={[S.dim, { width: 34 }]}>
+                {r.jersey_number ? `#${r.jersey_number}` : ""}
+              </Text>
+              <Text style={[S.body, { flex: 1 }]} numberOfLines={1}>
+                {player.first_name} {player.last_name}
+              </Text>
+              {editable ? (
+                <TouchableOpacity onPress={() => {
+                  setError(null);
+                  setEditingId(isEditing ? null : r.id);
+                  setDraft({
+                    first_name: player.first_name,
+                    last_name: player.last_name,
+                    dob: player.dob ?? "",
+                    position: r.position ?? player.position ?? "",
+                    jersey_number: r.jersey_number == null ? "" : String(r.jersey_number),
+                  });
+                }}>
+                  <Text style={S.link}>{isEditing ? "Cancel" : "Edit"}</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            {isEditing ? (
+              <View style={{ gap: 8 }}>
+                <View style={[S.row, { alignItems: "flex-start" }]}>
+                  <Field label="First name" value={draft.first_name}
+                         onChangeText={(first_name: string) => setDraft({ ...draft, first_name })} />
+                  <Field label="Last name" value={draft.last_name}
+                         onChangeText={(last_name: string) => setDraft({ ...draft, last_name })} />
+                </View>
+                <View style={[S.row, { alignItems: "flex-start" }]}>
+                  <Field label="Date of birth (YYYY-MM-DD)" value={draft.dob}
+                         onChangeText={(dob: string) => setDraft({ ...draft, dob })} />
+                  <Field label="Position" value={draft.position}
+                         onChangeText={(position: string) => setDraft({ ...draft, position })} />
+                </View>
+                <Field label="Shirt number (1–99)" value={draft.jersey_number}
+                       keyboardType="number-pad"
+                       onChangeText={(jersey_number: string) => setDraft({ ...draft, jersey_number })} />
+                <Btn label="Save player details" busy={busy}
+                     onPress={async () => {
+                       const jersey = draft.jersey_number.trim() ? Number(draft.jersey_number) : null;
+                       if (jersey !== null && (!Number.isInteger(jersey) || jersey < 1 || jersey > 99)) {
+                         setError("Shirt number must be a whole number from 1 to 99.");
+                         return;
+                       }
+                       setBusy(true);
+                       setError(null);
+                       try {
+                         await updateRegisteredPlayer(teamId, r.id, {
+                           first_name: draft.first_name.trim(),
+                           last_name: draft.last_name.trim(),
+                           dob: draft.dob.trim() || null,
+                           position: draft.position.trim() || null,
+                           jersey_number: jersey,
+                         });
+                         setEditingId(null);
+                         load();
+                       } catch (e: any) {
+                         setError(e.message);
+                       } finally {
+                         setBusy(false);
+                       }
+                     }} />
+                <Btn label="Choose player photo" tone="ghost" busy={busy}
+                     onPress={async () => {
+                       setError(null);
+                       try {
+                         const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                         if (!permission.granted) {
+                           setError("Allow photo-library access to choose a player photo.");
+                           return;
+                         }
+                         const result = await ImagePicker.launchImageLibraryAsync({
+                           mediaTypes: ["images"],
+                           allowsEditing: true,
+                           aspect: [1, 1],
+                           quality: 0.85,
+                         });
+                         if (result.canceled) return;
+                         const image = result.assets[0];
+                         setBusy(true);
+                         await uploadPlayerPhoto(r.player_id, {
+                           uri: image.uri,
+                           name: image.fileName ?? `player-${r.player_id}.jpg`,
+                           type: image.mimeType ?? "image/jpeg",
+                         });
+                         load();
+                       } catch (e: any) {
+                         setError(e.message);
+                       } finally {
+                         setBusy(false);
+                       }
+                     }} />
+              </View>
+            ) : null}
+          </View>
+        );
+      })}
     </View>
   );
 }

@@ -35,7 +35,7 @@ LIVE_STATUSES     = {"live", "ht"}
 FINISHED_STATUSES = {"ft"}
 
 EVENT_TYPES = {
-    "goal", "own_goal", "penalty_scored", "penalty_missed",
+    "goal", "own_goal", "penalty_scored", "penalty_missed", "penalty_saved",
     "yellow", "second_yellow", "red", "substitution",
 }
 
@@ -479,7 +479,11 @@ def list_events(fixture_id: str, user: dict = Depends(require_user)):
     _fixture_with_tournament(fixture_id, user, need="editor")
     rows = _rows(
         _db().table("match_events")
-        .select("*, players!match_events_player_id_fkey(id, first_name, last_name)")
+        .select(
+            "*, "
+            "players!match_events_player_id_fkey(id, first_name, last_name), "
+            "related_player:players!match_events_related_player_id_fkey(id, first_name, last_name)"
+        )
         .eq("fixture_id", fixture_id)
         .order("minute")
         .execute()

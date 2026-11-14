@@ -1,15 +1,17 @@
 import React, { useCallback, useState } from "react";
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl,
+  Alert,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { COLORS } from "../theme";
 import Crest from "../components/Crest";
 import {
   getTournament, getReadiness, submitForReview, sortRounds,
+  addFixture, generateFixtures, clearFixtures,
   type Tournament, type TeamRow, type Fixture, type Readiness,
 } from "../services/api";
-import { LockedNote } from "../sections/kit";
+import { LockedNote, Field, Btn, Choice } from "../sections/kit";
 import { SeasonStrip, MatchFilters, EmptyMatches } from "../sections/Season";
 import { Venues, Structure, Suspensions } from "../sections/Structure";
 import {
@@ -46,6 +48,13 @@ const SECTIONS: { id: Section; label: string; group: string }[] = [
   { id: "proof",         label: "Proof",         group: "Settings" },
   { id: "collaborators", label: "Collaborators", group: "Settings" },
 ];
+
+function defaultKickoff() {
+  const date = new Date(Date.now() + 86400000);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 export default function TournamentDetailScreen({ route, navigation }: any) {
   const { id, name } = route.params;
   const [t, setT] = useState<Tournament | null>(null);
@@ -167,6 +176,8 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
       <View style={{ gap: 10 }}>
         {section === "matches" ? (
           <>
+            <FixtureTools tid={id} teams={teams} fixtures={fixtures}
+                          editable={editable && isOwner} onChanged={load} />
             <SeasonStrip t={t} fixtures={fixtures} />
             <MatchFilters
               fixtures={fixtures} teams={teams}
@@ -222,8 +233,12 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
         ) : null}
 
         {section === "standings" ? <Standings tid={id} /> : null}
-        {section === "teams" ? <Teams teams={teams} /> : null}
-        {section === "players" ? <Players teams={teams} /> : null}
+        {section === "teams" ? (
+          <Teams tid={id} teams={teams} editable={editable && isOwner} onChanged={load} />
+        ) : null}
+        {section === "players" ? (
+          <Players teams={teams} editable={editable && isOwner} />
+        ) : null}
         {section === "venues" ? <Venues tid={id} editable={editable && isOwner} /> : null}
         {section === "structure" ? (
           <Structure tid={id} editable={editable && isOwner} onChanged={load} />
@@ -244,6 +259,142 @@ export default function TournamentDetailScreen({ route, navigation }: any) {
         {section === "collaborators" ? <Collaborators tid={id} isOwner={isOwner} /> : null}
       </View>
     </ScrollView>
+  );
+}
+
+function FixtureTools({ tid, teams, fixtures, editable, onChanged }: {
+  tid: string; teams: TeamRow[]; fixtures: Fixture[];
+  editable: boolean; onChanged: () => void;
+}) {
+  const [firstKickoff, setFirstKickoff] = useState(
+    defaultKickoff()
+  );
+  const [minutesBetween, setMinutesBetween] = useState("120");
+  const [matchesPerDay, setMatchesPerDay] = useState("4");
+  const [venue, setVenue] = useState("");
+  const [doubleRound, setDoubleRound] = useState(false);
+  const [homeTeamId, setHomeTeamId] = useState("");
+  const [awayTeamId, setAwayTeamId] = useState("");
+  const [manualKickoff, setManualKickoff] = useState(
+    defaultKickoff()
+  );
+  const [round, setRound] = useState("");
+  const [groupName, setGroupName] = useState("");
+  const [manualVenue, setManualVenue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+
+  if (!editable) return null;
+
+  const teamOptions = [
+    { id: "", label: "Choose a team" },
+    ...teams.map((team) => ({ id: team.id, label: team.clubs?.name ?? "Unknown" })),
+  ];
+
+  const run = async (action: () => Promise<unknown>, success: string) => {
+    setBusy(true);
+    setError(null);
+    setMessage("");
+    try {
+      await action();
+      setMessage(success);
+      onChanged();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const generate = () => {
+    const kickoff = new Date(firstKickoff);
+    if (Number.isNaN(kickoff.getTime())) {
+      setError("Enter a valid first kickoff date and time.");
+      return;
+    }
+    return run(() => generateFixtures(tid, {
+      first_kickoff: kickoff.toISOString(),
+      minutes_between: Number(minutesBetween),
+      matches_per_day: Number(matchesPerDay),
+      venue: venue.trim() || null,
+      double_round: doubleRound,
+    }), "Fixtures generated.");
+  };
+
+  const createOne = () => {
+    const kickoff = new Date(manualKickoff);
+    if (!homeTeamId || !awayTeamId || homeTeamId === awayTeamId) {
+      setError("Choose two different teams.");
+      return;
+    }
+    if (Number.isNaN(kickoff.getTime())) {
+      setError("Enter a valid kickoff date and time.");
+      return;
+    }
+    return run(() => addFixture(tid, {
+      home_team_id: homeTeamId,
+      away_team_id: awayTeamId,
+      kickoff_at: kickoff.toISOString(),
+      round: round.trim() || null,
+      group_name: groupName.trim() || null,
+      venue: manualVenue.trim() || null,
+    }), "Fixture added.");
+  };
+
+  const confirmClear = () => Alert.alert(
+    "Clear all fixtures?",
+    "This permanently removes the competition's fixtures and their match data.",
+    [
+      { text: "Cancel", style: "cancel" },
+      { text: "Clear fixtures", style: "destructive",
+        onPress: () => { void run(() => clearFixtures(tid), "Fixtures cleared."); } },
+    ]
+  );
+
+  return (
+    <View style={s.card}>
+      <Text style={s.label}>FIXTURE TOOLS</Text>
+      {error ? <Text style={s.error}>{error}</Text> : null}
+      {message ? <Text style={[s.body, { color: "#00E676" }]}>{message}</Text> : null}
+
+      <Text style={s.muted}>Generate a round-robin schedule</Text>
+      <Field label="First kickoff (YYYY-MM-DDTHH:mm)" value={firstKickoff}
+             onChangeText={setFirstKickoff} />
+      <View style={[s.rowTop, { alignItems: "flex-start" }]}>
+        <Field label="Minutes between" value={minutesBetween} keyboardType="number-pad"
+               onChangeText={setMinutesBetween} />
+        <Field label="Matches per day" value={matchesPerDay} keyboardType="number-pad"
+               onChangeText={setMatchesPerDay} />
+      </View>
+      <Field label="Venue (optional)" value={venue} onChangeText={setVenue} />
+      <TouchableOpacity onPress={() => setDoubleRound(!doubleRound)} style={s.rowTop}>
+        <Text style={s.body}>Home and away</Text>
+        <Text style={s.score}>{doubleRound ? "ON" : "OFF"}</Text>
+      </TouchableOpacity>
+      {fixtures.length > 0 ? (
+        <Text style={s.muted}>Clear existing fixtures before generating a new draw.</Text>
+      ) : null}
+      <Btn label="Generate fixtures" busy={busy}
+           disabled={teams.length < 2 || fixtures.length > 0}
+           onPress={() => { void generate(); }} />
+
+      {fixtures.length > 0 ? (
+        <Btn label="Clear all fixtures" tone="danger" busy={busy} onPress={confirmClear} />
+      ) : null}
+
+      <Text style={[s.muted, { marginTop: 6 }]}>Or add one fixture manually</Text>
+      <Choice value={homeTeamId} options={teamOptions} onChange={setHomeTeamId} />
+      <Choice value={awayTeamId} options={teamOptions} onChange={setAwayTeamId} />
+      <Field label="Kickoff (YYYY-MM-DDTHH:mm)" value={manualKickoff}
+             onChangeText={setManualKickoff} />
+      <View style={[s.rowTop, { alignItems: "flex-start" }]}>
+        <Field label="Round (optional)" value={round} onChangeText={setRound} />
+        <Field label="Group (optional)" value={groupName} onChangeText={setGroupName} />
+      </View>
+      <Field label="Venue (optional)" value={manualVenue} onChangeText={setManualVenue} />
+      <Btn label="Add fixture" busy={busy} onPress={() => { void createOne(); }} />
+    </View>
   );
 }
 

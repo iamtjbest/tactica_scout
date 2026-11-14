@@ -26,6 +26,7 @@ const STEPS = [4, 5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 10];
 const EVENT_LABEL: Record<string, string> = {
   goal: 'Goal', own_goal: 'Own goal', penalty: 'Penalty',
   penalty_scored: 'Penalty', penalty_missed: 'Pen missed',
+  penalty_saved: 'Penalty saved',
   yellow: 'Yellow', yellow_card: 'Yellow', second_yellow: '2nd yellow',
   red: 'Red', red_card: 'Red', substitution: 'Sub', assist: 'Assist',
 };
@@ -221,6 +222,10 @@ function Lineups({ d, openPlayer }: {
                 onPress={() => openPlayer(p.player_id, p.name)}
               >
                 <View style={s.shirt}>
+                  {p.photo_url ? (
+                    <Image source={{ uri: p.photo_url }}
+                           style={StyleSheet.absoluteFill} />
+                  ) : null}
                   <Text style={s.shirtNum}>{p.shirt_number ?? ''}</Text>
                 </View>
                 <Text style={s.pitchName} numberOfLines={1}>{p.name}</Text>
@@ -240,6 +245,7 @@ function Lineups({ d, openPlayer }: {
             activeOpacity={0.6}
             onPress={() => openPlayer(p.player_id, p.name)}
           >
+            <Crest url={p.photo_url} name={p.name} size={28} />
             <Text style={[s.mono, { width: 28 }]}>
               {p.shirt_number != null ? `#${p.shirt_number}` : ''}
             </Text>
@@ -267,11 +273,23 @@ function Timeline({ events, fx, openPlayer }: {
       {events.slice().sort((a, b) => (a.minute ?? 0) - (b.minute ?? 0)).map((e) => {
         const name = e.players
           ? `${e.players.first_name} ${e.players.last_name}`.trim() : '';
+        const relatedName = e.related_player
+          ? `${e.related_player.first_name} ${e.related_player.last_name}`.trim() : '';
+        const activePlayer = e.players ?? e.related_player;
+        const participants = e.type === 'substitution'
+          ? `Out: ${name || '—'} • In: ${relatedName || '—'}`
+          : e.type === 'goal' && relatedName
+            ? `${name || '—'} (Assist: ${relatedName})`
+            : e.type === 'penalty_saved' && relatedName
+              ? `${name || '—'} (Saved by: ${relatedName})`
+              : name || relatedName || '—';
         return (
           <TouchableOpacity
-            key={e.id} style={[s.card, s.row]} activeOpacity={e.players ? 0.6 : 1}
-            disabled={!e.players}
-            onPress={() => e.players && openPlayer(e.players.id, name)}
+            key={e.id} style={[s.card, s.row]} activeOpacity={activePlayer ? 0.6 : 1}
+            disabled={!activePlayer}
+            onPress={() => activePlayer && openPlayer(
+              activePlayer.id, name || relatedName
+            )}
           >
             <Text style={[s.mono, { width: 30 }]}>
               {e.minute != null ? `${e.minute}'` : '--'}
@@ -279,7 +297,16 @@ function Timeline({ events, fx, openPlayer }: {
             <Text style={[s.tag, { color: eventTint(e.type) }]}>
               {EVENT_LABEL[e.type] ?? e.type}
             </Text>
-            <Text style={[s.body, { flex: 1 }]} numberOfLines={1}>{name || '—'}</Text>
+            {e.players ? (
+              <Crest
+                url={e.players.photo_url}
+                name={`${e.players.first_name} ${e.players.last_name}`}
+                size={24}
+              />
+            ) : null}
+            <Text style={[s.body, { flex: 1 }]} numberOfLines={1}>
+              {participants}
+            </Text>
             <Text style={s.mono} numberOfLines={1}>
               {e.side === 'home' ? fx.home_team : fx.away_team}
             </Text>
@@ -507,7 +534,7 @@ const s = StyleSheet.create({
   shirt: {
     width: 30, height: 30, borderRadius: 15, backgroundColor: COLORS.cardElevated,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
   },
   shirtNum: { color: COLORS.volt, fontSize: 11, fontWeight: '800' },
   pitchName: {

@@ -16,8 +16,10 @@ import {
   listSubCompetitions, addSubCompetition, updateSubCompetition,
   deleteSubCompetition, assignTeams, unassignTeam, SUB_KINDS,
   listSuspensions, addSuspension, markServed, deleteSuspension, listSquad as squadOf,
-  type Venue, type SubCompetition, type SubCompKind, type Suspension,
+  type Venue, type SubCompetition, type SubCompKind, type Suspension, type Club,
+  type PlayerRegistration,
   searchClubs, addTeam, removeTeam,
+  updateClub, updateTournamentTeam, updateRegisteredPlayer, uploadPlayerPhoto,
   generateFixtures, clearFixtures, setScore,
   addProof, deleteProof,
   listSquad, registerPlayer, unregisterPlayer, searchPlayers,
@@ -252,10 +254,11 @@ function Detail() {
           <BracketsSection fixtures={data.fixtures} teams={data.teams} />
         )}
         {section === "teams" && (
-          <TeamsTab tid={id} teams={data.teams} editable={editable} onChanged={load} />
+          <TeamsTab tid={id} teams={data.teams}
+                    editable={editable && role === "owner"} onChanged={load} />
         )}
         {section === "players" && (
-          <PlayersSection teams={data.teams} editable={editable} />
+          <PlayersSection teams={data.teams} editable={editable && role === "owner"} />
         )}
         {section === "venues" && (
           <VenuesSection tid={id} editable={editable && role === "owner"} />
@@ -393,19 +396,91 @@ function TeamsTab({ tid, teams, editable, onChanged }: {
   tid: string; teams: TeamRow[]; editable: boolean; onChanged: () => void;
 }) {
   const [q, setQ] = useState("");
-  const [hits, setHits] = useState<any[]>([]);
+  const [hits, setHits] = useState<Club[]>([]);
+  const [subs, setSubs] = useState<SubCompetition[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [openSquad, setOpenSquad] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState({
+    name: "", short_name: "", institution: "", sub_competition_id: "",
+    home_color: "#CCFF00", away_color: "#0D1317",
+    attack_rating: "", defence_rating: "",
+  });
+
+  useEffect(() => {
+    listSubCompetitions(tid)
+      .then((d) => setSubs(d.sub_competitions || []))
+      .catch((e) => setError(e instanceof Error ? e.message : "Could not load groups."));
+  }, [tid]);
 
   // Search before create, always. Clubs are global, so a duplicate
   // splits one squad's career history across two rows.
   useEffect(() => {
     if (q.trim().length < 2) { setHits([]); return; }
     const timer = setTimeout(() => {
-      searchClubs(q.trim()).then((d) => setHits(d.clubs)).catch(() => setHits([]));
+      searchClubs(q.trim())
+        .then((d) => { setHits(d.clubs); setError(null); })
+        .catch((e) => setError(e instanceof Error ? e.message : "Could not search clubs."));
     }, 250);
     return () => clearTimeout(timer);
   }, [q]);
+
+  const openEditor = (tm: TeamRow) => {
+    if (editingId === tm.id) {
+      setEditingId(null);
+      return;
+    }
+    setEditingId(tm.id);
+    setError(null);
+    setDraft({
+      name: tm.clubs?.name ?? "",
+      short_name: tm.clubs?.short_name ?? "",
+      institution: tm.clubs?.institution ?? "",
+      sub_competition_id: tm.sub_competition_id ?? "",
+      home_color: tm.home_color ?? "#CCFF00",
+      away_color: tm.away_color ?? "#0D1317",
+      attack_rating: tm.attack_rating == null ? "" : String(tm.attack_rating),
+      defence_rating: tm.defence_rating == null ? "" : String(tm.defence_rating),
+    });
+  };
+
+  const saveTeam = async (tm: TeamRow) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const attackRating = draft.attack_rating.trim() ? Number(draft.attack_rating) : null;
+      const defenceRating = draft.defence_rating.trim() ? Number(draft.defence_rating) : null;
+      if ([attackRating, defenceRating].some(
+        (rating) => rating !== null && (!Number.isFinite(rating) || rating < 45 || rating > 75)
+      )) {
+        throw new Error("Seed ratings must be between 45 and 75.");
+      }
+      if (draft.name.trim().length < 2) {
+        throw new Error("Team name must be at least 2 characters.");
+      }
+      if (!tm.club_id) throw new Error("This team is not linked to a club.");
+
+      await updateClub(tm.club_id, {
+        name: draft.name.trim(),
+        short_name: draft.short_name.trim() || null,
+        institution: draft.institution.trim() || null,
+      });
+      await updateTournamentTeam(tid, tm.id, {
+        sub_competition_id: draft.sub_competition_id || null,
+        home_color: draft.home_color || null,
+        away_color: draft.away_color || null,
+        attack_rating: attackRating,
+        defence_rating: defenceRating,
+      });
+      setEditingId(null);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save team details.");
+      onChanged();
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const add = async (body: Record<string, unknown>) => {
     setError(null);
@@ -450,23 +525,43 @@ function TeamsTab({ tid, teams, editable, onChanged }: {
       ) : (
         <div className="space-y-2">
           {teams.map((tm) => (
-            <div key={tm.id} className="card">
+            <div key={tm.id} className={clsx(
+              "card transition-colors",
+              editable && "cursor-pointer",
+              editingId === tm.id && "border-volt/50"
+            )} onClick={() => editable && openEditor(tm)}>
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 flex items-center gap-3">
-                  <CrestUpload club={tm.clubs} onChanged={onChanged} />
-                  <div className="min-w-0">
-                    <p className="text-white text-sm truncate">{tm.clubs?.name ?? "Unknown club"}</p>
-                    {tm.group_name && <p className="text-mt text-xs mt-0.5">Group {tm.group_name}</p>}
+                  <div onClick={(e) => e.stopPropagation()}>
+                    {editable
+                      ? <CrestUpload club={tm.clubs} onChanged={onChanged} />
+                      : <Crest url={tm.clubs?.crest_url} name={tm.clubs?.name} size={36} />}
                   </div>
+                  <button type="button" className="min-w-0 text-left" disabled={!editable}
+                          onClick={(e) => { e.stopPropagation(); openEditor(tm); }}>
+                    <p className="text-white text-sm font-semibold truncate">
+                      {tm.clubs?.name ?? "Unknown club"}
+                      {tm.clubs?.short_name && (
+                        <span className="text-mt font-mono text-xs ml-2">({tm.clubs.short_name})</span>
+                      )}
+                    </p>
+                    <p className="text-mt text-xs mt-0.5">
+                      {[tm.group_name, tm.clubs?.institution].filter(Boolean).join(" • ") ||
+                        (editable ? "Tap to edit team details" : "No group assigned")}
+                    </p>
+                  </button>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
-                  <button className="text-volt2 text-sm"
-                          onClick={() => setOpenSquad(openSquad === tm.id ? null : tm.id)}>
-                    Squad
-                  </button>
                   {editable && (
-                    <button className="text-mt hover:text-red2 text-sm"
-                            onClick={async () => {
+                    <button type="button" className="text-volt2 text-sm"
+                            onClick={(e) => { e.stopPropagation(); openEditor(tm); }}>
+                      {editingId === tm.id ? "Close" : "Edit"}
+                    </button>
+                  )}
+                  {editable && (
+                    <button type="button" className="text-mt hover:text-red2 text-sm"
+                            onClick={async (e) => {
+                              e.stopPropagation();
                               try { await removeTeam(tid, tm.id); onChanged(); }
                               catch (e: any) { setError(e.message); }
                             }}>
@@ -475,7 +570,72 @@ function TeamsTab({ tid, teams, editable, onChanged }: {
                   )}
                 </div>
               </div>
-              {openSquad === tm.id && <Squad teamId={tm.id} editable={editable} />}
+              {editingId === tm.id && editable && (
+                <div className="mt-4 pt-4 border-t border-bd space-y-3"
+                     onClick={(e) => e.stopPropagation()}>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <label className="block">
+                      <span className="text-mt text-[11px] uppercase tracking-wide">Team name</span>
+                      <input className="input-select mt-1" value={draft.name}
+                             onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+                    </label>
+                    <label className="block">
+                      <span className="text-mt text-[11px] uppercase tracking-wide">Short name</span>
+                      <input className="input-select mt-1 uppercase" maxLength={20}
+                             value={draft.short_name}
+                             onChange={(e) => setDraft({ ...draft, short_name: e.target.value })} />
+                    </label>
+                    <label className="block">
+                      <span className="text-mt text-[11px] uppercase tracking-wide">Institution / Faculty</span>
+                      <input className="input-select mt-1" value={draft.institution}
+                             onChange={(e) => setDraft({ ...draft, institution: e.target.value })} />
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                    <label className="block">
+                      <span className="text-mt text-[11px] uppercase tracking-wide">Group / Stage</span>
+                      <select className="input-select mt-1" value={draft.sub_competition_id}
+                              onChange={(e) => setDraft({ ...draft, sub_competition_id: e.target.value })}>
+                        <option value="">Unassigned</option>
+                        {subs.map((sc) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-mt text-[11px] uppercase tracking-wide">Home kit</span>
+                      <input type="color" className="mt-1 h-10 w-full rounded bg-sur2 border border-bd cursor-pointer"
+                             value={draft.home_color}
+                             onChange={(e) => setDraft({ ...draft, home_color: e.target.value })} />
+                    </label>
+                    <label className="block">
+                      <span className="text-mt text-[11px] uppercase tracking-wide">Away kit</span>
+                      <input type="color" className="mt-1 h-10 w-full rounded bg-sur2 border border-bd cursor-pointer"
+                             value={draft.away_color}
+                             onChange={(e) => setDraft({ ...draft, away_color: e.target.value })} />
+                    </label>
+                    <label className="block">
+                      <span className="text-mt text-[11px] uppercase tracking-wide">Seed ATK (45–75)</span>
+                      <input type="number" min={45} max={75} step="0.5" placeholder="54"
+                             className="input-select mt-1" value={draft.attack_rating}
+                             onChange={(e) => setDraft({ ...draft, attack_rating: e.target.value })} />
+                    </label>
+                    <label className="block">
+                      <span className="text-mt text-[11px] uppercase tracking-wide">Seed DEF (45–75)</span>
+                      <input type="number" min={45} max={75} step="0.5" placeholder="54"
+                             className="input-select mt-1" value={draft.defence_rating}
+                             onChange={(e) => setDraft({ ...draft, defence_rating: e.target.value })} />
+                    </label>
+                  </div>
+                  {error && <p className="text-red2 text-sm font-semibold">{error}</p>}
+                  <div className="flex items-center gap-3">
+                    <button type="button" disabled={saving} onClick={() => saveTeam(tm)} className="btn-volt">
+                      {saving ? "Saving..." : "Save team details"}
+                    </button>
+                    <button type="button" onClick={() => setEditingId(null)} className="text-mt text-sm">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -484,85 +644,256 @@ function TeamsTab({ tid, teams, editable, onChanged }: {
   );
 }
 
-function Squad({ teamId, editable }: { teamId: string; editable: boolean }) {
-  const [squad, setSquad] = useState<any[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [f, setF] = useState({ first_name: "", last_name: "", dob: "", jersey_number: "" });
+const POSITIONS = ["GK", "DEF", "MID", "FWD"];
 
-  const load = useCallback(() => {
-    listSquad(teamId).then((d) => setSquad(d.squad)).catch((e) => setError(e.message));
+function Squad({ teamId, editable }: { teamId: string; editable: boolean }) {
+  const [squad, setSquad] = useState<PlayerRegistration[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [edit, setEdit] = useState({ jersey_number: "" });
+  const [f, setF] = useState({
+    first_name: "", last_name: "", dob: "", jersey_number: "", position: "MID",
+  });
+
+  const load = useCallback(async () => {
+    try {
+      const data = await listSquad(teamId);
+      setSquad(data.squad);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load the squad.");
+    }
   }, [teamId]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
+    setError(null); setBusy(true);
     try {
-      await registerPlayer(teamId, {
+      const registration = await registerPlayer(teamId, {
         first_name: f.first_name, last_name: f.last_name, dob: f.dob,
+        position: f.position || null,
         jersey_number: f.jersey_number ? Number(f.jersey_number) : null,
       });
-      setF({ first_name: "", last_name: "", dob: "", jersey_number: "" });
-      load();
-    } catch (err: any) { setError(err.message); }
+      setF({ first_name: "", last_name: "", dob: "", jersey_number: "", position: "MID" });
+      setPhotoFile(null);
+      await load();
+      if (photoFile && registration.player_id) {
+        try {
+          await uploadPlayerPhoto(registration.player_id, photoFile);
+          await load();
+        } catch (photoError) {
+          setError(photoError instanceof Error
+            ? `Player registered, but photo upload failed: ${photoError.message}`
+            : "Player registered, but photo upload failed.");
+        }
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not register the player.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const replacePhoto = async (playerId: string, file?: File) => {
+    if (!file) return;
+    setError(null); setBusy(true);
+    try {
+      await uploadPlayerPhoto(playerId, file);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not upload the player photo.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const beginEdit = (registration: PlayerRegistration) => {
+    setEditingId(registration.id);
+    setEdit({
+      jersey_number: registration.jersey_number == null ? "" : String(registration.jersey_number),
+    });
+  };
+
+  const saveRegistration = async (registration: PlayerRegistration) => {
+    const jersey = edit.jersey_number.trim() ? Number(edit.jersey_number) : null;
+    if (jersey !== null && (!Number.isInteger(jersey) || jersey < 1 || jersey > 99)) {
+      setError("Shirt number must be a whole number from 1 to 99.");
+      return;
+    }
+    setBusy(true); setError(null);
+    try {
+      await updateRegisteredPlayer(teamId, registration.id, {
+        jersey_number: jersey,
+      });
+      setEditingId(null);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not update the player.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <div className="mt-4 pt-4 border-t border-bd space-y-3">
       {squad === null ? <p className="text-mt text-sm">Loading squad...</p> :
        squad.length === 0 ? <p className="text-mt text-sm">Nobody registered yet.</p> : (
-        <div className="space-y-1">
-          {squad.map((r) => (
-            <div key={r.id} className="flex items-center justify-between gap-3 text-sm">
-              <span className="text-white/90">
-                {r.jersey_number != null && (
-                  <span className="text-mt font-mono mr-2">#{r.jersey_number}</span>
+        <div className="divide-y divide-bd/40">
+          {squad.map((r) => {
+            const player = r.players;
+            const initials = `${player?.first_name?.[0] ?? ""}${player?.last_name?.[0] ?? ""}`.toUpperCase();
+            return (
+              <div key={r.id} className="py-2.5 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <label className={clsx(
+                      "relative w-9 h-9 rounded-full bg-sur2 border border-bd overflow-hidden",
+                      "flex items-center justify-center shrink-0",
+                      editable && "cursor-pointer hover:border-volt"
+                    )} title={editable ? "Click to upload player photo" : undefined}>
+                      {player?.photo_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={player.photo_url} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-xs font-bold text-mt">{initials || "?"}</span>
+                      )}
+                      {editable && player?.id && (
+                        <input type="file" accept="image/png,image/jpeg,image/webp"
+                               className="hidden" disabled={busy}
+                               onChange={(e) => {
+                                 void replacePhoto(player.id, e.target.files?.[0]);
+                                 e.target.value = "";
+                               }} />
+                      )}
+                    </label>
+                    <div className="min-w-0">
+                      <p className="text-white font-semibold truncate">
+                        {r.jersey_number != null && (
+                          <span className="text-volt font-mono mr-2">#{r.jersey_number}</span>
+                        )}
+                        {player?.first_name} {player?.last_name}
+                      </p>
+                      <p className="text-mt text-xs font-mono">
+                        {editable
+                          ? (!player?.photo_url ? "Tap avatar to add photo" : "")
+                          : (r.position || player?.position || "—").toUpperCase()}
+                      </p>
+                    </div>
+                    <select
+                      aria-label={`Position for ${player?.first_name ?? ""} ${player?.last_name ?? ""}`.trim()}
+                      disabled={!editable || busy}
+                      value={(r.position || player?.position || "MID").toUpperCase()}
+                      onChange={async (e) => {
+                        setBusy(true);
+                        setError(null);
+                        try {
+                          await updateRegisteredPlayer(teamId, r.id, { position: e.target.value });
+                          await load();
+                        } catch (err: any) {
+                          setError(err.message);
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      className="bg-sur2 border border-bd rounded px-2 py-1 text-[11px] font-mono text-volt shrink-0"
+                    >
+                      {POSITIONS.map((pos) => (
+                        <option key={pos} value={pos}>{pos}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {editable && (
+                    <div className="flex items-center gap-3 shrink-0">
+                      <button type="button" className="text-volt2 text-xs"
+                              onClick={() => beginEdit(r)}>
+                        {editingId === r.id ? "Editing" : "Edit"}
+                      </button>
+                      <button type="button" className="text-mt hover:text-red2 text-xs"
+                              onClick={async () => {
+                                setBusy(true); setError(null);
+                                try { await unregisterPlayer(teamId, r.id); await load(); }
+                                catch (e) {
+                                  setError(e instanceof Error ? e.message : "Could not remove player.");
+                                } finally { setBusy(false); }
+                              }}>
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {editingId === r.id && editable && (
+                  <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 items-end">
+                    <label className="block">
+                      <span className="text-mt text-[11px] uppercase tracking-wide">Shirt no.</span>
+                      <input className="input-select mt-1" type="number" min={1} max={99}
+                             value={edit.jersey_number}
+                             onChange={(e) => setEdit({ ...edit, jersey_number: e.target.value })} />
+                    </label>
+                    <button type="button" className="btn-volt" disabled={busy}
+                            onClick={() => saveRegistration(r)}>
+                      {busy ? "Saving..." : "Save player"}
+                    </button>
+                    <button type="button" className="text-mt text-sm"
+                            onClick={() => setEditingId(null)}>
+                      Cancel
+                    </button>
+                  </div>
                 )}
-                {r.players?.first_name} {r.players?.last_name}
-              </span>
-              {editable && (
-                <button className="text-mt hover:text-red2 text-xs"
-                        onClick={async () => {
-                          try { await unregisterPlayer(teamId, r.id); load(); }
-                          catch (e: any) { setError(e.message); }
-                        }}>
-                  Remove
-                </button>
-              )}
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </div>
       )}
 
       {editable && (
-        <form onSubmit={add} className="grid grid-cols-2 sm:grid-cols-5 gap-2 items-end">
-          <label className="block">
-            <span className="text-mt text-[11px] uppercase tracking-wide">First name</span>
-            <input className="input-select mt-1" required
-                   value={f.first_name}
-                   onChange={(e) => setF({ ...f, first_name: e.target.value })} />
-          </label>
-          <label className="block">
-            <span className="text-mt text-[11px] uppercase tracking-wide">Last name</span>
-            <input className="input-select mt-1" required
-                   value={f.last_name}
-                   onChange={(e) => setF({ ...f, last_name: e.target.value })} />
-          </label>
-          {/* dob is required by the schema on purpose: it's how the same
-              student is recognised next season instead of getting a new
-              record and losing his career stats. */}
-          <label className="block">
-            <span className="text-mt text-[11px] uppercase tracking-wide">Date of birth</span>
-            <input className="input-select mt-1" type="date" required
-                   value={f.dob} onChange={(e) => setF({ ...f, dob: e.target.value })} />
-          </label>
-          <label className="block">
-            <span className="text-mt text-[11px] uppercase tracking-wide">Shirt no.</span>
-            <input className="input-select mt-1" type="number" min={1} max={99}
-                   value={f.jersey_number}
-                   onChange={(e) => setF({ ...f, jersey_number: e.target.value })} />
-          </label>
-          <button className="btn-volt w-full">Add player</button>
+        <form onSubmit={add} className="bg-sur2/60 border border-bd rounded-xl p-3 space-y-3">
+          <p className="text-volt text-[10px] font-mono uppercase tracking-wider">Register new player</p>
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 items-end">
+            <label className="block">
+              <span className="text-mt text-[11px] uppercase tracking-wide">First name</span>
+              <input className="input-select mt-1" required value={f.first_name}
+                     onChange={(e) => setF({ ...f, first_name: e.target.value })} />
+            </label>
+            <label className="block">
+              <span className="text-mt text-[11px] uppercase tracking-wide">Last name</span>
+              <input className="input-select mt-1" required value={f.last_name}
+                     onChange={(e) => setF({ ...f, last_name: e.target.value })} />
+            </label>
+            <label className="block">
+              <span className="text-mt text-[11px] uppercase tracking-wide">Date of birth</span>
+              <input className="input-select mt-1" type="date" required value={f.dob}
+                     onChange={(e) => setF({ ...f, dob: e.target.value })} />
+            </label>
+            <label className="block">
+              <span className="text-mt text-[11px] uppercase tracking-wide">Position</span>
+              <select className="input-select mt-1" value={f.position}
+                      onChange={(e) => setF({ ...f, position: e.target.value })}>
+                {POSITIONS.map((position) => (
+                  <option key={position} value={position}>{position}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-mt text-[11px] uppercase tracking-wide">Shirt no.</span>
+              <input className="input-select mt-1" type="number" min={1} max={99}
+                     value={f.jersey_number}
+                     onChange={(e) => setF({ ...f, jersey_number: e.target.value })} />
+            </label>
+            <label className="block">
+              <span className="text-mt text-[11px] uppercase tracking-wide">Photo (optional)</span>
+              <span className="input-select mt-1 flex items-center justify-center text-xs text-mt cursor-pointer hover:border-volt truncate">
+                {photoFile ? photoFile.name : "Choose image"}
+                <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+                       onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)} />
+              </span>
+            </label>
+          </div>
+          <button className="btn-volt w-full sm:w-auto" disabled={busy}>
+            {busy ? "Adding player..." : "Add player"}
+          </button>
         </form>
       )}
       {error && <p className="text-red2 text-xs font-semibold">{error}</p>}
@@ -671,7 +1002,7 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
         </div>
       )}
 
-      {editable && fixtures.length === 0 && (
+      {editable && (
         <>
           <div className="flex gap-2">
             <button onClick={() => setMode("generate")}
@@ -687,6 +1018,11 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
           {mode === "generate" ? (
             <div className="card space-y-3">
               <p className="section-label">Generate the fixture list</p>
+              {fixtures.length > 0 && (
+                <p className="text-amber text-sm">
+                  Clear the existing fixtures before generating a new list. Current results are preserved.
+                </p>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label className="block">
                   <span className="text-mt text-xs uppercase tracking-wide">First kickoff</span>
@@ -717,7 +1053,7 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
               <p className="text-mt2 text-xs">
                 Kickoffs go on a simple grid. Move any of them afterwards.
               </p>
-              <button className="btn-volt" disabled={busy} onClick={generate}>
+              <button className="btn-volt" disabled={busy || fixtures.length > 0} onClick={generate}>
                 {busy ? "Generating..." : "Generate"}
               </button>
             </div>
@@ -988,6 +1324,25 @@ function OwnDraw({ tid, teams, onChanged }: {
   const set = (i: number, k: keyof Row, v: string) =>
     setRows(rows.map((r, idx) => (idx === i ? { ...r, [k]: v } : r)));
 
+  const pickTeam = (i: number, side: "home_team_id" | "away_team_id", teamId: string) => {
+    const team = teams.find((x) => x.id === teamId);
+    const otherSide = side === "home_team_id" ? "away_team_id" : "home_team_id";
+    setRows(rows.map((r, idx) => {
+      if (idx !== i) return r;
+      const next = {
+        ...r,
+        [side]: teamId,
+        group_name: r.group_name || team?.group_name || "",
+      };
+      if (teamId && next[otherSide] === teamId) next[otherSide] = "";
+      return next;
+    }));
+  };
+
+  const groups = Array.from(
+    new Set(teams.map((team) => team.group_name).filter((group): group is string => Boolean(group)))
+  ).sort();
+
   const save = async () => {
     setBusy(true); setError(null);
     try {
@@ -1021,21 +1376,29 @@ function OwnDraw({ tid, teams, onChanged }: {
       {rows.map((r, i) => (
         <div key={i} className="grid grid-cols-2 sm:grid-cols-6 gap-2">
           <select className="input-select" value={r.home_team_id}
-                  onChange={(e) => set(i, "home_team_id", e.target.value)}>
+                  onChange={(e) => pickTeam(i, "home_team_id", e.target.value)}>
             <option value="">Home</option>
             {teams.map((t) => <option key={t.id} value={t.id}>{t.clubs?.name}</option>)}
           </select>
           <select className="input-select" value={r.away_team_id}
-                  onChange={(e) => set(i, "away_team_id", e.target.value)}>
+                  onChange={(e) => pickTeam(i, "away_team_id", e.target.value)}>
             <option value="">Away</option>
-            {teams.map((t) => <option key={t.id} value={t.id}>{t.clubs?.name}</option>)}
+            {teams.filter((team) => team.id !== r.home_team_id).map((t) => (
+              <option key={t.id} value={t.id}>{t.clubs?.name}</option>
+            ))}
           </select>
           <input type="datetime-local" className="input-select" value={r.kickoff_at}
                  onChange={(e) => set(i, "kickoff_at", e.target.value)} />
           <input className="input-select" placeholder="Round" value={r.round}
                  onChange={(e) => set(i, "round", e.target.value)} />
-          <input className="input-select" placeholder="Group" value={r.group_name}
-                 onChange={(e) => set(i, "group_name", e.target.value)} />
+          <select className="input-select" value={r.group_name}
+                  onChange={(e) => set(i, "group_name", e.target.value)}>
+            <option value="">No group</option>
+            {r.group_name && !groups.includes(r.group_name) && (
+              <option value={r.group_name}>{r.group_name}</option>
+            )}
+            {groups.map((group) => <option key={group} value={group}>{group}</option>)}
+          </select>
           <input className="input-select" placeholder="Venue" value={r.venue}
                  onChange={(e) => set(i, "venue", e.target.value)} />
         </div>
@@ -1427,9 +1790,32 @@ function StructureSection({ tid, t, teams, fixtures, editable, onChanged }: {
   tid: string; t: Tournament; teams: TeamRow[]; fixtures: Fixture[];
   editable: boolean; onChanged: () => void;
 }) {
-  const groups = Array.from(
-    new Set(teams.map((x) => x.group_name).filter(Boolean))
-  ).sort() as string[];
+  const [subCompetitions, setSubCompetitions] = useState<SubCompetition[] | null>(null);
+  const [subCompetitionError, setSubCompetitionError] = useState<string | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    listSubCompetitions(tid)
+      .then((data) => {
+        if (active) {
+          setSubCompetitions(data.sub_competitions);
+          setSubCompetitionError(null);
+        }
+      })
+      .catch((e) => {
+        if (active) {
+          setSubCompetitionError(e instanceof Error ? e.message : "Could not load groups.");
+        }
+      });
+    return () => { active = false; };
+  }, [tid, refreshVersion]);
+
+  const refreshStructure = () => {
+    setRefreshVersion((version) => version + 1);
+    onChanged();
+  };
+  const groups = (subCompetitions || []).map((sub) => sub.name).sort();
 
   const rounds = sortRounds(
     Array.from(new Set(fixtures.map((f) => f.round).filter(Boolean))) as string[]
@@ -1442,10 +1828,16 @@ function StructureSection({ tid, t, teams, fixtures, editable, onChanged }: {
         <dl className="grid sm:grid-cols-2 gap-x-8 gap-y-4 text-sm">
           <Field label="Format" value={t.format.replace("_", " + ")} />
           <Field label="Teams" value={String(teams.length)} />
-          <Field label="Groups" value={groups.length ? groups.join(", ") : "None"} />
+          <Field label="Groups" value={
+            subCompetitions === null ? "Loading..." : groups.length ? groups.join(", ") : "None"
+          } />
           <Field label="Fixtures" value={String(fixtures.length)} />
         </dl>
       </div>
+
+      {subCompetitionError && (
+        <p className="text-red2 text-sm font-semibold">{subCompetitionError}</p>
+      )}
 
       {rounds.length > 0 && (
         <div className="card">
@@ -1461,7 +1853,7 @@ function StructureSection({ tid, t, teams, fixtures, editable, onChanged }: {
         </div>
       )}
 
-      <SubCompetitions tid={tid} editable={editable} onChanged={onChanged} />
+      <SubCompetitions tid={tid} editable={editable} onChanged={refreshStructure} />
 
       <p className="text-mt2 text-xs">
         The format is fixed once the competition is created, because changing
@@ -2085,6 +2477,7 @@ function SubCompetitions({ tid, editable, onChanged }: {
   const [name, setName] = useState("");
   const [kind, setKind] = useState<SubCompKind>("group");
   const [target, setTarget] = useState<string>("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const load = useCallback(() => {
     listSubCompetitions(tid)
@@ -2098,6 +2491,14 @@ function SubCompetitions({ tid, editable, onChanged }: {
     try { await fn(); load(); onChanged(); }
     catch (e: any) { setError(e.message); }
     finally { setBusy(false); }
+  };
+
+  const togglePick = (teamId: string) => {
+    setSelectedIds((previous) =>
+      previous.includes(teamId)
+        ? previous.filter((id) => id !== teamId)
+        : [...previous, teamId]
+    );
   };
 
   if (subs === null && !error) return <p className="text-mt text-sm">Loading...</p>;
@@ -2157,25 +2558,50 @@ function SubCompetitions({ tid, editable, onChanged }: {
       </div>
 
       {loose.length > 0 && (
-        <div className="border-t border-bd pt-4">
-          <p className="text-mt text-xs mb-2">
-            Not placed yet ({loose.length}). These sit outside every table until
-            they are put somewhere.
-          </p>
+        <div className="border-t border-bd pt-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-mt text-xs">
+              Not placed yet ({loose.length}). Tap teams to select them, then assign to a group:
+            </p>
+            {editable && (
+              <button type="button"
+                      onClick={() => setSelectedIds(
+                        loose.every((team) => selectedIds.includes(team.id))
+                          ? []
+                          : loose.map((team) => team.id)
+                      )}
+                      className="text-volt2 text-xs font-semibold hover:underline shrink-0">
+                {loose.length > 0 && loose.every((team) => selectedIds.includes(team.id))
+                  ? "Clear selection"
+                  : "Select all"}
+              </button>
+            )}
+          </div>
+
           <div className="flex flex-wrap gap-1.5">
-            {loose.map((tm) => (
-              <span key={tm.id}
-                    className="bg-sur2 border border-amber/30 rounded-md px-2 py-1
-                               text-xs text-amber">
-                {tm.clubs?.name ?? "Unknown"}
-              </span>
-            ))}
+            {loose.map((tm) => {
+              const picked = selectedIds.includes(tm.id);
+              return (
+                <button type="button" key={tm.id} disabled={!editable || busy}
+                        onClick={() => togglePick(tm.id)}
+                        className={clsx(
+                          "rounded-md px-2.5 py-1.5 text-xs font-semibold border transition-colors",
+                          picked
+                            ? "bg-volt text-bg border-volt"
+                            : "bg-sur2 border-amber/30 text-amber hover:border-volt/50"
+                        )}>
+                  {picked ? "✓ " : ""}{tm.clubs?.name ?? "Unknown"}
+                </button>
+              );
+            })}
           </div>
 
           {editable && (subs || []).length > 0 && (
-            <div className="flex flex-wrap items-end gap-2 mt-3">
+            <div className="flex flex-wrap items-end gap-2">
               <label className="block">
-                <span className="block text-mt text-xs uppercase tracking-wide">Place all in</span>
+                <span className="block text-mt text-xs uppercase tracking-wide">
+                  Assign {selectedIds.length > 0 ? `${selectedIds.length} selected` : `all ${loose.length}`} to
+                </span>
                 <select className="input-select mt-1.5 w-auto" value={target}
                         onChange={(e) => setTarget(e.target.value)}>
                   <option value="">Choose...</option>
@@ -2184,10 +2610,18 @@ function SubCompetitions({ tid, editable, onChanged }: {
                   ))}
                 </select>
               </label>
-              <button disabled={busy || !target}
-                      onClick={() => run(() => assignTeams(tid, target, loose.map((x) => x.id)))}
+              <button type="button" disabled={busy || !target}
+                      onClick={() => {
+                        const ids = selectedIds.length > 0
+                          ? selectedIds
+                          : loose.map((team) => team.id);
+                        run(async () => {
+                          await assignTeams(tid, target, ids);
+                          setSelectedIds([]);
+                        });
+                      }}
                       className="btn-volt text-[13px] px-4 py-2 disabled:opacity-40">
-                Place {loose.length}
+                Place {selectedIds.length > 0 ? selectedIds.length : loose.length}
               </button>
             </div>
           )}

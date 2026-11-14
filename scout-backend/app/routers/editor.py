@@ -31,7 +31,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, EmailStr, Field
 
-from app.access import require_access
+from app.access import RANK, require_access
 from app.deps import require_user
 from app.supabase import get_supabase
 
@@ -74,6 +74,56 @@ def _owned_tournament(tournament_id: str, user: dict, need: str = "owner") -> di
     by flipping a default and hoping.
     """
     return require_access(tournament_id, user, need=need)
+
+
+def _owns_tournaments(tournament_ids: list[str], user: dict) -> bool:
+    if user.get("role") == "admin":
+        return True
+    ids = list(set(tournament_ids))
+    if not ids:
+        return False
+
+    owned = _rows(
+        _db().table("tournaments").select("id")
+        .in_("id", ids).eq("owner_id", user["id"]).limit(1).execute()
+    )
+    if owned:
+        return True
+
+    memberships = _rows(
+        _db().table("tournament_members").select("role")
+        .eq("user_id", user["id"]).in_("tournament_id", ids).execute()
+    )
+    return any(RANK.get(m.get("role"), 0) >= RANK["owner"] for m in memberships)
+
+
+def _may_edit_club(club: dict, user: dict) -> bool:
+    if user.get("role") == "admin" or club.get("created_by") == user.get("id"):
+        return True
+
+    entries = _rows(
+        _db().table("tournament_teams").select("tournament_id")
+        .eq("club_id", club["id"]).execute()
+    )
+    return _owns_tournaments([entry["tournament_id"] for entry in entries], user)
+
+
+def _may_edit_player(player: dict, user: dict) -> bool:
+    if user.get("role") == "admin" or player.get("created_by") == user.get("id"):
+        return True
+
+    registrations = _rows(
+        _db().table("player_registrations").select("tournament_team_id")
+        .eq("player_id", player["id"]).execute()
+    )
+    team_ids = list({registration["tournament_team_id"] for registration in registrations})
+    if not team_ids:
+        return False
+    teams = _rows(
+        _db().table("tournament_teams").select("tournament_id")
+        .in_("id", team_ids).execute()
+    )
+    return _owns_tournaments([team["tournament_id"] for team in teams], user)
 
 
 # Review is the only thing that freezes a tournament.
@@ -188,6 +238,21 @@ class TeamIn(BaseModel):
     away_color: str | None = None
 
 
+class ClubPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=120)
+    short_name: str | None = Field(default=None, max_length=20)
+    institution: str | None = Field(default=None, max_length=120)
+
+
+class TournamentTeamPatch(BaseModel):
+    group_name: str | None = None
+    sub_competition_id: str | None = None
+    home_color: str | None = None
+    away_color: str | None = None
+    attack_rating: float | None = Field(default=None, ge=40, le=90)
+    defence_rating: float | None = Field(default=None, ge=40, le=90)
+
+
 class PlayerIn(BaseModel):
     """Same idea: an existing global player, or enough to create one.
 
@@ -203,6 +268,15 @@ class PlayerIn(BaseModel):
     photo_url: str | None = None
     nationality: str | None = "Nigeria"
     jersey_number: int | None = Field(default=None, ge=1, le=99)
+
+
+class PlayerRegPatch(BaseModel):
+    first_name: str | None = Field(default=None, min_length=1, max_length=60)
+    last_name: str | None = Field(default=None, min_length=1, max_length=60)
+    dob: date | None = None
+    position: str | None = None
+    jersey_number: int | None = Field(default=None, ge=1, le=99)
+    photo_url: str | None = None
 
 
 # ── tournaments ───────────────────────────────────────────────────────
@@ -408,6 +482,37 @@ def search_clubs(q: str = Query(..., min_length=2), limit: int = 20,
     return {"count": len(rows), "clubs": rows}
 
 
+@router.patch("/editor/clubs/{club_id}")
+def update_club(club_id: str, body: ClubPatch, user: dict = Depends(require_user)):
+    club = _one(
+        _db().table("clubs").select("*").eq("id", club_id).limit(1).execute()
+    )
+    if not club:
+        raise HTTPException(status_code=404, detail="Club not found")
+    if not _may_edit_club(club, user):
+        raise HTTPException(status_code=403, detail="You can't edit this club.")
+
+    patch = {}
+    for key, value in body.model_dump(exclude_unset=True).items():
+        if key == "name" and value is None:
+            raise HTTPException(status_code=422, detail="Club name cannot be blank.")
+        if isinstance(value, str):
+            value = value.strip()
+            if key == "name" and len(value) < 2:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Club name must be at least 2 characters.",
+                )
+            if key != "name" and not value:
+                value = None
+        patch[key] = value
+    if not patch:
+        return club
+    return _one(
+        _db().table("clubs").update(patch).eq("id", club_id).execute()
+    ) or club
+
+
 def _find_or_create_club(body: TeamIn, user: dict) -> str:
     if body.club_id:
         club = _one(_db().table("clubs").select("id").eq("id", body.club_id).limit(1).execute())
@@ -469,6 +574,42 @@ def add_team(tournament_id: str, body: TeamIn, user: dict = Depends(require_user
         "away_color":    body.away_color,
     }).execute())
     return created
+
+
+@router.patch("/editor/tournaments/{tournament_id}/teams/{team_id}")
+def update_tournament_team(
+    tournament_id: str,
+    team_id: str,
+    body: TournamentTeamPatch,
+    user: dict = Depends(require_user),
+):
+    tournament = _owned_tournament(tournament_id, user, need="owner")
+    _require_editable(tournament)
+    raw = body.model_dump(exclude_unset=True)
+    if not raw:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    if "sub_competition_id" in raw:
+        sub_id = raw["sub_competition_id"]
+        if sub_id:
+            sub = _one(
+                _db().table("sub_competitions").select("id, name")
+                .eq("id", sub_id).eq("tournament_id", tournament_id)
+                .limit(1).execute()
+            )
+            if not sub:
+                raise HTTPException(status_code=404, detail="Sub-competition not found")
+            raw["group_name"] = sub["name"]
+        else:
+            raw["group_name"] = None
+
+    updated = _one(
+        _db().table("tournament_teams").update(raw)
+        .eq("id", team_id).eq("tournament_id", tournament_id).execute()
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Team not found in tournament")
+    return updated
 
 
 @router.delete("/editor/tournaments/{tournament_id}/teams/{team_id}", status_code=204)
@@ -624,6 +765,98 @@ def list_squad(team_id: str, user: dict = Depends(require_user)):
         .eq("tournament_team_id", team_id).execute()
     )
     return {"count": len(rows), "squad": rows}
+
+
+@router.patch("/editor/teams/{team_id}/players/{registration_id}")
+def update_registered_player(
+    team_id: str,
+    registration_id: str,
+    body: PlayerRegPatch,
+    user: dict = Depends(require_user),
+):
+    team = _one(
+        _db().table("tournament_teams").select("id, tournament_id")
+        .eq("id", team_id).limit(1).execute()
+    )
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    tournament = _owned_tournament(team["tournament_id"], user, need="owner")
+    _require_editable(tournament)
+
+    reg = _one(
+        _db().table("player_registrations").select("*")
+        .eq("id", registration_id).eq("tournament_team_id", team_id)
+        .limit(1).execute()
+    )
+    if not reg:
+        raise HTTPException(status_code=404, detail="Player registration not found")
+
+    raw = body.model_dump(exclude_unset=True)
+    reg_patch = {}
+    if "jersey_number" in raw:
+        jersey_number = raw["jersey_number"]
+        if jersey_number is not None:
+            clash = _one(
+                _db().table("player_registrations").select("id")
+                .eq("tournament_team_id", team_id)
+                .eq("jersey_number", jersey_number)
+                .neq("id", registration_id).limit(1).execute()
+            )
+            if clash:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Shirt number {jersey_number} is already taken.",
+                )
+        reg_patch["jersey_number"] = jersey_number
+    if "position" in raw:
+        reg_patch["position"] = raw["position"]
+
+    player_patch = {}
+    for key in ("first_name", "last_name", "position", "photo_url"):
+        if key in raw and raw[key] is not None:
+            value = raw[key].strip() if isinstance(raw[key], str) else raw[key]
+            if key in {"first_name", "last_name"} and not value:
+                raise HTTPException(status_code=422, detail=f"{key} cannot be blank.")
+            player_patch[key] = value
+    if "dob" in raw and raw["dob"] is not None:
+        player_patch["dob"] = raw["dob"].isoformat()
+
+    if any(key in player_patch for key in ("first_name", "last_name", "dob")):
+        player = _one(
+            _db().table("players").select("id, first_name, last_name, dob")
+            .eq("id", reg["player_id"]).limit(1).execute()
+        )
+        if not player:
+            raise HTTPException(status_code=404, detail="Registered player not found")
+        first_name = player_patch.get("first_name", player["first_name"])
+        last_name = player_patch.get("last_name", player["last_name"])
+        dob = player_patch.get("dob", str(player["dob"]))
+        same_day = _rows(
+            _db().table("players").select("id, first_name, last_name")
+            .eq("dob", dob).limit(200).execute()
+        )
+        if any(
+            other["id"] != player["id"]
+            and _norm_name(other["first_name"]) == _norm_name(first_name)
+            and _norm_name(other["last_name"]) == _norm_name(last_name)
+            for other in same_day
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="A player with this name and date of birth already exists.",
+            )
+
+    if player_patch:
+        _db().table("players").update(player_patch).eq("id", reg["player_id"]).execute()
+    if reg_patch:
+        _db().table("player_registrations").update(reg_patch) \
+            .eq("id", registration_id).execute()
+
+    return _one(
+        _db().table("player_registrations")
+        .select("*, players(id, first_name, last_name, dob, position, photo_url)")
+        .eq("id", registration_id).limit(1).execute()
+    )
 
 
 @router.delete("/editor/teams/{team_id}/players/{registration_id}", status_code=204)

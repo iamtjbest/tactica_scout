@@ -84,7 +84,7 @@ def list_public_tournaments(country: str | None = None, level: str | None = None
 def _team_lookup(tournament_id: str) -> dict[str, dict]:
     rows = _rows(
         _db().table("tournament_teams")
-        .select("id, group_name, attack_rating, defence_rating, clubs(id, name, short_name, crest_url)")
+        .select("*, clubs(id, name, short_name, crest_url)")
         .eq("tournament_id", tournament_id).execute()
     )
     out = {}
@@ -432,7 +432,8 @@ def public_fixture(tournament_id: str, fixture_id: str):
     events = _rows(
         _db().table("match_events")
         .select("id, type, minute, tournament_team_id, "
-                "players!match_events_player_id_fkey(id, first_name, last_name)")
+                "players!match_events_player_id_fkey(id, first_name, last_name, photo_url), "
+                "related_player:players!match_events_related_player_id_fkey(id, first_name, last_name)")
         .eq("fixture_id", fixture_id)
         .order("minute")
         .execute()
@@ -445,7 +446,7 @@ def public_fixture(tournament_id: str, fixture_id: str):
     sheet = _rows(
         _db().table("fixture_lineups")
         .select("player_id, tournament_team_id, role, shirt_number, position, "
-                "players(id, first_name, last_name)")
+                "players(id, first_name, last_name, photo_url)")
         .eq("fixture_id", fixture_id).execute()
     )
 
@@ -458,6 +459,7 @@ def public_fixture(tournament_id: str, fixture_id: str):
             out.append({
                 "player_id": r["player_id"],
                 "name": f"{p.get('first_name','')} {p.get('last_name','')}".strip() or "Unknown",
+                "photo_url": p.get("photo_url"),
                 "shirt_number": r.get("shirt_number"),
                 "position": r.get("position"),
             })

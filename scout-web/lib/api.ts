@@ -340,7 +340,13 @@ import { authHeaders } from "./auth";
 async function parseErr(res: Response, fallback: string): Promise<string> {
   try {
     const body = await res.json();
-    return body?.detail || fallback;
+    const detail = body?.detail;
+    if (Array.isArray(detail)) {
+      return detail.map((item: any) => item?.msg || JSON.stringify(item)).join("; ") || fallback;
+    }
+    if (typeof detail === "string" && detail.trim()) return detail;
+    if (detail && typeof detail === "object") return JSON.stringify(detail);
+    return fallback;
   } catch {
     return fallback;
   }
@@ -721,12 +727,14 @@ export type TournamentMatchEvent = {
   minute: number | null;
   tournament_team_id: string;
   side: "home" | "away";
-  players: { id: string; first_name: string; last_name: string } | null;
+  players: { id: string; first_name: string; last_name: string; photo_url: string | null } | null;
+  related_player?: { id: string; first_name: string; last_name: string } | null;
 };
 
 export type TournamentSheetPlayer = {
   player_id: string;
   name: string;
+  photo_url: string | null;
   shirt_number: number | null;
   position: string | null;
 };

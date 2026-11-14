@@ -134,6 +134,7 @@ function TeamLine({ name, crest, align = "left" }: {
 
 const EVENT_LABEL: Record<string, string> = {
   goal: "Goal", own_goal: "Own goal", penalty: "Penalty",
+  penalty_scored: "Penalty", penalty_saved: "Penalty saved",
   penalty_missed: "Penalty missed", yellow_card: "Yellow",
   red_card: "Red", substitution: "Sub", assist: "Assist",
 };
@@ -179,16 +180,53 @@ function Timeline({ events, fx, tournamentId }: {
             )}>
               {EVENT_LABEL[e.type] ?? e.type}
             </span>
-            {e.players ? (
-              <Link
-                href={`/tournament/${tournamentId}/player/${e.players.id}`}
-                className="text-white text-sm truncate flex-1 hover:text-volt"
-              >
-                {`${e.players.first_name} ${e.players.last_name}`.trim()}
-              </Link>
-            ) : (
-              <span className="text-white text-sm truncate flex-1">—</span>
-            )}
+            <div className="flex items-center gap-1 min-w-0 flex-1">
+              {e.type === "substitution" && (
+                <span className="text-mt text-xs shrink-0">Out:</span>
+              )}
+              {e.players ? (
+                <>
+                  {e.players.photo_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={e.players.photo_url} alt=""
+                         className="w-6 h-6 rounded-full object-cover shrink-0" />
+                  ) : null}
+                  <Link
+                    href={`/tournament/${tournamentId}/player/${e.players.id}`}
+                    className="text-white text-sm truncate hover:text-volt"
+                  >
+                    {`${e.players.first_name} ${e.players.last_name}`.trim()}
+                  </Link>
+                </>
+              ) : (
+                <span className="text-white text-sm truncate">—</span>
+              )}
+              {e.type === "substitution" && e.related_player && (
+                <span className="text-mt text-xs shrink-0">• In:</span>
+              )}
+              {e.related_player && (
+                <>
+                  {e.type !== "substitution" && (
+                    <span className="text-mt text-xs shrink-0">
+                      {e.type === "goal"
+                        ? "(Assist:"
+                        : e.type === "penalty_saved"
+                          ? "(Saved by:"
+                          : "("}
+                    </span>
+                  )}
+                  <Link
+                    href={`/tournament/${tournamentId}/player/${e.related_player.id}`}
+                    className="text-mt text-xs truncate hover:text-volt"
+                  >
+                    {`${e.related_player.first_name} ${e.related_player.last_name}`.trim()}
+                  </Link>
+                  {e.type !== "substitution" && (
+                    <span className="text-mt text-xs shrink-0">)</span>
+                  )}
+                </>
+              )}
+            </div>
             <span className="text-mt2 text-[11px] truncate shrink-0 max-w-[40%]">
               {e.side === "home" ? fx.home_team : fx.away_team}
             </span>
@@ -512,10 +550,14 @@ function Lineups({ d, homeLabel, awayLabel, tournamentId }: {
                   href={`/tournament/${tournamentId}/player/${p.player_id}`}
                   className="flex flex-col items-center w-14 shrink-0 group"
                 >
-                  <span className="w-8 h-8 rounded-full bg-sur2 border border-bd
-                                   flex items-center justify-center
+                  <span className="relative w-8 h-8 rounded-full bg-sur2 border border-bd
+                                   overflow-hidden flex items-center justify-center
                                    group-hover:border-volt transition-colors">
-                    <span className="text-volt text-[11px] font-bold">
+                    {p.photo_url && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={p.photo_url} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                    )}
+                    <span className="relative text-white text-[11px] font-bold drop-shadow">
                       {p.shirt_number ?? ""}
                     </span>
                   </span>
@@ -545,6 +587,12 @@ function Lineups({ d, homeLabel, awayLabel, tournamentId }: {
                 href={`/tournament/${tournamentId}/player/${p.player_id}`}
                 className="flex items-center gap-3 py-1.5 hover:text-volt"
               >
+                {p.photo_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={p.photo_url} alt="" className="w-7 h-7 rounded-full object-cover" />
+                ) : (
+                  <span className="w-7 h-7 rounded-full bg-sur2 border border-bd" />
+                )}
                 <span className="font-mono text-[11px] text-mt w-7">
                   {p.shirt_number != null ? `#${p.shirt_number}` : ""}
                 </span>
