@@ -3,10 +3,13 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import clsx from "clsx";
+import { ChevronRight } from "lucide-react";
 import FollowButton from "@/components/FollowButton";
 import MatchSkeleton from "@/components/MatchSkeleton";
-import { getTournament, type TournamentDetail, type TournamentStanding,
-         type TournamentFixture } from "@/lib/api";
+import {
+  getTournament, type TournamentDetail, type TournamentStanding,
+  type TournamentFixture
+} from "@/lib/api";
 
 type Tab = "table" | "matches" | "teams" | "stats" | "bracket";
 
@@ -85,7 +88,7 @@ export default function TournamentPage() {
 
       <div className="mt-4">
         {tab === "matches" && <Matches tournamentId={id} fixtures={d.fixtures} />}
-        {tab === "table" && hasTable && <Tables d={d} />}
+        {tab === "table" && hasTable && <Tables d={d} tournamentId={id} />}
         {tab === "stats" && (
           <div className="grid gap-4 sm:grid-cols-2">
             <TournamentLeaders title="Golden Boot" stat="goals" rows={d.top_scorers ?? []} />
@@ -96,7 +99,11 @@ export default function TournamentPage() {
         {tab === "teams" && (
           <div className="space-y-2">
             {d.teams.map((tm) => (
-              <div key={tm.team_id} className="card flex items-center gap-3">
+              <Link
+                key={tm.team_id}
+                href={`/team/${tm.team_id}?tournamentId=${id}`}
+                className="card flex items-center gap-3 hover:border-volt/40 transition-colors"
+              >
                 <Badge url={tm.crest_url} name={tm.name} />
                 <span className="text-white text-sm flex-1 truncate">{tm.name}</span>
                 {tm.group_name && (
@@ -104,7 +111,8 @@ export default function TournamentPage() {
                     {groupLabel(tm.group_name)}
                   </span>
                 )}
-              </div>
+                <ChevronRight size={14} className="text-mt2 shrink-0" />
+              </Link>
             ))}
           </div>
         )}
@@ -194,8 +202,8 @@ function Badge({ url, name, size = 22 }: { url: string | null; name: string; siz
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img src={url} alt="" onError={() => setFailed(true)}
-         className="rounded-full object-cover shrink-0"
-         style={{ width: size, height: size }} />
+      className="rounded-full object-cover shrink-0"
+      style={{ width: size, height: size }} />
   );
 }
 
@@ -242,15 +250,15 @@ function Matches({ tournamentId, fixtures }: {
                       </div>
                       <div className="text-right shrink-0">
                         <p className={clsx("font-mono text-[10px]",
-                                           live ? "text-red2" : "text-mt2")}>
+                          live ? "text-red2" : "text-mt2")}>
                           {live ? "LIVE" : String(fx.status).toUpperCase()}
                         </p>
                         <p className="text-mt2 text-[10px] font-mono mt-0.5">
                           {fx.kickoff_at
                             ? new Date(fx.kickoff_at).toLocaleString("en-GB", {
-                                day: "numeric", month: "short",
-                                hour: "2-digit", minute: "2-digit",
-                              })
+                              day: "numeric", month: "short",
+                              hour: "2-digit", minute: "2-digit",
+                            })
                             : ""}
                         </p>
                       </div>
@@ -309,7 +317,7 @@ function seasonRange(start?: string | null, end?: string | null): string {
   return `${fmt(start, !sameYear)} – ${fmt(end, true)}`;
 }
 
-function Tables({ d }: { d: TournamentDetail }) {
+function Tables({ d, tournamentId }: { d: TournamentDetail; tournamentId: string }) {
   const groups = d.group_tables ? Object.keys(d.group_tables).sort() : [];
   const pts = d.points_rules;
 
@@ -317,14 +325,14 @@ function Tables({ d }: { d: TournamentDetail }) {
     <div className="space-y-6">
       {groups.length > 0
         ? groups.map((g) => (
-            <div key={g}>
-              <p className="text-mt text-[10px] font-mono uppercase tracking-wide mb-2">
-                {groupLabel(g)}
-              </p>
-              <Table rows={d.group_tables![g]} />
-            </div>
-          ))
-        : <Table rows={d.standings ?? []} />}
+          <div key={g}>
+            <p className="text-mt text-[10px] font-mono uppercase tracking-wide mb-2">
+              {groupLabel(g)}
+            </p>
+            <Table rows={d.group_tables![g]} tournamentId={tournamentId} />
+          </div>
+        ))
+        : <Table rows={d.standings ?? []} tournamentId={tournamentId} />}
 
       <p className="text-mt2 text-xs">
         Built from finished matches only.
@@ -334,7 +342,7 @@ function Tables({ d }: { d: TournamentDetail }) {
   );
 }
 
-function Table({ rows }: { rows: TournamentStanding[] }) {
+function Table({ rows, tournamentId }: { rows: TournamentStanding[]; tournamentId: string }) {
   if (rows.length === 0) {
     return <p className="text-mt text-sm">No finished matches yet.</p>;
   }
@@ -358,10 +366,13 @@ function Table({ rows }: { rows: TournamentStanding[] }) {
             <tr key={r.team_id} className="border-b border-bd/50 last:border-0">
               <td className="py-2 pr-2 text-mt text-xs">{r.position}</td>
               <td className="py-2 pr-2">
-                <span className="flex items-center gap-2 min-w-0">
+                <Link
+                  href={`/team/${r.team_id}?tournamentId=${tournamentId}`}
+                  className="flex items-center gap-2 min-w-0 hover:text-volt transition-colors"
+                >
                   <Badge url={r.crest_url} name={r.name} size={18} />
                   <span className="text-white truncate">{r.name}</span>
-                </span>
+                </Link>
               </td>
               <td className="text-center text-mt px-1">{r.played}</td>
               <td className="text-center text-mt px-1">{r.won}</td>

@@ -38,9 +38,9 @@ export type MatchSummary = {
   home_crest?: string | null;
   away_crest?: string | null;
   home_team: string;
-  home_team_id?: number | null;
+  home_team_id?: number | string | null;
   away_team: string;
-  away_team_id?: number | null;
+  away_team_id?: number | string | null;
   home_score: number;
   away_score: number;
   minute: number;
@@ -50,7 +50,7 @@ export type MatchSummary = {
   // the card can show a kickoff time instead of "notstarted".
   kickoff?: string;
   competition?: string;
-  league_id?: number;
+  league_id?: number | string;
 };
 
 export async function getLiveScores(): Promise<{ count: number; leagues: LeagueMatches[] }> {
@@ -230,7 +230,9 @@ export async function getLeagues(): Promise<{ leagues: LeagueOption[] }> {
 export type StandingsRow = {
   position: number | null;
   team: string;
-  team_id: number | null;
+  team_name?: string;
+  team_id: number | string | null;
+  crest_url?: string | null;
   played: number;
   won: number;
   drawn: number;
@@ -238,6 +240,7 @@ export type StandingsRow = {
   goals_for: number;
   goals_against: number;
   goal_diff: number;
+  goal_difference?: number;
   points: number;
   zone: { key?: string; label?: string; type?: string } | null;
 };
@@ -450,21 +453,26 @@ export async function updateLanguage(language: string): Promise<{ user: ScoutUse
 
 // ── Teams ────────────────────────────────────────────────────────────
 export type PlayerSummary = {
-  id: number;
+  id: number | string;
   name: string;
   short_name: string;
   position: string;
   jersey_number: number | null;
   nationality: string;
   date_of_birth: string | null;
+  photo_url?: string | null;
   availability: string;
   injury_type: string | null;
+  goals?: number;
+  assists?: number;
 };
 
 export type TeamDetail = {
-  id: number;
+  id: number | string;
+  source?: "local";
   name: string;
   short_name: string;
+  crest_url?: string | null;
   country: string;
   venue: string | null;
   venue_capacity: number | null;
@@ -474,22 +482,35 @@ export type TeamDetail = {
     avg_goals_scored: number | null;
     avg_goals_conceded: number | null;
   } | null;
-  primary_league_id?: number | null;
+  primary_league_id?: number | string | null;
   primary_league_name?: string | null;
   position?: number | null;
   squad: PlayerSummary[];
+  standings?: StandingsRow[];
+  top_stats?: { scorers: any[]; assists: any[] };
 };
 
 // `degraded` is true when a BSD sub-call came back empty, so missing
 // fields mean "we couldn't fetch this", not "this doesn't exist".
-export async function getTeamDetail(teamId: number): Promise<TeamDetail> {
-  const res = await fetch(`${API_BASE}/api/teams/${teamId}`, { cache: "no-store" });
+export async function getTeamDetail(
+  teamId: number | string,
+  tournamentId?: string | null
+): Promise<TeamDetail> {
+  const isLocal = typeof teamId === "string" && !/^\d+$/.test(teamId);
+  const qs = tournamentId ? `?tournament_id=${encodeURIComponent(tournamentId)}` : "";
+  const url = isLocal
+    ? `${API_BASE}/api/tournaments/teams/${teamId}${qs}`
+    : `${API_BASE}/api/teams/${teamId}`;
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`team detail failed: ${res.status}`);
   return res.json();
 }
 
-export async function getTeamFixtures(teamId: number): Promise<{
-  team_id: number;
+export async function getTeamFixtures(
+  teamId: number | string,
+  tournamentId?: string | null
+): Promise<{
+  team_id: number | string;
   // The backend already splits these correctly. BSD reports a finished
   // match as any of finished/ended/played/ft, so never re-filter
   // `matches` on a single status string here -- use `recent`.
@@ -498,7 +519,12 @@ export async function getTeamFixtures(teamId: number): Promise<{
   matches: MatchSummary[];
   degraded?: boolean;
 }> {
-  const res = await fetch(`${API_BASE}/api/teams/${teamId}/fixtures`, { cache: "no-store" });
+  const isLocal = typeof teamId === "string" && !/^\d+$/.test(teamId);
+  const qs = tournamentId ? `?tournament_id=${encodeURIComponent(tournamentId)}` : "";
+  const url = isLocal
+    ? `${API_BASE}/api/tournaments/teams/${teamId}/fixtures${qs}`
+    : `${API_BASE}/api/teams/${teamId}/fixtures`;
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`team fixtures failed: ${res.status}`);
   return res.json();
 }

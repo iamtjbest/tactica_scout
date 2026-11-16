@@ -41,6 +41,13 @@ DEFAULT_TIEBREAKERS = ["goal_difference", "goals_scored", "head_to_head"]
 DEFAULT_POINTS = {"win": 3, "draw": 1, "loss": 0}
 
 
+def _group_label(name: str | None) -> str:
+    g = (name or "").strip()
+    if not g:
+        return ""
+    return g if g.lower().startswith("group") else f"Group {g}"
+
+
 def _points(rules: dict | None) -> dict:
     """Whole, sane points values, whatever is in the column.
 
@@ -522,4 +529,248 @@ def public_fixture(tournament_id: str, fixture_id: str):
         "events": events,
         "official_motm": official_motm,
         "prediction": prediction,
+    }
+
+
+@router.get("/tournaments/teams/{team_id}")
+def public_tournament_team(team_id: str, tournament_id: str | None = None):
+    """Unified team profile for a local Scout Editor team, shaped to match
+    /api/teams/{team_id} so the TeamDetail view works identically."""
+    q = _db().table("tournament_teams").select("*, clubs(id, name, short_name, crest_url)").eq("id", team_id)
+    if tournament_id:
+        q = q.eq("tournament_id", tournament_id)
+    tt = _one(q.limit(1).execute())
+    if not tt:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    tid = tt["tournament_id"]
+    t = _one(
+        _db().table("tournaments").select("*")
+        .eq("id", tid).eq("status", "approved")
+        .limit(1).execute()
+    )
+    if not t:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    club = tt.get("clubs") or {}
+    team_name = club.get("name") or "Unknown"
+    teams = _team_lookup(tid)
+
+    fixtures_raw = _rows(
+        _db().table("fixtures").select("*")
+        .eq("tournament_id", tid)
+        .order("kickoff_at").execute()
+    )
+
+    group_name = tt.get("group_name")
+    scoped_teams = (
+        {k: v for k, v in teams.items() if v.get("group_name") == group_name}
+        if group_name else teams
+    )
+    raw_standings = _standings(
+        tid, scoped_teams, fixtures_raw, t.get("tiebreakers"), t.get("points_rules")
+    )
+
+    position = None
+    standings_formatted = []
+    for row in raw_standings:
+        if row["team_id"] == team_id:
+            position = row["position"]
+        standings_formatted.append({
+            "position": row["position"],
+            "team": row["name"],
+            "team_name": row["name"],
+            "team_id": row["team_id"],
+            "crest_url": row.get("crest_url"),
+            "played": row["played"],
+            "won": row["won"],
+            "drawn": row["drawn"],
+            "lost": row["lost"],
+            "goals_for": row["goals_for"],
+            "goals_against": row["goals_against"],
+            "goal_diff": row["goal_difference"],
+            "goal_difference": row["goal_difference"],
+            "points": row["points"],
+            "zone": None,
+        })
+
+    regs = _rows(
+        _db().table("player_registrations")
+        .select("*, players(*)")
+        .eq("tournament_team_id", team_id)
+        .execute()
+    )
+
+    team_fixture_ids = [
+        f["id"] for f in fixtures_raw
+        if f.get("home_team_id") == team_id or f.get("away_team_id") == team_id
+    ]
+    goal_counts: dict[str, int] = {}
+    assist_counts: dict[str, int] = {}
+    if team_fixture_ids:
+        ev_rows = _rows(
+            _db().table("match_events")
+            .select("type, player_id, related_player_id, tournament_team_id")
+            .in_("fixture_id", team_fixture_ids)
+            .in_("type", ["goal", "penalty_scored"])
+            .execute()
+        )
+        for ev in ev_rows:
+            if ev.get("tournament_team_id") != team_id:
+                continue
+            pid = ev.get("player_id")
+            aid = ev.get("related_player_id")
+            if pid:
+                goal_counts[pid] = goal_counts.get(pid, 0) + 1
+            if aid:
+                assist_counts[aid] = assist_counts.get(aid, 0) + 1
+
+    squad = []
+    scorers = []
+    assists = []
+    for r in regs:
+        p = r.get("players") or {}
+        pid = p.get("id") or r.get("player_id")
+        if not pid:
+            continue
+        full_name = f"{p.get('first_name', '')} {p.get('last_name', '')}".strip() or p.get("name") or "Unknown"
+        pos = r.get("position") or p.get("position") or "Midfielder"
+        jersey = r.get("jersey_number")
+        g_val = goal_counts.get(pid, 0)
+        a_val = assist_counts.get(pid, 0)
+
+        squad.append({
+            "id": pid,
+            "name": full_name,
+            "short_name": p.get("last_name") or full_name,
+            "position": pos,
+            "jersey_number": jersey,
+            "nationality": p.get("nationality") or t.get("country") or "",
+            "date_of_birth": p.get("date_of_birth"),
+            "photo_url": p.get("photo_url"),
+            "availability": "available",
+            "injury_type": None,
+            "goals": g_val,
+            "assists": a_val,
+        })
+        if g_val > 0:
+            scorers.append({
+                "player_id": pid,
+                "player_name": full_name,
+                "team_id": team_id,
+                "team_name": team_name,
+                "value": g_val,
+            })
+        if a_val > 0:
+            assists.append({
+                "player_id": pid,
+                "player_name": full_name,
+                "team_id": team_id,
+                "team_name": team_name,
+                "value": a_val,
+            })
+
+    squad.sort(key=lambda x: (x["jersey_number"] is None, x["jersey_number"] or 999, x["name"].lower()))
+    scorers.sort(key=lambda x: (-x["value"], x["player_name"].lower()))
+    assists.sort(key=lambda x: (-x["value"], x["player_name"].lower()))
+
+    comp_label = f"{t['name']} ({_group_label(group_name)})" if group_name else t["name"]
+
+    return {
+        "id": team_id,
+        "source": "local",
+        "name": team_name,
+        "short_name": club.get("short_name") or team_name,
+        "crest_url": club.get("crest_url"),
+        "country": t.get("country") or "Nigeria",
+        "venue": tt.get("venue") or t.get("venue"),
+        "venue_capacity": None,
+        "manager_name": tt.get("manager_name") or tt.get("coach_name"),
+        "manager_stats": None,
+        "primary_league_id": tid,
+        "primary_league_name": comp_label,
+        "position": position,
+        "squad": squad,
+        "standings": standings_formatted,
+        "top_stats": {
+            "scorers": scorers,
+            "assists": assists,
+        },
+        "degraded": False,
+        "cached": False,
+    }
+
+
+@router.get("/tournaments/teams/{team_id}/fixtures")
+def public_tournament_team_fixtures(team_id: str, tournament_id: str | None = None):
+    """Previous and upcoming fixtures for a local Scout Editor team."""
+    q = _db().table("tournament_teams").select("id, tournament_id").eq("id", team_id)
+    if tournament_id:
+        q = q.eq("tournament_id", tournament_id)
+    tt = _one(q.limit(1).execute())
+    if not tt:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    tid = tt["tournament_id"]
+    t = _one(
+        _db().table("tournaments").select("id, name")
+        .eq("id", tid).eq("status", "approved")
+        .limit(1).execute()
+    )
+    if not t:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    teams = _team_lookup(tid)
+    fixtures_raw = _rows(
+        _db().table("fixtures").select("*")
+        .eq("tournament_id", tid)
+        .or_(f"home_team_id.eq.{team_id},away_team_id.eq.{team_id}")
+        .order("kickoff_at").execute()
+    )
+
+    recent = []
+    upcoming = []
+    for fx in fixtures_raw:
+        raw_status = str(fx.get("status") or "scheduled").lower()
+        is_finished = raw_status in FINISHED
+        is_live = raw_status in {"live", "ht", "inprogress"}
+        norm_status = "finished" if is_finished else ("inprogress" if is_live else "notstarted")
+
+        home = teams.get(fx["home_team_id"], {})
+        away = teams.get(fx["away_team_id"], {})
+        comp_name = " · ".join([x for x in [t["name"], fx.get("round")] if x])
+
+        mapped = {
+            "event_id": fx["id"],
+            "source": "local",
+            "tournament_id": tid,
+            "home_team": home.get("name") or "TBD",
+            "home_team_id": fx.get("home_team_id"),
+            "home_crest": home.get("crest_url"),
+            "away_team": away.get("name") or "TBD",
+            "away_team_id": fx.get("away_team_id"),
+            "away_crest": away.get("crest_url"),
+            "home_score": fx.get("home_score"),
+            "away_score": fx.get("away_score"),
+            "minute": 0,
+            "status": norm_status,
+            "kickoff": fx.get("kickoff_at") or "",
+            "competition": comp_name,
+            "league_id": tid,
+        }
+        if is_finished:
+            recent.append(mapped)
+        else:
+            upcoming.append(mapped)
+
+    recent.sort(key=lambda m: m["kickoff"], reverse=True)
+    upcoming.sort(key=lambda m: m["kickoff"])
+
+    return {
+        "team_id": team_id,
+        "recent": recent,
+        "upcoming": upcoming,
+        "matches": list(reversed(recent)) + upcoming,
+        "degraded": False,
+        "cached": False,
     }
