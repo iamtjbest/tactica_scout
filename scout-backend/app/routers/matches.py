@@ -6,50 +6,15 @@ Every match for one calendar day, played/live/upcoming, across every
 league, grouped by league — backs the Matches tab's day-by-day
 browsing.
 
-LEAGUE LABELING: almost every match was landing in a generic "Other"
-bucket because the league-name/id field guess had no fallback. Now
-goes through config.extract_league_name, which tries several spellings
-and nested shapes. If it's STILL wrong, "_debug_sample_event" below
-carries one raw event so the real field name can be read off a hit to
-this endpoint directly.
-
 GET /api/matches/{event_id}
 The match detail screen's data source: Overview, Lineups, H2H, Facts,
 Stats in one payload.
-
-CONFIRMED 2026-10-08 against the real BSD docs (Events & live scores,
-Managers/referees/venues, Competition structure):
-  - league name is NEVER embedded on an event, only league_id -- always
-    resolved through extract_league_name / the league id map.
-  - venue_id / referee_id / home_coach_id / away_coach_id are ids only.
-    Real names come from /venues/{id}/, /referees/{id}/, /managers/{id}/
-    -- see _lookup_name below. Old code guessed a name field directly
-    on the event, which was always going to come back empty.
-  - round_label ("League phase - Matchday 5") is the ready-to-display
-    string -- round_number repeats across stages (matchday 5 of league
-    phase vs. round of 16) and round_name is usually blank, so neither
-    should be shown alone.
-  - H2H has its own endpoint, /events/{id}/h2h/, with a real summary
-    (total_matches/home_wins/draws/away_wins/goals) plus recent_matches.
-    Replaces the old fixture-filter-by-name fallback, which is gone.
-  - Goalscorers come from /events/{id}/incidents/ (chronological goals/
-    cards/subs/VAR), not a field on the event itself. Filtered here to
-    goal-type entries. Exact minute/player field names inside each
-    incident are still unconfirmed -- "_debug_incidents_sample" carries
-    one raw entry so that can be nailed down from a real response.
-  - Stats endpoint is /events/{id}/stats/, NOT /statistics/ -- the old
-    path was never going to 200.
-  - /events/{id}/availability/ tells us up front which sub-resources
-    this match actually has data for, so the frontend can show an
-    accurate "not published yet" message instead of guessing from an
-    empty response.
 """
 import time
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException
 from app.tactica import (
     get_match_ratings, get_frozen_ratings, is_freezable, freeze_ratings,
-    FREEZE_WINDOW_HOURS,
 )
 from app.config import bsd_get, cache_read, cache_write, cache_age, get_league_id_map, extract_league_name, debug_field
 
@@ -138,8 +103,6 @@ def matches_by_date(date: str):
                 "_debug_sample_event": sample,
             })
 
-    # Local fixtures are queried on every request; their own date window
-    # and approval state can change independently of the BSD cache.
     local = _local_leagues(date)
     return {
         "_cached_at": time.time(),
@@ -153,21 +116,7 @@ def matches_by_date(date: str):
 
 def _local_leagues(date: str) -> list[dict]:
     """Approved local competitions with fixtures on this date, shaped
-    exactly like a BSD league group.
-
-    A competition run in Scout Editor is not a second-class thing in
-    Scout: it sits in the same list as the Premier League, grouped the
-    same way, because to the student whose faculty is playing it IS the
-    competition that matters.
-
-    `event_id` is the fixture uuid and `source` marks the group, so the
-    client routes a tap to the local match page rather than a BSD one.
-    Everything else matches the BSD shape field for field, so the
-    existing match card renders it with no special case.
-    """
-    # Imported here rather than at module load: tournaments_public
-    # imports helpers from app.routers.editor, and a top-level import
-    # would couple the two modules' import order.
+    exactly like a BSD league group."""
     from app.routers.editor import _db, _rows
 
     try:
@@ -207,23 +156,22 @@ def _local_leagues(date: str) -> list[dict]:
         for fx in fixtures:
             t = tournaments.get(fx["tournament_id"])
             if not t:
-                continue          # draft or rejected: not public
+                continue
             home = teams.get(fx["home_team_id"], {})
             away = teams.get(fx["away_team_id"], {})
             by_t.setdefault(fx["tournament_id"], []).append({
-                "event_id":     fx["id"],
-                "home_team":    home.get("name") or "Unknown",
-                "home_team_id": fx["home_team_id"],
-                "home_crest":   home.get("crest_url"),
-                "away_team":    away.get("name") or "Unknown",
-                "away_team_id": fx["away_team_id"],
-                "away_crest":   away.get("crest_url"),
-                "home_score":   fx.get("home_score"),
-                "away_score":   fx.get("away_score"),
-                "minute":       0,
-                "status":       fx.get("status") or "scheduled",
-                "kickoff":      fx.get("kickoff_at") or "",
-                # What tells the client this is a local fixture.
+                "event_id":      fx["id"],
+                "home_team":     home.get("name") or "Unknown",
+                "home_team_id":  fx["home_team_id"],
+                "home_crest":    home.get("crest_url"),
+                "away_team":     away.get("name") or "Unknown",
+                "away_team_id":  fx["away_team_id"],
+                "away_crest":    away.get("crest_url"),
+                "home_score":    fx.get("home_score"),
+                "away_score":    fx.get("away_score"),
+                "minute":        0,
+                "status":        fx.get("status") or "scheduled",
+                "kickoff":       fx.get("kickoff_at") or "",
                 "source":        "local",
                 "tournament_id": fx["tournament_id"],
             })
@@ -239,18 +187,10 @@ def _local_leagues(date: str) -> list[dict]:
             for tid, rows in by_t.items()
         ]
     except Exception:
-        # A local-competition failure must never take down the main
-        # livescore list. Scout's core job is BSD fixtures; these are an
-        # addition, so they drop out silently rather than 500 the page.
         return []
 
 
 def _lookup_name(resource: str, obj_id) -> str | None:
-    """GET /api/v2/{resource}/{obj_id}/ and read its 'name' field.
-    Confirmed from the Managers, referees & venues docs that events
-    only carry referee_id/venue_id/home_coach_id/away_coach_id -- never
-    a name string -- so this one extra call per id is the only way to
-    get something displayable."""
     if obj_id is None:
         return None
     data = bsd_get(f"/{resource}/{obj_id}/")
@@ -260,11 +200,6 @@ def _lookup_name(resource: str, obj_id) -> str | None:
 
 
 def _h2h(event_id: int) -> dict:
-    """GET /events/{id}/h2h/ -- a real, documented endpoint, not a
-    guess. Returns a summary (wins/draws/goals) plus recent_matches.
-    Docs are explicit: read home_score/away_score (nullable ints), not
-    the "score" string, which turns a no-result meeting into a fake
-    "0-0"."""
     data = bsd_get(f"/events/{event_id}/h2h/")
     if not data:
         return {"summary": None, "recent_matches": []}
@@ -273,36 +208,31 @@ def _h2h(event_id: int) -> dict:
         eid = m.get("event_id")
         ev_data = bsd_get(f"/events/{eid}/") if eid else {}
         league_id = ev_data.get("league_id") if isinstance(ev_data, dict) else None
-        # BSD's event object has no nested `league` object -- only a
-        # top-level league_id -- so the old ev_data["league"]["name"]
-        # lookup was always None and the competition header never
-        # rendered. Resolve from the cached id->name map instead, same
-        # as everywhere else.
         league_name = None
         if league_id is not None:
             _lm = get_league_id_map()
             league_name = _lm.get(league_id) or _lm.get(str(league_id))
-        
+
         recent.append({
-            "event_id":   eid,
-            "date":       m.get("date", ""),
-            "home_team":  m.get("home", ""),
-            "away_team":  m.get("away", ""),
+            "event_id":     eid,
+            "date":         m.get("date", ""),
+            "home_team":    m.get("home", ""),
+            "away_team":    m.get("away", ""),
             "home_team_id": m.get("home_team_id"),
             "away_team_id": m.get("away_team_id"),
-            "home_score": m.get("home_score"),
-            "away_score": m.get("away_score"),
-            "league_id":  league_id,
-            "league_name": league_name,
+            "home_score":   m.get("home_score"),
+            "away_score":   m.get("away_score"),
+            "league_id":    league_id,
+            "league_name":  league_name,
         })
     return {
         "summary": {
             "total_matches": data.get("total_matches"),
-            "home_wins":      data.get("home_wins"),
-            "draws":          data.get("draws"),
-            "away_wins":      data.get("away_wins"),
-            "home_goals":     data.get("home_goals"),
-            "away_goals":     data.get("away_goals"),
+            "home_wins":     data.get("home_wins"),
+            "draws":         data.get("draws"),
+            "away_wins":     data.get("away_wins"),
+            "home_goals":    data.get("home_goals"),
+            "away_goals":    data.get("away_goals"),
         },
         "recent_matches": recent,
     }
@@ -318,18 +248,13 @@ def _extract_incidents(event_id: int) -> list[dict]:
 
 
 def _extract_goalscorers(incidents: list[dict]) -> list[dict]:
-    """Filters /incidents/ down to goal-type entries. Field names for
-    minute/player/side inside each incident are still unconfirmed --
-    tries the common spellings and falls back to period_second // 60
-    for the minute. "_debug_incidents_sample" on the response carries
-    one raw incident so this can be tightened once real data is seen."""
     out = []
     for inc in incidents:
         itype = str(inc.get("type") or inc.get("incident_type") or "").lower()
         if "goal" not in itype:
             continue
         if inc.get("rescinded") is True:
-            continue  # overturned on review -- stays in the timeline but shouldn't count
+            continue
         minute = inc.get("minute")
         if minute is None:
             secs = inc.get("period_second")
@@ -345,21 +270,12 @@ def _extract_goalscorers(incidents: list[dict]) -> list[dict]:
 
 
 def _recent_form(team_id, exclude_event_id: int | None = None, limit: int = 5) -> list[dict]:
-    """Last N finished results for one team, independent of the other
-    side in the current match -- same shape BSD's own fixtures list
-    uses (home_team/away_team/home_score/away_score/home_team_id/
-    away_team_id), confirmed from the Teams, players & transfers docs
-    (GET /teams/{id}/fixtures/?status=&...). Powers the "Team form"
-    strip on the Overview tab, same idea as FotMob's."""
     if team_id is None:
         return []
-    # The BSD API /teams/{id}/fixtures/ does not exist. Use /events/?team_id= instead, and filter for finished matches.
     data = bsd_get(f"/events/", params={"team_id": team_id, "limit": 40})
     if not data:
         return []
     fixtures = data if isinstance(data, list) else (data.get("events") or data.get("results") or data.get("fixtures") or [])
-
-    # Sort fixtures by date descending just in case they aren't
     fixtures = sorted(fixtures, key=lambda x: x.get("event_date", ""), reverse=True)
 
     out = []
@@ -367,9 +283,6 @@ def _recent_form(team_id, exclude_event_id: int | None = None, limit: int = 5) -
         if len(out) >= limit:
             break
         status = str(fx.get("status", "")).lower()
-        # "ft" belongs here too -- it's in FINISHED_STATUSES everywhere
-        # else in this codebase, and leaving it out silently dropped
-        # finished matches from the form strip.
         if status not in ["finished", "ended", "played", "ft"]:
             continue
         if exclude_event_id is not None and fx.get("id") == exclude_event_id:
@@ -383,17 +296,14 @@ def _recent_form(team_id, exclude_event_id: int | None = None, limit: int = 5) -
         if own_score is not None and opp_score is not None:
             result = "W" if own_score > opp_score else "L" if own_score < opp_score else "D"
         out.append({
-            "event_id":  fx.get("id"),
-            "opponent":  (fx.get("away_team") if is_home else fx.get("home_team")) or "",
-            # Needed for the opponent crest on the Team Form strip. The
-            # fixture already carries both ids; we just weren't passing
-            # the other side's through.
+            "event_id":    fx.get("id"),
+            "opponent":    (fx.get("away_team") if is_home else fx.get("home_team")) or "",
             "opponent_id": (fx.get("away_team_id") if is_home else fx.get("home_team_id")),
-            "own_score": own_score,
-            "opp_score": opp_score,
-            "is_home":   is_home,
-            "result":    result,
-            "date":      fx.get("event_date", ""),
+            "own_score":   own_score,
+            "opp_score":   opp_score,
+            "is_home":     is_home,
+            "result":      result,
+            "date":        fx.get("event_date", ""),
         })
         if len(out) >= limit:
             break
@@ -414,8 +324,6 @@ def _parse_kickoff(raw) -> datetime | None:
 
 
 def _empty_facts(reason: str) -> dict:
-    """Same shape get_match_ratings returns when it has nothing, so the
-    Facts tab renders "--" exactly as it already does."""
     side = {"attack": None, "defence": None, "win_prob": None, "live_rating": False}
     return {
         "home": dict(side), "away": dict(side),
@@ -428,36 +336,23 @@ def _empty_facts(reason: str) -> dict:
 
 @router.get("/matches/{event_id}/facts")
 def match_facts(event_id: int):
-    """Tactica ATK/DEF + win probability for one fixture, FROZEN.
+    """Tactica ATK/DEF + win probability for one fixture.
 
-    The numbers shown for a match are the ones calculated shortly before
-    kickoff, saved once in Supabase (match_predictions) and never
-    recalculated. Both teams will play again and their live ratings will
-    move; this match keeps the numbers it was played under.
-
-      1. A stored snapshot exists  -> return it. Nothing is computed.
-      2. No snapshot, match already started or finished -> return empty.
-         Computing now would fold this match's own result into the form
-         ratings, so a "pre-match" number made after the fact is wrong.
-      3. No snapshot, kickoff still ahead -> compute live from Tactica.
-         Inside the freeze window (FREEZE_WINDOW_HOURS before kickoff)
-         and only if the result is complete, save it as the snapshot.
-         Earlier than that, return it marked provisional and don't save,
-         because a team may still play before this match.
-
-    Split out of match_detail on purpose: computing calls Tactica's
-    backend (two /api/form lookups plus two /api/predict runs) and that
-    service sleeps on Render's free tier. Keeping it off the match-detail
-    path means a cold Tactica costs you the Facts tab, not the whole page.
-    Extra keys vs before: frozen, provisional, computed_at,
-    formula_version, unavailable_reason. Existing keys are unchanged.
+    Option B — Live Mirror Before Kickoff, Frozen at Kickoff:
+      1. Before kickoff (status not finished and now < kickoff):
+         Always pulls the latest live numbers from the main Tactica
+         backend (app.tacticaengine.com) so both apps stay 100% identical
+         right up until kickoff.
+      2. At or after kickoff (now >= kickoff or status finished):
+         Returns the stored snapshot if one exists; otherwise captures
+         and freezes the kickoff-time numbers once so post-match results
+         never rewrite pre-match probabilities.
     """
-    frozen = get_frozen_ratings(event_id)
-    if frozen:
-        return frozen
-
     base = bsd_get(f"/events/{event_id}/")
     if not base:
+        frozen = get_frozen_ratings(event_id)
+        if frozen:
+            return frozen
         raise HTTPException(status_code=404, detail="Match not found")
 
     home_team = base.get("home_team")
@@ -466,17 +361,27 @@ def match_facts(event_id: int):
     now       = datetime.now(timezone.utc)
     status    = str(base.get("status") or "").lower()
 
-    if status in _FINISHED or (kickoff is not None and now >= kickoff):
-        return _empty_facts("no_prematch_snapshot")
+    started_or_finished = status in _FINISHED or (kickoff is not None and now >= kickoff)
 
+    if started_or_finished:
+        frozen = get_frozen_ratings(event_id)
+        if frozen:
+            return frozen
+        if status in _FINISHED:
+            return _empty_facts("no_prematch_snapshot")
+        # Just kicked off without a snapshot yet: capture & freeze once now
+        result = get_match_ratings(home_team, away_team)
+        if is_freezable(result):
+            kickoff_iso = kickoff.isoformat() if kickoff else now.isoformat()
+            stored = freeze_ratings(event_id, home_team, away_team, kickoff_iso, result)
+            if stored:
+                return stored
+        result["frozen"] = False
+        result["provisional"] = False
+        return result
+
+    # Before kickoff: always mirror main Tactica backend live
     result = get_match_ratings(home_team, away_team)
-
-    in_window = kickoff is not None and (kickoff - now) <= timedelta(hours=FREEZE_WINDOW_HOURS)
-    if in_window and is_freezable(result):
-        stored = freeze_ratings(event_id, home_team, away_team, kickoff.isoformat(), result)
-        if stored:
-            return stored
-
     result["frozen"] = False
     result["provisional"] = True
     return result
@@ -538,11 +443,6 @@ def match_detail(event_id: int):
         "h2h":           h2h,
         "stats":         stats,
         "availability":  (availability or {}).get("available") or {},
-        # Facts are NOT fetched here. Tactica's backend is on Render's
-        # free tier and sleeps when idle, so a cold start is roughly 50
-        # seconds -- inline, that would hold the entire match page
-        # hostage for a tab most people never open. The Facts tab calls
-        # /api/matches/{id}/facts itself and shows its own loading state.
         "facts_url": f"/api/matches/{event_id}/facts",
         "_debug_base_keys": debug_field(list(base.keys())),
         "_debug_incidents_sample": debug_field(incidents[0] if incidents else None),

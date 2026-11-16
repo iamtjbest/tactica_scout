@@ -19,8 +19,9 @@ TACTICA_API_URL = os.environ.get(
     "TACTICA_API_URL", "https://tactica-backend-hdbd.onrender.com"
 ).rstrip("/")
 
-RATINGS_TTL  = 1800
-DEGRADED_TTL = 60
+# Short 3-minute cache before kickoff so Scout mirrors app.tacticaengine.com live
+RATINGS_TTL  = 180
+DEGRADED_TTL = 45
 TIMEOUT = 25
 
 
@@ -59,7 +60,7 @@ def _form(team: str) -> dict | None:
 
 
 def _predict(my_team: str, opp_team: str, overrides: dict | None = None) -> dict | None:
-    """One POST /api/predict, with live ratings passed in as overrides."""
+    """One POST /api/predict, matching app.tacticaengine.com."""
     body = {"my_team": my_team, "opp_team": opp_team}
     if overrides:
         body.update({k: v for k, v in overrides.items() if v is not None})
@@ -77,33 +78,35 @@ def _predict(my_team: str, opp_team: str, overrides: dict | None = None) -> dict
         return None
 
 
-def get_match_ratings(home_team: str | None, away_team: str | None) -> dict:
-    """ATK/DEF for both sides plus canonical Home / Draw / Away win probabilities."""
+def get_match_ratings(home_team: str | None, away_team: str | None, bypass_cache: bool = False) -> dict:
+    """ATK/DEF for both sides plus canonical Home / Draw / Away win probabilities
+    matching app.tacticaengine.com."""
     empty = {
-        "home":            {"attack": None, "defence": None, "win_prob": None, "live_rating": False},
-        "away":            {"attack": None, "defence": None, "win_prob": None, "live_rating": False},
-        "draw_prob":       None,
-        "best_formation":  None,
+        "home":                {"attack": None, "defence": None, "win_prob": None, "live_rating": False},
+        "away":                {"attack": None, "defence": None, "win_prob": None, "live_rating": False},
+        "draw_prob":           None,
+        "best_formation":      None,
         "away_best_formation": None,
-        "degraded":        True,
-        "name_mismatch":   None,
+        "degraded":            True,
+        "name_mismatch":       None,
     }
 
     if not home_team or not away_team:
         return empty
 
-    cache_key = f"tactica_ratings_v6__{home_team.lower()}__{away_team.lower()}"
-    cached = cache_read(cache_key)
-    if cached:
-        ttl = DEGRADED_TTL if cached.get("degraded") else RATINGS_TTL
-        if cache_age(cached) < ttl:
-            return {k: v for k, v in cached.items() if k != "_cached_at"}
+    cache_key = f"tactica_ratings_v7__{home_team.lower()}__{away_team.lower()}"
+    if not bypass_cache:
+        cached = cache_read(cache_key)
+        if cached:
+            ttl = DEGRADED_TTL if cached.get("degraded") else RATINGS_TTL
+            if cache_age(cached) < ttl:
+                return {k: v for k, v in cached.items() if k != "_cached_at"}
 
     # 1. Live ratings for each side from /api/form (single source of truth).
     hf = _form(home_team)
     af = _form(away_team)
 
-    def _rt(f: dict | None) -> tuple[int | None, int | None]:
+    def _rt(f: dict | None) -> tuple[int | float | None, int | float | None]:
         if not isinstance(f, dict):
             return None, None
         return _num(f.get("attack")), _num(f.get("defence"))
@@ -123,8 +126,6 @@ def get_match_ratings(home_team: str | None, away_team: str | None) -> dict:
 
     # 2. Canonical Home vs Away prediction matching app.tacticaengine.com
     h = _predict(home_team, away_team, {
-        "my_att": h_att, "my_def": h_def,
-        "opp_att": a_att, "opp_def": a_def,
         "is_home": True,
     })
 
@@ -139,8 +140,6 @@ def get_match_ratings(home_team: str | None, away_team: str | None) -> dict:
 
     # Fetch away-side best_formation (and away win prob if /api/predict only returned 1-sided prob)
     a = _predict(away_team, home_team, {
-        "my_att": a_att, "my_def": a_def,
-        "opp_att": h_att, "opp_def": h_def,
         "is_home": False,
     }) or {}
 
@@ -194,11 +193,11 @@ def get_match_ratings(home_team: str | None, away_team: str | None) -> dict:
 
 
 # ---------------------------------------------------------------------
-# Frozen pre-match snapshots
+# Frozen pre-match snapshots (locked at kickoff, live before kickoff)
 # ---------------------------------------------------------------------
 
-FORMULA_VERSION = "v2"
-FREEZE_WINDOW_HOURS = float(os.environ.get("FREEZE_WINDOW_HOURS", "6"))
+FORMULA_VERSION = "v3"
+FREEZE_WINDOW_HOURS = float(os.environ.get("FREEZE_WINDOW_HOURS", "0"))
 
 
 def get_frozen_ratings(event_id: int) -> dict | None:
@@ -263,7 +262,7 @@ def freeze_ratings(event_id: int, home_team: str, away_team: str,
     }
     try:
         from app.supabase import get_supabase
-        get_supabase().table("match_predictions").insert(row).execute()
+        get_supabase().table("match_predictions").upsert(row, on_conflict="event_id").execute()
     except Exception as e:
-        print(f"[tactica] freeze insert for {event_id} did not complete: {e}")
+        print(f"[tactica] freeze upsert for {event_id} did not complete: {e}")
     return get_frozen_ratings(event_id)
