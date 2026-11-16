@@ -841,6 +841,16 @@ export type TournamentSheet = {
   substitutes: TournamentSheetPlayer[];
 };
 
+export type TournamentPrediction = {
+  home_attack: number;
+  home_defence: number;
+  away_attack: number;
+  away_defence: number;
+  home_win_prob: number;
+  draw_prob: number;
+  away_win_prob: number;
+};
+
 export type TournamentMatch = {
   fixture: TournamentFixture & { tournament_id: string };
   /** The team sheet the organiser entered. Empty arrays when they
@@ -848,6 +858,15 @@ export type TournamentMatch = {
   lineups: { home: TournamentSheet; away: TournamentSheet };
   lineup_status: "confirmed" | "unavailable";
   events: TournamentMatchEvent[];
+  official_motm?: {
+    player_id: string;
+    name: string;
+    photo_url: string | null;
+    shirt_number: number | null;
+    team_name: string | null;
+    side: "home" | "away";
+  } | null;
+  prediction?: TournamentPrediction | null;
 };
 
 export async function getTournaments(

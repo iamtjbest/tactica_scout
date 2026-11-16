@@ -5,7 +5,7 @@ import Link from "next/link";
 import clsx from "clsx";
 import {
   getTournamentMatch, getMatchRatings, getMyVotes, ratePlayer, voteMotm,
-  type TournamentMatch, type TournamentMatchEvent, type TournamentSheet,
+  type TournamentMatch, type TournamentMatchEvent,
   type MatchRatings, type MyVotes,
 } from "@/lib/api";
 
@@ -13,17 +13,11 @@ type Tab = "lineups" | "timeline" | "ratings";
 
 /**
  * One match in a local competition.
- *
- * This is the page the ratings feature needed and didn't have: the
- * backend has accepted source="local" since it was written, but there
- * was nowhere in Scout to show a local fixture at all.
  */
 export default function TournamentMatchPage() {
   const { id, fixtureId } = useParams<{ id: string; fixtureId: string }>();
   const [d, setD] = useState<TournamentMatch | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Opens on Lineups when there is a team sheet, because that is the
-  // thing people check before kickoff; otherwise the timeline.
   const [tab, setTab] = useState<Tab>("timeline");
   const [tabPicked, setTabPicked] = useState(false);
 
@@ -47,7 +41,9 @@ export default function TournamentMatchPage() {
   if (!d) return <main className="px-4 pt-6"><p className="text-mt text-sm">Loading...</p></main>;
 
   const fx = d.fixture;
+  const pred = d.prediction;
   const live = ["live", "ht"].includes(String(fx.status).toLowerCase());
+  const finished = String(fx.status).toLowerCase() === "ft";
 
   return (
     <main className="max-w-screen-md mx-auto px-4 pt-4 pb-24">
@@ -55,37 +51,135 @@ export default function TournamentMatchPage() {
         ← Competition
       </Link>
 
+      {/* Match Score Header */}
       <div className="card mt-3">
         <div className="flex items-center justify-between gap-4">
-          <TeamLine name={fx.home_team} crest={fx.home_crest} />
+          <TeamLine
+            teamId={fx.home_team_id}
+            tournamentId={id}
+            name={fx.home_team}
+            crest={fx.home_crest}
+          />
           <div className="text-center shrink-0">
             <p className="font-display font-black text-2xl text-white">
               {fx.home_score ?? "–"} : {fx.away_score ?? "–"}
             </p>
             <p className={clsx("font-mono text-[10px] mt-0.5",
-                               live ? "text-red2" : "text-mt2")}>
+              live ? "text-red2" : "text-mt2")}>
               {live ? "LIVE" : String(fx.status).toUpperCase()}
             </p>
           </div>
-          <TeamLine name={fx.away_team} crest={fx.away_crest} align="right" />
+          <TeamLine
+            teamId={fx.away_team_id}
+            tournamentId={id}
+            name={fx.away_team}
+            crest={fx.away_crest}
+            align="right"
+          />
         </div>
         <p className="text-mt2 text-[11px] font-mono text-center mt-3">
           {fx.kickoff_at
             ? new Date(fx.kickoff_at).toLocaleString("en-GB", {
-                weekday: "short", day: "numeric", month: "short",
-                hour: "2-digit", minute: "2-digit",
-              })
+              weekday: "short", day: "numeric", month: "short",
+              hour: "2-digit", minute: "2-digit",
+            })
             : ""}
           {fx.venue ? ` • ${fx.venue}` : ""}
           {fx.round ? ` • ${fx.round}` : ""}
         </p>
       </div>
 
+      {/* Tactica Pre-Match Model: Win Probabilities & ATK/DEF Ratings */}
+      {pred && (
+        <section className="card mt-3 border border-volt/25">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <p className="text-volt text-[10px] font-mono font-bold uppercase tracking-wider">
+              {finished ? "Tactica Pre-Match Snapshot" : "Tactica Pre-Match Model"}
+            </p>
+            <span className="text-mt2 text-[10px] font-mono">
+              See the game before kickoff
+            </span>
+          </div>
+
+          {/* Probability Bar */}
+          <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-sur2 gap-0.5">
+            <div
+              className="bg-volt transition-all"
+              style={{ width: `${pred.home_win_prob}%` }}
+              title={`${fx.home_team ?? "Home"}: ${pred.home_win_prob}%`}
+            />
+            <div
+              className="bg-white/25 transition-all"
+              style={{ width: `${pred.draw_prob}%` }}
+              title={`Draw: ${pred.draw_prob}%`}
+            />
+            <div
+              className="bg-cyan-400 transition-all"
+              style={{ width: `${pred.away_win_prob}%` }}
+              title={`${fx.away_team ?? "Away"}: ${pred.away_win_prob}%`}
+            />
+          </div>
+
+          {/* Win Probability Percentages */}
+          <div className="grid grid-cols-3 gap-2 mt-2.5 text-xs font-mono">
+            <div>
+              <p className="text-mt2 text-[10px] uppercase">Home</p>
+              <p className="text-volt font-bold text-sm">{pred.home_win_prob}%</p>
+            </div>
+            <div className="text-center">
+              <p className="text-mt2 text-[10px] uppercase">Draw</p>
+              <p className="text-white font-bold text-sm">{pred.draw_prob}%</p>
+            </div>
+            <div className="text-right">
+              <p className="text-mt2 text-[10px] uppercase">Away</p>
+              <p className="text-cyan-400 font-bold text-sm">{pred.away_win_prob}%</p>
+            </div>
+          </div>
+
+          {/* ATK & DEF Ratings Comparison */}
+          <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-bd/50">
+            <div className="rounded-lg bg-sur2/70 px-3 py-2 flex items-center justify-between">
+              <span className="text-mt text-[11px] font-mono uppercase">
+                {fx.home_team?.split(" ")[0] || "Home"}
+              </span>
+              <div className="flex items-center gap-2 font-mono text-xs">
+                <span className="text-white font-bold">
+                  <span className="text-mt2 font-normal mr-1">ATK</span>
+                  {pred.home_attack}
+                </span>
+                <span className="text-bd">|</span>
+                <span className="text-white font-bold">
+                  <span className="text-mt2 font-normal mr-1">DEF</span>
+                  {pred.home_defence}
+                </span>
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-sur2/70 px-3 py-2 flex items-center justify-between">
+              <span className="text-mt text-[11px] font-mono uppercase">
+                {fx.away_team?.split(" ")[0] || "Away"}
+              </span>
+              <div className="flex items-center gap-2 font-mono text-xs">
+                <span className="text-white font-bold">
+                  <span className="text-mt2 font-normal mr-1">ATK</span>
+                  {pred.away_attack}
+                </span>
+                <span className="text-bd">|</span>
+                <span className="text-white font-bold">
+                  <span className="text-mt2 font-normal mr-1">DEF</span>
+                  {pred.away_defence}
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
       <div className="flex gap-2 mt-4">
         {(["lineups", "timeline", "ratings"] as Tab[]).map((x) => (
           <button key={x} onClick={() => { setTab(x); setTabPicked(true); }}
-                  className={clsx("tab-pill capitalize",
-                    tab === x ? "tab-pill-active" : "tab-pill-inactive")}>
+            className={clsx("tab-pill capitalize",
+              tab === x ? "tab-pill-active" : "tab-pill-inactive")}>
             {x}
           </button>
         ))}
@@ -94,41 +188,74 @@ export default function TournamentMatchPage() {
       <div className="mt-4">
         {tab === "lineups" && (
           <Lineups d={d} homeLabel={fx.home_team ?? "Home"}
-                   awayLabel={fx.away_team ?? "Away"} tournamentId={id} />
+            awayLabel={fx.away_team ?? "Away"} tournamentId={id} />
         )}
         {tab === "timeline" && (
           <Timeline events={d.events} fx={fx} tournamentId={id} />
         )}
         {tab === "ratings" && (
           <LocalRatings matchRef={fixtureId} match={d} tournamentId={id}
-                        homeLabel={fx.home_team ?? "Home"}
-                        awayLabel={fx.away_team ?? "Away"} />
+            homeLabel={fx.home_team ?? "Home"}
+            awayLabel={fx.away_team ?? "Away"} />
         )}
       </div>
     </main>
   );
 }
 
-function TeamLine({ name, crest, align = "left" }: {
-  name: string | null; crest: string | null; align?: "left" | "right";
+function TeamLine({
+  teamId,
+  tournamentId,
+  name,
+  crest,
+  align = "left",
+}: {
+  teamId?: string;
+  tournamentId: string;
+  name: string | null;
+  crest: string | null;
+  align?: "left" | "right";
 }) {
   const [failed, setFailed] = useState(false);
   const initials = (name || "?").split(/\s+/).filter(Boolean).slice(0, 2)
     .map((w) => w[0]!.toUpperCase()).join("");
-  return (
-    <div className={clsx("flex items-center gap-2 min-w-0 flex-1",
-                         align === "right" && "flex-row-reverse text-right")}>
+
+  const inner = (
+    <>
       {crest && !failed ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={crest} alt="" onError={() => setFailed(true)}
-             className="w-7 h-7 rounded-full object-cover shrink-0" />
+          className="w-7 h-7 rounded-full object-cover shrink-0" />
       ) : (
         <span className="w-7 h-7 rounded-full bg-sur2 border border-bd text-mt text-[10px]
                          font-bold flex items-center justify-center shrink-0">
           {initials}
         </span>
       )}
-      <span className="text-white text-sm font-semibold truncate">{name ?? "Unknown"}</span>
+      <span className="text-white text-sm font-semibold truncate group-hover:text-volt transition-colors">
+        {name ?? "Unknown"}
+      </span>
+    </>
+  );
+
+  if (teamId) {
+    return (
+      <Link
+        href={`/team/${teamId}?tournamentId=${tournamentId}`}
+        className={clsx(
+          "flex items-center gap-2 min-w-0 flex-1 group",
+          align === "right" && "flex-row-reverse text-right"
+        )}
+      >
+        {inner}
+      </Link>
+    );
+  }
+
+  return (
+    <div className={clsx("flex items-center gap-2 min-w-0 flex-1",
+      align === "right" && "flex-row-reverse text-right")}>
+      {inner}
     </div>
   );
 }
@@ -140,11 +267,6 @@ const EVENT_LABEL: Record<string, string> = {
   red_card: "Red", substitution: "Sub", assist: "Assist",
 };
 
-/**
- * The event_type enum is 'yellow' / 'red' / 'second_yellow', not
- * 'yellow_card' / 'red_card'. Matching on the long names meant every
- * tag fell through to the volt accent, so a booking looked like a goal.
- */
 function eventTone(type: string): string {
   const t = String(type).toLowerCase();
   if (t === "red" || t === "red_card" || t.includes("second_yellow")) {
@@ -190,7 +312,7 @@ function Timeline({ events, fx, tournamentId }: {
                   {e.players.photo_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={e.players.photo_url} alt=""
-                         className="w-6 h-6 rounded-full object-cover shrink-0" />
+                      className="w-6 h-6 rounded-full object-cover shrink-0" />
                   ) : null}
                   <Link
                     href={`/tournament/${tournamentId}/player/${e.players.id}`}
@@ -237,17 +359,8 @@ function Timeline({ events, fx, tournamentId }: {
   );
 }
 
-/* Halves only, same as the BSD ratings tab and the backend. */
 const STEPS = [4, 5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 10];
 
-/**
- * Ratings for a local fixture.
- *
- * The rateable list comes from the match events rather than a lineup,
- * because a local competition has no published XI: who actually played
- * is whoever the organiser logged. That means only players involved in
- * an incident can be rated, which is the honest limit of what we know.
- */
 function LocalRatings({ matchRef, match, homeLabel, awayLabel, tournamentId }: {
   matchRef: string; match: TournamentMatch;
   homeLabel: string; awayLabel: string; tournamentId: string;
@@ -279,10 +392,6 @@ function LocalRatings({ matchRef, match, homeLabel, awayLabel, tournamentId }: {
   if (!data && !error) return <p className="text-mt text-sm">Loading ratings...</p>;
   if (!data) return <p className="text-red2 text-sm font-semibold">{error}</p>;
 
-  // Everyone on the team sheet, starters and bench. This is the whole
-  // point of the organiser entering one: before it existed, only
-  // players who picked up a goal or a card could be rated, so someone
-  // could have the game of his life and be unratable.
   const seen = new Map<string, { name: string; side: "home" | "away" }>();
   for (const side of ["home", "away"] as const) {
     const sheet = match.lineups?.[side];
@@ -291,8 +400,6 @@ function LocalRatings({ matchRef, match, homeLabel, awayLabel, tournamentId }: {
     }
   }
 
-  // No sheet entered: fall back to whoever appears in the events, so
-  // the tab still works for an organiser who never filled one in.
   if (seen.size === 0) {
     for (const e of match.events) {
       if (!e.players) continue;
@@ -305,8 +412,6 @@ function LocalRatings({ matchRef, match, homeLabel, awayLabel, tournamentId }: {
   const byRef = new Map(data.players.map((p) => [p.player_ref, p]));
   const open = data.window.open;
 
-  // Array.from, not a spread: this project targets ES5, where
-  // spreading a Map needs downlevelIteration and won't compile.
   const entries = Array.from(seen.entries());
   const sides: { label: string; refs: string[] }[] = [
     { label: homeLabel, refs: entries.filter(([, v]) => v.side === "home").map(([k]) => k) },
@@ -390,7 +495,6 @@ function LocalRatings({ matchRef, match, homeLabel, awayLabel, tournamentId }: {
                         </Link>
                         <p className="text-mt text-[11px]">
                           {agg?.enough_votes
-                            // The average is already the big number beside it.
                             ? `${agg.votes} ${agg.votes === 1 ? "vote" : "votes"}`
                             : agg
                               ? `${agg.votes} of ${data.min_votes} votes needed`
@@ -453,11 +557,6 @@ function LocalRatings({ matchRef, match, homeLabel, awayLabel, tournamentId }: {
   );
 }
 
-/* ── team sheets ────────────────────────────────────────────────────
-   The XI on a pitch, laid out from the formation the organiser entered,
-   with the bench underneath. Same layout rule as the BSD lineups: the
-   formation drives the rows, because bucketing by position string turns
-   a 4-2-3-1 into a 4-5-1. */
 function parseFormation(formation: unknown): number[] | null {
   const raw = String(formation ?? "").trim();
   if (!raw) return null;
@@ -476,8 +575,6 @@ const POS_RANK = (p: any) => {
   return 3;
 };
 
-/** Narrow rows stay central: a two-man pivot spread full width ends up
- *  standing where the full-backs should be. */
 const ROW_WIDTH: Record<number, string> = {
   1: "42%", 2: "60%", 3: "84%", 4: "100%", 5: "100%",
 };
@@ -520,8 +617,8 @@ function Lineups({ d, homeLabel, awayLabel, tournamentId }: {
       <div className="flex gap-2">
         {(["home", "away"] as const).map((x) => (
           <button key={x} onClick={() => setSide(x)}
-                  className={clsx("tab-pill flex-1 truncate",
-                    side === x ? "tab-pill-active" : "tab-pill-inactive")}>
+            className={clsx("tab-pill flex-1 truncate",
+              side === x ? "tab-pill-active" : "tab-pill-inactive")}>
             {x === "home" ? homeLabel : awayLabel}
           </button>
         ))}
@@ -544,7 +641,7 @@ function Lineups({ d, homeLabel, awayLabel, tournamentId }: {
         <div className="absolute inset-0 flex flex-col-reverse justify-around py-3">
           {rows.map((row, i) => (
             <div key={i} className="flex justify-around items-start mx-auto"
-                 style={{ width: ROW_WIDTH[row.length] ?? "100%" }}>
+              style={{ width: ROW_WIDTH[row.length] ?? "100%" }}>
               {row.map((p) => (
                 <Link
                   key={p.player_id}

@@ -373,8 +373,11 @@ def _local_prediction(fx: dict, teams: dict[str, dict], all_fixtures: list[dict]
         mp = st["mp"]
         if mp == 0:
             return round(st["seed_atk"]), round(st["seed_def"])
-        emp_atk = max(45.0, min(75.0, BASE + ((st["gf"] / mp) - league_mu) * 6.5))
-        emp_def = max(45.0, min(75.0, BASE + (league_mu - (st["ga"] / mp)) * 6.5))
+        # Expected goals per match implied by the team's seed relative to BASE
+        seed_gf_exp = league_mu * (st["seed_atk"] / BASE)
+        seed_ga_exp = league_mu * (BASE / max(45.0, st["seed_def"]))
+        emp_atk = max(45.0, min(75.0, st["seed_atk"] + ((st["gf"] / mp) - seed_gf_exp) * 6.5))
+        emp_def = max(45.0, min(75.0, st["seed_def"] + (seed_ga_exp - (st["ga"] / mp)) * 6.5))
         w = min(1.0, mp / 5.0)
         return (
             round((1.0 - w) * st["seed_atk"] + w * emp_atk),

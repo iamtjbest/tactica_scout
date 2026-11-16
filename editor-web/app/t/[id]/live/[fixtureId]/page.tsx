@@ -1,31 +1,32 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import clsx from "clsx";
 import Guard from "@/components/Guard";
 import TeamSheet from "@/components/TeamSheet";
+import MatchGraphicStudio from "@/components/MatchGraphicStudio";
 import {
   getTournament, getLineup, setScore, listEvents, addEvent, deleteEvent,
-  type Fixture, type TeamRow, type MatchEvent, type FixtureLineup,
+  type Tournament, type Fixture, type TeamRow, type MatchEvent, type FixtureLineup,
 } from "@/lib/api";
 
 type PrimaryEvent = "goal" | "penalty" | "own_goal" | "yellow" | "second_yellow" | "red" | "substitution";
 type PenaltyOutcome = "penalty_scored" | "penalty_saved" | "penalty_missed";
 
 const PRIMARY_EVENTS: { id: PrimaryEvent; label: string }[] = [
-  { id: "goal",          label: "Goal" },
-  { id: "penalty",       label: "Penalty" },
-  { id: "own_goal",      label: "Own Goal" },
-  { id: "yellow",        label: "Yellow Card" },
+  { id: "goal", label: "Goal" },
+  { id: "penalty", label: "Penalty" },
+  { id: "own_goal", label: "Own Goal" },
+  { id: "yellow", label: "Yellow Card" },
   { id: "second_yellow", label: "2nd Yellow" },
-  { id: "red",           label: "Red Card" },
-  { id: "substitution",  label: "Substitution" },
+  { id: "red", label: "Red Card" },
+  { id: "substitution", label: "Substitution" },
 ];
 
 const PENALTY_OUTCOMES: { id: PenaltyOutcome; label: string }[] = [
   { id: "penalty_scored", label: "Penalty Scored" },
-  { id: "penalty_saved",  label: "Penalty Saved" },
+  { id: "penalty_saved", label: "Penalty Saved" },
   { id: "penalty_missed", label: "Penalty Missed" },
 ];
 
@@ -35,6 +36,10 @@ export default function Page() {
 
 function Live() {
   const { id, fixtureId } = useParams<{ id: string; fixtureId: string }>();
+  const searchParams = useSearchParams();
+  const initialPane = searchParams.get("pane");
+
+  const [tournament, setTournament] = useState<Tournament | null>(null);
   const [fx, setFx] = useState<Fixture | null>(null);
   const [teams, setTeams] = useState<TeamRow[]>([]);
   const [lineupData, setLineupData] = useState<FixtureLineup | null>(null);
@@ -42,7 +47,9 @@ function Live() {
   const [implied, setImplied] = useState<{ home: number; away: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [pane, setPane] = useState<"match" | "sheet">("match");
+  const [pane, setPane] = useState<"match" | "sheet" | "graphics">(
+    initialPane === "graphics" || initialPane === "sheet" ? initialPane : "match"
+  );
   const [kickoffNow, setKickoffNow] = useState(() => Date.now());
 
   // Structured Event Form State
@@ -56,11 +63,12 @@ function Live() {
 
   const load = useCallback(() => {
     getTournament(id).then((d) => {
+      setTournament(d.tournament);
       setTeams(d.teams);
       setFx(d.fixtures.find((f) => f.id === fixtureId) ?? null);
     }).catch((e) => setError(e.message));
-    getLineup(fixtureId).then(setLineupData).catch(() => {});
-    listEvents(fixtureId).then((d) => setEvents(d.events)).catch(() => {});
+    getLineup(fixtureId).then(setLineupData).catch(() => { });
+    listEvents(fixtureId).then((d) => setEvents(d.events)).catch(() => { });
   }, [id, fixtureId]);
 
   useEffect(() => { load(); }, [load]);
@@ -78,7 +86,7 @@ function Live() {
   }, [fx?.kickoff_at, fx?.status]);
 
   if (error && !fx) return <p className="text-red2 text-sm font-semibold">{error}</p>;
-  if (!fx) return <p className="text-mt text-sm">Loading...</p>;
+  if (!fx || !tournament) return <p className="text-mt text-sm">Loading...</p>;
 
   const name = (tid: string) => teams.find((t) => t.id === tid)?.clubs?.name ?? "Unknown";
   const home = fx.home_score ?? 0;
@@ -137,7 +145,6 @@ function Live() {
       });
       setImplied(r.score_from_events);
 
-      // Automatically update scoreboard when logging Goal, Penalty Scored, or Own Goal
       if (syncScore && (isScoringEvent || isOwnGoal)) {
         const creditSide: "home" | "away" = isOwnGoal
           ? (teamSide === "home" ? "away" : "home")
@@ -170,15 +177,35 @@ function Live() {
         &larr; Back to tournament
       </Link>
 
-      <div className="flex gap-2">
-        {([["match", "Score & events"], ["sheet", "Team sheet"]] as const).map(([k, label]) => (
-          <button key={k} onClick={() => setPane(k)}
-                  className={clsx("tab-pill",
-                    pane === k ? "tab-pill-active" : "tab-pill-inactive")}>
+      <div className="flex flex-wrap gap-2">
+        {(
+          [
+            ["match", "Score & events"],
+            ["sheet", "Team sheet"],
+            ["graphics", "Match graphics"],
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            onClick={() => setPane(k)}
+            className={clsx(
+              "tab-pill",
+              pane === k ? "tab-pill-active" : "tab-pill-inactive"
+            )}
+          >
             {label}
           </button>
         ))}
       </div>
+
+      {pane === "graphics" && (
+        <MatchGraphicStudio
+          tournament={tournament}
+          fixture={fx}
+          teams={teams}
+          events={events}
+        />
+      )}
 
       {pane === "sheet" && (
         <TeamSheet
@@ -201,32 +228,37 @@ function Live() {
                   weekday: "short", day: "numeric", month: "short",
                   hour: "2-digit", minute: "2-digit",
                 })}
-                . Score and event logging unlock automatically at kickoff. You can still set the{" "}
+                . Score and event logging unlock automatically at kickoff. You can set the{" "}
                 <button type="button" onClick={() => setPane("sheet")} className="text-volt underline font-semibold">
                   Team sheet
+                </button>{" "}
+                or generate a{" "}
+                <button type="button" onClick={() => setPane("graphics")} className="text-volt underline font-semibold">
+                  Pre-Match Graphic
                 </button>{" "}
                 now.
               </p>
             </div>
           )}
+
           {/* Scoreboard */}
           <div className="card">
             <div className="grid grid-cols-3 items-center gap-2">
               <Side label={name(fx.home_team_id)} score={home} disabled={busy || !kickoffReached}
-                    onUp={() => bump("home", 1)} onDown={() => bump("home", -1)} />
+                onUp={() => bump("home", 1)} onDown={() => bump("home", -1)} />
               <p className="text-center text-mt text-xs font-mono uppercase">
                 {fx.status}
               </p>
               <Side label={name(fx.away_team_id)} score={away} disabled={busy || !kickoffReached}
-                    onUp={() => bump("away", 1)} onDown={() => bump("away", -1)} />
+                onUp={() => bump("away", 1)} onDown={() => bump("away", -1)} />
             </div>
 
             <div className="flex flex-wrap gap-2 mt-5 justify-center">
               {["live", "ht", "ft", "postponed"].map((s) => (
                 <button key={s} disabled={busy || !kickoffReached}
-                        onClick={() => push({ status: s })}
-                        className={clsx("tab-pill",
-                          fx.status === s ? "tab-pill-active" : "tab-pill-inactive")}>
+                  onClick={() => push({ status: s })}
+                  className={clsx("tab-pill",
+                    fx.status === s ? "tab-pill-active" : "tab-pill-inactive")}>
                   {s.toUpperCase()}
                 </button>
               ))}
@@ -301,7 +333,6 @@ function Live() {
                 ))}
               </div>
 
-              {/* Conditional Penalty Outcome Sub-selector */}
               {primaryType === "penalty" && (
                 <div className="mt-3 p-3 rounded-xl bg-sur2/70 border border-volt/30 space-y-2">
                   <span className="block text-volt text-[10px] font-mono uppercase tracking-wider">
@@ -351,10 +382,10 @@ function Live() {
                   {primaryType === "substitution"
                     ? "4. Player Off"
                     : primaryType === "penalty"
-                    ? "4. Penalty Taker"
-                    : primaryType === "goal"
-                    ? "4. Goal Scorer"
-                    : "4. Player Affected"}
+                      ? "4. Penalty Taker"
+                      : primaryType === "goal"
+                        ? "4. Goal Scorer"
+                        : "4. Player Affected"}
                 </span>
                 <select
                   className="input-select mt-1"
@@ -370,7 +401,6 @@ function Live() {
                 </select>
               </label>
 
-              {/* Conditional 2nd Player Field: Assist / Goalkeeper Save / Sub On */}
               {primaryType === "goal" && (
                 <label className="block">
                   <span className="text-mt text-[11px] uppercase tracking-wide">
@@ -505,10 +535,10 @@ function Live() {
                             {e.type === "goal"
                               ? `(Assist: ${relName})`
                               : e.type === "penalty_saved"
-                              ? `(Saved by: ${relName})`
-                              : e.type === "substitution"
-                              ? `→ In: ${relName}`
-                              : `(${relName})`}
+                                ? `(Saved by: ${relName})`
+                                : e.type === "substitution"
+                                  ? `→ In: ${relName}`
+                                  : `(${relName})`}
                           </span>
                         )}
                         <span className="text-mt2 text-xs ml-2">{name(e.tournament_team_id)}</span>
@@ -544,11 +574,11 @@ function Side({ label, score, disabled, onUp, onDown }: {
       <p className="font-display font-black text-5xl text-volt leading-none">{score}</p>
       <div className="flex justify-center gap-2 mt-3">
         <button disabled={disabled} onClick={onDown}
-                className="w-11 h-11 rounded-lg bg-sur2 hover:bg-bd text-white text-xl">
+          className="w-11 h-11 rounded-lg bg-sur2 hover:bg-bd text-white text-xl">
           &minus;
         </button>
         <button disabled={disabled} onClick={onUp}
-                className="w-11 h-11 rounded-lg bg-volt text-bg font-bold text-xl">
+          className="w-11 h-11 rounded-lg bg-volt text-bg font-bold text-xl">
           +
         </button>
       </div>

@@ -28,22 +28,6 @@ import {
   type StandingRow,
 } from "@/lib/api";
 
-/**
- * The competition workspace is organised the way Torneo organises
- * theirs, because that grouping is right: what you do during the
- * competition, what you set up before it, and what you configure once.
- *
- * RUN      Matches, Standings, Brackets
- * BUILD    Teams, Players, Format & structure
- * SETTINGS Info, Proof, Collaborators
- *
- * Torneo also has Venues, Regulations and Suspensions. Those are not
- * here because nothing in our schema backs them yet: there is no
- * venues table (a fixture carries a free-text venue), no regulations
- * document, and no disciplinary record. Drawing the menu items would
- * promise screens that cannot save anything, so they arrive when the
- * tables do.
- */
 type Section =
   | "matches" | "standings" | "brackets"
   | "teams" | "players" | "venues" | "structure"
@@ -53,27 +37,27 @@ const NAV: { group: string; items: { id: Section; label: string; icon: () => JSX
   {
     group: "Run",
     items: [
-      { id: "matches",   label: "Matches",   icon: IconMatches },
+      { id: "matches", label: "Matches", icon: IconMatches },
       { id: "standings", label: "Standings", icon: IconStandings },
-      { id: "brackets",  label: "Brackets",  icon: IconBrackets },
+      { id: "brackets", label: "Brackets", icon: IconBrackets },
     ],
   },
   {
     group: "Build",
     items: [
-      { id: "teams",     label: "Teams",             icon: IconTeams },
-      { id: "players",   label: "Players",           icon: IconPlayers },
-      { id: "venues",    label: "Venues",            icon: IconVenues },
+      { id: "teams", label: "Teams", icon: IconTeams },
+      { id: "players", label: "Players", icon: IconPlayers },
+      { id: "venues", label: "Venues", icon: IconVenues },
       { id: "structure", label: "Format & structure", icon: IconStructure },
     ],
   },
   {
     group: "Settings",
     items: [
-      { id: "info",          label: "Info",          icon: IconInfo },
-      { id: "regulations",   label: "Regulations",   icon: IconRules },
-      { id: "suspensions",   label: "Suspensions",   icon: IconBan },
-      { id: "proof",         label: "Proof",         icon: IconProof },
+      { id: "info", label: "Info", icon: IconInfo },
+      { id: "regulations", label: "Regulations", icon: IconRules },
+      { id: "suspensions", label: "Suspensions", icon: IconBan },
+      { id: "proof", label: "Proof", icon: IconProof },
       { id: "collaborators", label: "Collaborators", icon: IconPeople },
     ],
   },
@@ -99,18 +83,20 @@ function Detail() {
   const [ready, setReady] = useState<Readiness | null>(null);
   const [section, setSection] = useState<Section>("matches");
   const [navOpen, setNavOpen] = useState(false);
-  // Remembered per browser: someone who collapses it means it.
   const [navCollapsed, setNavCollapsed] = useState(false);
+
   useEffect(() => {
     try {
       setNavCollapsed(localStorage.getItem("editor.navCollapsed") === "1");
     } catch { /* private mode, blocked storage: just stay expanded */ }
   }, []);
+
   useEffect(() => {
     try {
       localStorage.setItem("editor.navCollapsed", navCollapsed ? "1" : "0");
     } catch { /* not worth failing a render over */ }
   }, [navCollapsed]);
+
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -126,30 +112,18 @@ function Detail() {
   if (!data) return <p className="text-mt text-sm">Loading...</p>;
 
   const t = data.tournament;
-  // The backend attaches the caller's role. A scorer sees the same
-  // screens but the controls they can't use aren't drawn.
   const role = (t as any)._role ?? "owner";
-  // Mirrors FROZEN_STATUSES on the backend: nothing is editable until
-  // it is approved. A competition is submitted the moment it is
-  // created, so draft here means "waiting on us" rather than "still
-  // being written". Hiding the controls is a courtesy; the server
-  // refuses the write regardless.
   const editable =
     (t.status === "approved" || t.status === "rejected") &&
     (role === "owner" || role === "editor");
 
-  // Proof is narrower. It is the evidence a decision was made on, so it
-  // is only editable while that decision is still outstanding -- which
-  // matches add_proof/delete_proof in editor_review.py. Drawing proof
-  // controls on an approved competition would offer a button the server
-  // rejects.
   const proofEditable =
     (t.status === "draft" || t.status === "rejected") && role === "owner";
 
   const counts: Partial<Record<Section, number>> = {
     matches: data.fixtures.length,
-    teams:   data.teams.length,
-    proof:   data.proofs.length,
+    teams: data.teams.length,
+    proof: data.proofs.length,
   };
 
   const nav = (
@@ -163,10 +137,6 @@ function Detail() {
 
   return (
     <div className="lg:flex lg:items-start">
-      {/* ── competition menu ───────────────────────────────── */}
-      {/* Collapsible: on a laptop the 56px rail plus a 256px menu plus
-          the page's own content leaves very little room for a wide
-          table, so the menu folds away and the choice is remembered. */}
       <div className={clsx(
         "hidden lg:block shrink-0 border-r border-bd min-h-screen relative transition-all",
         navCollapsed ? "w-10" : "w-64"
@@ -186,8 +156,6 @@ function Detail() {
         {!navCollapsed && nav}
       </div>
 
-      {/* phone: the same menu behind a disclosure, so the content
-          still starts at the top of the screen */}
       <div className="lg:hidden border-b border-bd">
         <button
           onClick={() => setNavOpen((v) => !v)}
@@ -205,7 +173,6 @@ function Detail() {
         {navOpen && <div className="border-t border-bd">{nav}</div>}
       </div>
 
-      {/* ── content ────────────────────────────────────────── */}
       <div className="flex-1 min-w-0 px-4 sm:px-6 py-6">
         <nav className="text-xs text-mt mb-5" aria-label="Breadcrumb">
           <Link href="/competitions" className="hover:text-white transition-colors">
@@ -247,7 +214,7 @@ function Detail() {
 
         {section === "matches" && (
           <FixturesTab tid={id} t={t} teams={data.teams} fixtures={data.fixtures}
-                       format={t.format} editable={editable} onChanged={load} />
+            format={t.format} editable={editable} onChanged={load} />
         )}
         {section === "standings" && <TableTab tid={id} />}
         {section === "brackets" && (
@@ -255,7 +222,7 @@ function Detail() {
         )}
         {section === "teams" && (
           <TeamsTab tid={id} teams={data.teams}
-                    editable={editable && role === "owner"} onChanged={load} />
+            editable={editable && role === "owner"} onChanged={load} />
         )}
         {section === "players" && (
           <PlayersSection teams={data.teams} editable={editable && role === "owner"} />
@@ -265,7 +232,7 @@ function Detail() {
         )}
         {section === "structure" && (
           <StructureSection tid={id} t={t} teams={data.teams} fixtures={data.fixtures}
-                            editable={editable && role === "owner"} onChanged={load} />
+            editable={editable && role === "owner"} onChanged={load} />
         )}
         {section === "suspensions" && (
           <SuspensionsSection tid={id} teams={data.teams} editable={editable} />
@@ -275,7 +242,7 @@ function Detail() {
         )}
         {section === "regulations" && (
           <RegulationsSection t={t} editable={editable && role === "owner"}
-                              onChanged={load} />
+            onChanged={load} />
         )}
         {section === "proof" && (
           <ProofTab tid={id} proofs={data.proofs} editable={proofEditable} onChanged={load} />
@@ -288,27 +255,21 @@ function Detail() {
   );
 }
 
-/** One line under each section heading, so a screen is never just a title. */
 const BLURBS: Record<Section, string> = {
-  matches:       "The full schedule and results for this competition.",
-  standings:     "Worked out from finished matches every time this loads.",
-  brackets:      "The knockout draw, round by round.",
-  teams:         "Every team taking part.",
-  players:       "Every registered player, by team.",
-  venues:        "The grounds your matches are played at.",
-  structure:     "The named parts this competition is divided into.",
-  suspensions:   "Players serving a ban, and what they were banned for.",
-  info:          "Name, logo, organiser, country and dates.",
-  regulations:   "What a result is worth, and how level teams are separated.",
-  proof:         "Evidence this competition is real. We read this before approving.",
+  matches: "The full schedule and results for this competition.",
+  standings: "Worked out from finished matches every time this loads.",
+  brackets: "The knockout draw, round by round.",
+  teams: "Every team taking part.",
+  players: "Every registered player, by team.",
+  venues: "The grounds your matches are played at.",
+  structure: "The named parts this competition is divided into.",
+  suspensions: "Players serving a ban, and what they were banned for.",
+  info: "Name, logo, organiser, country and dates.",
+  regulations: "What a result is worth, and how level teams are separated.",
+  proof: "Evidence this competition is real. We read this before approving.",
   collaborators: "The people who can edit this competition.",
 };
 
-/* ── publish state ───────────────────────────────────────────────────
-   Lives at the top of the competition menu, so it is a narrow column,
-   not a full-width bar. Everything here stacks and the button is full
-   width; the earlier side-by-side version burst out of the menu and
-   sat on top of the page heading. */
 function SubmitBar({ t, ready, editable, onChanged }: {
   t: Tournament; ready: Readiness | null; editable: boolean; onChanged: () => void;
 }) {
@@ -341,7 +302,7 @@ function SubmitBar({ t, ready, editable, onChanged }: {
           Fans can follow it on Scout.
         </p>
         <button className="text-mt hover:text-red2 text-xs font-semibold mt-2"
-                disabled={busy} onClick={() => act(() => unpublish(t.id))}>
+          disabled={busy} onClick={() => act(() => unpublish(t.id))}>
           {busy ? "Working..." : "Unpublish"}
         </button>
         {error && <p className="text-red2 text-xs font-semibold mt-2">{error}</p>}
@@ -413,8 +374,6 @@ function TeamsTab({ tid, teams, editable, onChanged }: {
       .catch((e) => setError(e instanceof Error ? e.message : "Could not load groups."));
   }, [tid]);
 
-  // Search before create, always. Clubs are global, so a duplicate
-  // splits one squad's career history across two rows.
   useEffect(() => {
     if (q.trim().length < 2) { setHits([]); return; }
     const timer = setTimeout(() => {
@@ -484,8 +443,6 @@ function TeamsTab({ tid, teams, editable, onChanged }: {
 
   const add = async (body: Record<string, unknown>) => {
     setError(null);
-    // Groups are set in Format & structure, which is the one place
-    // that knows the competition's shape.
     try { await addTeam(tid, { ...body, group_name: null }); setQ(""); onChanged(); }
     catch (e: any) { setError(e.message); }
   };
@@ -496,14 +453,14 @@ function TeamsTab({ tid, teams, editable, onChanged }: {
         <div className="card space-y-3">
           <p className="section-label">Add a team</p>
           <input className="input-select" value={q} onChange={(e) => setQ(e.target.value)}
-                 placeholder="Search existing clubs, or type a new name" />
+            placeholder="Search existing clubs, or type a new name" />
 
           {hits.length > 0 && (
             <div className="space-y-1">
               <p className="text-mt text-xs">Existing clubs, pick one to keep its history:</p>
               {hits.map((c) => (
                 <button key={c.id} onClick={() => add({ club_id: c.id })}
-                        className="w-full text-left px-3 py-2 rounded-lg bg-sur2 hover:bg-bd text-sm text-white">
+                  className="w-full text-left px-3 py-2 rounded-lg bg-sur2 hover:bg-bd text-sm text-white">
                   {c.name}{c.institution ? ` — ${c.institution}` : ""}
                 </button>
               ))}
@@ -512,7 +469,7 @@ function TeamsTab({ tid, teams, editable, onChanged }: {
 
           {q.trim().length >= 2 && (
             <button type="button" className="btn-volt w-full sm:w-auto"
-                    onClick={() => add({ club_name: q.trim() })}>
+              onClick={() => add({ club_name: q.trim() })}>
               Add &ldquo;{q.trim()}&rdquo; as a new team
             </button>
           )}
@@ -538,7 +495,7 @@ function TeamsTab({ tid, teams, editable, onChanged }: {
                       : <Crest url={tm.clubs?.crest_url} name={tm.clubs?.name} size={36} />}
                   </div>
                   <button type="button" className="min-w-0 text-left" disabled={!editable}
-                          onClick={(e) => { e.stopPropagation(); openEditor(tm); }}>
+                    onClick={(e) => { e.stopPropagation(); openEditor(tm); }}>
                     <p className="text-white text-sm font-semibold truncate">
                       {tm.clubs?.name ?? "Unknown club"}
                       {tm.clubs?.short_name && (
@@ -554,17 +511,17 @@ function TeamsTab({ tid, teams, editable, onChanged }: {
                 <div className="flex items-center gap-3 shrink-0">
                   {editable && (
                     <button type="button" className="text-volt2 text-sm"
-                            onClick={(e) => { e.stopPropagation(); openEditor(tm); }}>
+                      onClick={(e) => { e.stopPropagation(); openEditor(tm); }}>
                       {editingId === tm.id ? "Close" : "Edit"}
                     </button>
                   )}
                   {editable && (
                     <button type="button" className="text-mt hover:text-red2 text-sm"
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              try { await removeTeam(tid, tm.id); onChanged(); }
-                              catch (e: any) { setError(e.message); }
-                            }}>
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try { await removeTeam(tid, tm.id); onChanged(); }
+                        catch (e: any) { setError(e.message); }
+                      }}>
                       Remove
                     </button>
                   )}
@@ -572,30 +529,30 @@ function TeamsTab({ tid, teams, editable, onChanged }: {
               </div>
               {editingId === tm.id && editable && (
                 <div className="mt-4 pt-4 border-t border-bd space-y-3"
-                     onClick={(e) => e.stopPropagation()}>
+                  onClick={(e) => e.stopPropagation()}>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <label className="block">
                       <span className="text-mt text-[11px] uppercase tracking-wide">Team name</span>
                       <input className="input-select mt-1" value={draft.name}
-                             onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+                        onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
                     </label>
                     <label className="block">
                       <span className="text-mt text-[11px] uppercase tracking-wide">Short name</span>
                       <input className="input-select mt-1 uppercase" maxLength={20}
-                             value={draft.short_name}
-                             onChange={(e) => setDraft({ ...draft, short_name: e.target.value })} />
+                        value={draft.short_name}
+                        onChange={(e) => setDraft({ ...draft, short_name: e.target.value })} />
                     </label>
                     <label className="block">
                       <span className="text-mt text-[11px] uppercase tracking-wide">Institution / Faculty</span>
                       <input className="input-select mt-1" value={draft.institution}
-                             onChange={(e) => setDraft({ ...draft, institution: e.target.value })} />
+                        onChange={(e) => setDraft({ ...draft, institution: e.target.value })} />
                     </label>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                     <label className="block">
                       <span className="text-mt text-[11px] uppercase tracking-wide">Group / Stage</span>
                       <select className="input-select mt-1" value={draft.sub_competition_id}
-                              onChange={(e) => setDraft({ ...draft, sub_competition_id: e.target.value })}>
+                        onChange={(e) => setDraft({ ...draft, sub_competition_id: e.target.value })}>
                         <option value="">Unassigned</option>
                         {subs.map((sc) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
                       </select>
@@ -603,26 +560,26 @@ function TeamsTab({ tid, teams, editable, onChanged }: {
                     <label className="block">
                       <span className="text-mt text-[11px] uppercase tracking-wide">Home kit</span>
                       <input type="color" className="mt-1 h-10 w-full rounded bg-sur2 border border-bd cursor-pointer"
-                             value={draft.home_color}
-                             onChange={(e) => setDraft({ ...draft, home_color: e.target.value })} />
+                        value={draft.home_color}
+                        onChange={(e) => setDraft({ ...draft, home_color: e.target.value })} />
                     </label>
                     <label className="block">
                       <span className="text-mt text-[11px] uppercase tracking-wide">Away kit</span>
                       <input type="color" className="mt-1 h-10 w-full rounded bg-sur2 border border-bd cursor-pointer"
-                             value={draft.away_color}
-                             onChange={(e) => setDraft({ ...draft, away_color: e.target.value })} />
+                        value={draft.away_color}
+                        onChange={(e) => setDraft({ ...draft, away_color: e.target.value })} />
                     </label>
                     <label className="block">
                       <span className="text-mt text-[11px] uppercase tracking-wide">Seed ATK (45–75)</span>
                       <input type="number" min={45} max={75} step="0.5" placeholder="54"
-                             className="input-select mt-1" value={draft.attack_rating}
-                             onChange={(e) => setDraft({ ...draft, attack_rating: e.target.value })} />
+                        className="input-select mt-1" value={draft.attack_rating}
+                        onChange={(e) => setDraft({ ...draft, attack_rating: e.target.value })} />
                     </label>
                     <label className="block">
                       <span className="text-mt text-[11px] uppercase tracking-wide">Seed DEF (45–75)</span>
                       <input type="number" min={45} max={75} step="0.5" placeholder="54"
-                             className="input-select mt-1" value={draft.defence_rating}
-                             onChange={(e) => setDraft({ ...draft, defence_rating: e.target.value })} />
+                        className="input-select mt-1" value={draft.defence_rating}
+                        onChange={(e) => setDraft({ ...draft, defence_rating: e.target.value })} />
                     </label>
                   </div>
                   {error && <p className="text-red2 text-sm font-semibold">{error}</p>}
@@ -740,113 +697,113 @@ function Squad({ teamId, editable }: { teamId: string; editable: boolean }) {
   return (
     <div className="mt-4 pt-4 border-t border-bd space-y-3">
       {squad === null ? <p className="text-mt text-sm">Loading squad...</p> :
-       squad.length === 0 ? <p className="text-mt text-sm">Nobody registered yet.</p> : (
-        <div className="divide-y divide-bd/40">
-          {squad.map((r) => {
-            const player = r.players;
-            const initials = `${player?.first_name?.[0] ?? ""}${player?.last_name?.[0] ?? ""}`.toUpperCase();
-            return (
-              <div key={r.id} className="py-2.5 text-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <label className={clsx(
-                      "relative w-9 h-9 rounded-full bg-sur2 border border-bd overflow-hidden",
-                      "flex items-center justify-center shrink-0",
-                      editable && "cursor-pointer hover:border-volt"
-                    )} title={editable ? "Click to upload player photo" : undefined}>
-                      {player?.photo_url ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={player.photo_url} alt="" className="w-full h-full object-cover" />
-                      ) : (
-                        <span className="text-xs font-bold text-mt">{initials || "?"}</span>
-                      )}
-                      {editable && player?.id && (
-                        <input type="file" accept="image/png,image/jpeg,image/webp"
-                               className="hidden" disabled={busy}
-                               onChange={(e) => {
-                                 void replacePhoto(player.id, e.target.files?.[0]);
-                                 e.target.value = "";
-                               }} />
-                      )}
-                    </label>
-                    <div className="min-w-0">
-                      <p className="text-white font-semibold truncate">
-                        {r.jersey_number != null && (
-                          <span className="text-volt font-mono mr-2">#{r.jersey_number}</span>
+        squad.length === 0 ? <p className="text-mt text-sm">Nobody registered yet.</p> : (
+          <div className="divide-y divide-bd/40">
+            {squad.map((r) => {
+              const player = r.players;
+              const initials = `${player?.first_name?.[0] ?? ""}${player?.last_name?.[0] ?? ""}`.toUpperCase();
+              return (
+                <div key={r.id} className="py-2.5 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <label className={clsx(
+                        "relative w-9 h-9 rounded-full bg-sur2 border border-bd overflow-hidden",
+                        "flex items-center justify-center shrink-0",
+                        editable && "cursor-pointer hover:border-volt"
+                      )} title={editable ? "Click to upload player photo" : undefined}>
+                        {player?.photo_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={player.photo_url} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-xs font-bold text-mt">{initials || "?"}</span>
                         )}
-                        {player?.first_name} {player?.last_name}
-                      </p>
-                      <p className="text-mt text-xs font-mono">
-                        {editable
-                          ? (!player?.photo_url ? "Tap avatar to add photo" : "")
-                          : (r.position || player?.position || "—").toUpperCase()}
-                      </p>
+                        {editable && player?.id && (
+                          <input type="file" accept="image/png,image/jpeg,image/webp"
+                            className="hidden" disabled={busy}
+                            onChange={(e) => {
+                              void replacePhoto(player.id, e.target.files?.[0]);
+                              e.target.value = "";
+                            }} />
+                        )}
+                      </label>
+                      <div className="min-w-0">
+                        <p className="text-white font-semibold truncate">
+                          {r.jersey_number != null && (
+                            <span className="text-volt font-mono mr-2">#{r.jersey_number}</span>
+                          )}
+                          {player?.first_name} {player?.last_name}
+                        </p>
+                        <p className="text-mt text-xs font-mono">
+                          {editable
+                            ? (!player?.photo_url ? "Tap avatar to add photo" : "")
+                            : (r.position || player?.position || "—").toUpperCase()}
+                        </p>
+                      </div>
+                      <select
+                        aria-label={`Position for ${player?.first_name ?? ""} ${player?.last_name ?? ""}`.trim()}
+                        disabled={!editable || busy}
+                        value={(r.position || player?.position || "MID").toUpperCase()}
+                        onChange={async (e) => {
+                          setBusy(true);
+                          setError(null);
+                          try {
+                            await updateRegisteredPlayer(teamId, r.id, { position: e.target.value });
+                            await load();
+                          } catch (err: any) {
+                            setError(err.message);
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                        className="bg-sur2 border border-bd rounded px-2 py-1 text-[11px] font-mono text-volt shrink-0"
+                      >
+                        {POSITIONS.map((pos) => (
+                          <option key={pos} value={pos}>{pos}</option>
+                        ))}
+                      </select>
                     </div>
-                    <select
-                      aria-label={`Position for ${player?.first_name ?? ""} ${player?.last_name ?? ""}`.trim()}
-                      disabled={!editable || busy}
-                      value={(r.position || player?.position || "MID").toUpperCase()}
-                      onChange={async (e) => {
-                        setBusy(true);
-                        setError(null);
-                        try {
-                          await updateRegisteredPlayer(teamId, r.id, { position: e.target.value });
-                          await load();
-                        } catch (err: any) {
-                          setError(err.message);
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                      className="bg-sur2 border border-bd rounded px-2 py-1 text-[11px] font-mono text-volt shrink-0"
-                    >
-                      {POSITIONS.map((pos) => (
-                        <option key={pos} value={pos}>{pos}</option>
-                      ))}
-                    </select>
+                    {editable && (
+                      <div className="flex items-center gap-3 shrink-0">
+                        <button type="button" className="text-volt2 text-xs"
+                          onClick={() => beginEdit(r)}>
+                          {editingId === r.id ? "Editing" : "Edit"}
+                        </button>
+                        <button type="button" className="text-mt hover:text-red2 text-xs"
+                          onClick={async () => {
+                            setBusy(true); setError(null);
+                            try { await unregisterPlayer(teamId, r.id); await load(); }
+                            catch (e) {
+                              setError(e instanceof Error ? e.message : "Could not remove player.");
+                            } finally { setBusy(false); }
+                          }}>
+                          Remove
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  {editable && (
-                    <div className="flex items-center gap-3 shrink-0">
-                      <button type="button" className="text-volt2 text-xs"
-                              onClick={() => beginEdit(r)}>
-                        {editingId === r.id ? "Editing" : "Edit"}
+                  {editingId === r.id && editable && (
+                    <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 items-end">
+                      <label className="block">
+                        <span className="text-mt text-[11px] uppercase tracking-wide">Shirt no.</span>
+                        <input className="input-select mt-1" type="number" min={1} max={99}
+                          value={edit.jersey_number}
+                          onChange={(e) => setEdit({ ...edit, jersey_number: e.target.value })} />
+                      </label>
+                      <button type="button" className="btn-volt" disabled={busy}
+                        onClick={() => saveRegistration(r)}>
+                        {busy ? "Saving..." : "Save player"}
                       </button>
-                      <button type="button" className="text-mt hover:text-red2 text-xs"
-                              onClick={async () => {
-                                setBusy(true); setError(null);
-                                try { await unregisterPlayer(teamId, r.id); await load(); }
-                                catch (e) {
-                                  setError(e instanceof Error ? e.message : "Could not remove player.");
-                                } finally { setBusy(false); }
-                              }}>
-                        Remove
+                      <button type="button" className="text-mt text-sm"
+                        onClick={() => setEditingId(null)}>
+                        Cancel
                       </button>
                     </div>
                   )}
                 </div>
-                {editingId === r.id && editable && (
-                  <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 items-end">
-                    <label className="block">
-                      <span className="text-mt text-[11px] uppercase tracking-wide">Shirt no.</span>
-                      <input className="input-select mt-1" type="number" min={1} max={99}
-                             value={edit.jersey_number}
-                             onChange={(e) => setEdit({ ...edit, jersey_number: e.target.value })} />
-                    </label>
-                    <button type="button" className="btn-volt" disabled={busy}
-                            onClick={() => saveRegistration(r)}>
-                      {busy ? "Saving..." : "Save player"}
-                    </button>
-                    <button type="button" className="text-mt text-sm"
-                            onClick={() => setEditingId(null)}>
-                      Cancel
-                    </button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
 
       {editable && (
         <form onSubmit={add} className="bg-sur2/60 border border-bd rounded-xl p-3 space-y-3">
@@ -855,22 +812,22 @@ function Squad({ teamId, editable }: { teamId: string; editable: boolean }) {
             <label className="block">
               <span className="text-mt text-[11px] uppercase tracking-wide">First name</span>
               <input className="input-select mt-1" required value={f.first_name}
-                     onChange={(e) => setF({ ...f, first_name: e.target.value })} />
+                onChange={(e) => setF({ ...f, first_name: e.target.value })} />
             </label>
             <label className="block">
               <span className="text-mt text-[11px] uppercase tracking-wide">Last name</span>
               <input className="input-select mt-1" required value={f.last_name}
-                     onChange={(e) => setF({ ...f, last_name: e.target.value })} />
+                onChange={(e) => setF({ ...f, last_name: e.target.value })} />
             </label>
             <label className="block">
               <span className="text-mt text-[11px] uppercase tracking-wide">Date of birth</span>
               <input className="input-select mt-1" type="date" required value={f.dob}
-                     onChange={(e) => setF({ ...f, dob: e.target.value })} />
+                onChange={(e) => setF({ ...f, dob: e.target.value })} />
             </label>
             <label className="block">
               <span className="text-mt text-[11px] uppercase tracking-wide">Position</span>
               <select className="input-select mt-1" value={f.position}
-                      onChange={(e) => setF({ ...f, position: e.target.value })}>
+                onChange={(e) => setF({ ...f, position: e.target.value })}>
                 {POSITIONS.map((position) => (
                   <option key={position} value={position}>{position}</option>
                 ))}
@@ -879,15 +836,15 @@ function Squad({ teamId, editable }: { teamId: string; editable: boolean }) {
             <label className="block">
               <span className="text-mt text-[11px] uppercase tracking-wide">Shirt no.</span>
               <input className="input-select mt-1" type="number" min={1} max={99}
-                     value={f.jersey_number}
-                     onChange={(e) => setF({ ...f, jersey_number: e.target.value })} />
+                value={f.jersey_number}
+                onChange={(e) => setF({ ...f, jersey_number: e.target.value })} />
             </label>
             <label className="block">
               <span className="text-mt text-[11px] uppercase tracking-wide">Photo (optional)</span>
               <span className="input-select mt-1 flex items-center justify-center text-xs text-mt cursor-pointer hover:border-volt truncate">
                 {photoFile ? photoFile.name : "Choose image"}
                 <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
-                       onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)} />
+                  onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)} />
               </span>
             </label>
           </div>
@@ -941,9 +898,6 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
 
   const isKnockout = format === "knockout";
 
-  // Filters are applied once and everything below reads the result, so
-  // the bracket, the round list and the calendar can never disagree
-  // about what is being shown.
   const shown = fixtures.filter((fx) => {
     if (filterSub && (fx.group_name || "") !== filterSub) return false;
     if (filterRound && (fx.round || "") !== filterRound) return false;
@@ -963,7 +917,7 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
         <div className="flex flex-wrap items-center gap-2">
           {subs.length > 0 && (
             <select className="input-select w-auto" value={filterSub}
-                    onChange={(e) => setFilterSub(e.target.value)}>
+              onChange={(e) => setFilterSub(e.target.value)}>
               <option value="">All sub-competitions</option>
               {subs.map((g) => (
                 <option key={g} value={g}>{/^group\b/i.test(g) ? g : `Group ${g}`}</option>
@@ -972,13 +926,13 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
           )}
           {rounds.length > 0 && (
             <select className="input-select w-auto" value={filterRound}
-                    onChange={(e) => setFilterRound(e.target.value)}>
+              onChange={(e) => setFilterRound(e.target.value)}>
               <option value="">All rounds</option>
               {rounds.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
           )}
           <select className="input-select w-auto" value={filterTeam}
-                  onChange={(e) => setFilterTeam(e.target.value)}>
+            onChange={(e) => setFilterTeam(e.target.value)}>
             <option value="">All teams</option>
             {teams.map((tm) => (
               <option key={tm.id} value={tm.id}>{tm.clubs?.name ?? "Unknown"}</option>
@@ -988,9 +942,9 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
           <div className="ml-auto flex items-center border border-bd rounded-lg overflow-hidden">
             {(["list", "calendar"] as const).map((v) => (
               <button key={v} onClick={() => setView(v)} aria-pressed={view === v}
-                      className={clsx(
-                        "px-3 py-2 text-xs font-semibold capitalize transition-colors",
-                        view === v ? "bg-volt/10 text-volt" : "text-mt hover:text-white")}>
+                className={clsx(
+                  "px-3 py-2 text-xs font-semibold capitalize transition-colors",
+                  view === v ? "bg-volt/10 text-volt" : "text-mt hover:text-white")}>
                 {v}
               </button>
             ))}
@@ -1000,7 +954,7 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
 
       {editable && fixtures.length > 0 && (
         <button type="button" className="text-volt2 text-sm font-semibold"
-                onClick={() => setShowAddForm((previous) => !previous)}>
+          onClick={() => setShowAddForm((previous) => !previous)}>
           {showAddForm ? "Hide fixture form" : "+ Add fixture(s)"}
         </button>
       )}
@@ -1021,19 +975,16 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
       {fixtures.length > 0 && editable && (
         <div className="flex items-center gap-4">
           <button className="text-mt hover:text-red2 text-sm font-semibold"
-                  onClick={async () => {
-                    setError(null);
-                    try { await clearFixtures(tid); onChanged(); }
-                    catch (e: any) { setError(e.message); }
-                  }}>
+            onClick={async () => {
+              setError(null);
+              try { await clearFixtures(tid); onChanged(); }
+              catch (e: any) { setError(e.message); }
+            }}>
             Clear all fixtures
           </button>
         </div>
       )}
 
-      {/* A knockout reads as a bracket; everything else reads as
-          matchdays. Same data, different shape, because a list of 30
-          league fixtures with no grouping is unusable. */}
       {fixtures.length > 0 && shown.length > 0 && (
         view === "calendar"
           ? <Calendar fixtures={shown} tid={tid} info={info} editable={editable} onDelete={removeOneFixture} />
@@ -1046,7 +997,7 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
         <div className="card text-center py-10">
           <p className="text-white font-semibold">Nothing matches those filters</p>
           <button onClick={() => { setFilterSub(""); setFilterRound(""); setFilterTeam(""); }}
-                  className="text-volt text-sm font-semibold mt-2 hover:underline">
+            className="text-volt text-sm font-semibold mt-2 hover:underline">
             Clear filters
           </button>
         </div>
@@ -1059,12 +1010,6 @@ function FixturesTab({ tid, t, teams, fixtures, format, editable, onChanged }: {
   );
 }
 
-/* ── season strip ───────────────────────────────────────────────────
-   How far through the competition is, and whether it is finished.
-   Worked out from the dates and the fixtures rather than stored: a
-   stored "progress" column goes stale the moment a score is corrected
-   or a match is postponed, and correcting scores is the single most
-   common thing an organiser does. */
 function SeasonStrip({ t, fixtures }: { t: Tournament; fixtures: Fixture[] }) {
   const start = new Date(t.start_date).getTime();
   const end = new Date(t.end_date).getTime();
@@ -1076,8 +1021,6 @@ function SeasonStrip({ t, fixtures }: { t: Tournament; fixtures: Fixture[] }) {
   const played = fixtures.filter((f) => String(f.status).toLowerCase() === "ft").length;
   const byPlayed = fixtures.length ? (played / fixtures.length) * 100 : 0;
 
-  // Once there are fixtures, how many have been played is the honest
-  // measure. Before then, all we know is the calendar.
   const pct = Math.round(fixtures.length ? byPlayed : byTime);
   const ended = fixtures.length > 0 && played === fixtures.length;
 
@@ -1093,8 +1036,8 @@ function SeasonStrip({ t, fixtures }: { t: Tournament; fixtures: Fixture[] }) {
         </div>
         <div className="h-1.5 rounded-full bg-sur2 overflow-hidden">
           <div className={clsx("h-full rounded-full transition-all",
-                               ended ? "bg-grn" : "bg-volt")}
-               style={{ width: `${pct}%` }} />
+            ended ? "bg-grn" : "bg-volt")}
+            style={{ width: `${pct}%` }} />
         </div>
         <div className="flex items-center justify-between mt-2">
           <p className="font-mono text-[11px] text-mt2">{fmt(t.start_date)}</p>
@@ -1120,7 +1063,7 @@ function EmptyMatches() {
     <div className="card text-center py-14">
       <div className="w-12 h-12 rounded-xl bg-sur2 mx-auto flex items-center justify-center mb-4">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8A9BA8"
-             strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
           <rect x="3" y="5" width="18" height="16" rx="2" />
           <path d="M3 10h18M8 3v4M16 3v4" />
         </svg>
@@ -1133,10 +1076,6 @@ function EmptyMatches() {
   );
 }
 
-/* ── calendar ───────────────────────────────────────────────────────
-   The same fixtures by day rather than by round. Useful when the
-   question is "what is on Saturday" rather than "who plays in the
-   semi-final". */
 function Calendar({ fixtures, tid, info, editable, onDelete }: {
   fixtures: Fixture[]; tid: string;
   info: (id: string) => { name: string; crest_url: string | null };
@@ -1158,8 +1097,8 @@ function Calendar({ fixtures, tid, info, editable, onDelete }: {
             {d === "Unscheduled"
               ? "Unscheduled"
               : new Date(d).toLocaleDateString("en-GB", {
-                  weekday: "long", day: "numeric", month: "long",
-                })}
+                weekday: "long", day: "numeric", month: "long",
+              })}
           </p>
           {byDay[d]
             .slice()
@@ -1170,29 +1109,33 @@ function Calendar({ fixtures, tid, info, editable, onDelete }: {
               return (
                 <div key={fx.id} className="card flex items-center justify-between gap-4">
                   <Link href={`/t/${tid}/live/${fx.id}`} className="flex items-center gap-2 min-w-0 flex-1">
-                      <span className="font-mono text-[11px] text-mt w-11 shrink-0">
-                        {fx.kickoff_at
-                          ? new Date(fx.kickoff_at).toLocaleTimeString("en-GB",
-                              { hour: "2-digit", minute: "2-digit" })
-                          : "--:--"}
-                      </span>
-                      <Crest url={h.crest_url} name={h.name} size={18} />
-                      <span className="text-white text-sm truncate">{h.name}</span>
-                      <span className="text-mt2 text-xs">v</span>
-                      <Crest url={a.crest_url} name={a.name} size={18} />
-                      <span className="text-white text-sm truncate">{a.name}</span>
+                    <span className="font-mono text-[11px] text-mt w-11 shrink-0">
+                      {fx.kickoff_at
+                        ? new Date(fx.kickoff_at).toLocaleTimeString("en-GB",
+                          { hour: "2-digit", minute: "2-digit" })
+                        : "--:--"}
+                    </span>
+                    <Crest url={h.crest_url} name={h.name} size={18} />
+                    <span className="text-white text-sm truncate">{h.name}</span>
+                    <span className="text-mt2 text-xs">v</span>
+                    <Crest url={a.crest_url} name={a.name} size={18} />
+                    <span className="text-white text-sm truncate">{a.name}</span>
                   </Link>
                   <div className="flex items-center gap-3 shrink-0">
                     <span className="font-display font-black text-white">
                       {fx.home_score ?? "–"}:{fx.away_score ?? "–"}
                     </span>
+                    <Link href={`/t/${tid}/live/${fx.id}?pane=graphics`}
+                      className="text-cyan-400 hover:text-white text-xs font-semibold">
+                      Graphic
+                    </Link>
                     <Link href={`/t/${tid}/live/${fx.id}`}
-                          className={clsx("text-xs font-semibold", unlocked ? "text-volt2" : "text-mt hover:text-white")}>
+                      className={clsx("text-xs font-semibold", unlocked ? "text-volt2" : "text-mt hover:text-white")}>
                       {fx.status === "ft" ? "Edit" : unlocked ? "Go live" : "Team sheet"}
                     </Link>
                     {editable && (
                       <button type="button" onClick={() => onDelete(fx.id)}
-                              className="text-mt hover:text-red2 text-xs">
+                        className="text-mt hover:text-red2 text-xs">
                         Delete
                       </button>
                     )}
@@ -1253,13 +1196,17 @@ function ByRound({ fixtures, tid, info, editable, onDelete }: {
                       <span className="font-mono font-bold text-white">
                         {fx.home_score ?? "-"}:{fx.away_score ?? "-"}
                       </span>
+                      <Link href={`/t/${tid}/live/${fx.id}?pane=graphics`}
+                        className="text-cyan-400 hover:text-white text-xs font-semibold">
+                        Graphic
+                      </Link>
                       <Link href={`/t/${tid}/live/${fx.id}`}
-                            className={clsx("text-sm font-semibold", unlocked ? "text-volt2" : "text-mt hover:text-white")}>
+                        className={clsx("text-sm font-semibold", unlocked ? "text-volt2" : "text-mt hover:text-white")}>
                         {fx.status === "ft" ? "Edit" : unlocked ? "Go live" : "Team sheet"}
                       </Link>
                       {editable && (
                         <button type="button" onClick={() => onDelete(fx.id)}
-                                className="text-mt hover:text-red2 text-xs font-semibold">
+                          className="text-mt hover:text-red2 text-xs font-semibold">
                           Delete
                         </button>
                       )}
@@ -1274,9 +1221,6 @@ function ByRound({ fixtures, tid, info, editable, onDelete }: {
   );
 }
 
-/** Enter a draw you already have, one row at a time, then save as a
- *  set. Validated server-side as a whole: a typo in row four fails the
- *  lot rather than importing three and leaving you to work out which. */
 function OwnDraw({ tid, teams, onChanged }: {
   tid: string; teams: TeamRow[]; onChanged: () => void;
 }) {
@@ -1401,55 +1345,55 @@ function OwnDraw({ tid, teams, onChanged }: {
           ? teams.filter((team) => teamBelongsToGroup(team, row.group_name))
           : teams;
         return (
-        <div key={i} className="grid grid-cols-2 sm:grid-cols-6 gap-2">
-          <select className="input-select" value={row.group_name}
-                  onChange={(e) => setGroup(i, e.target.value)}>
-            <option value="">All / No group</option>
-            {groupNames.map((group) => (
-              <option key={group} value={group}>{groupLabel(group)}</option>
-            ))}
-          </select>
-          <select className="input-select" value={row.home_team_id}
-                  onChange={(e) => setField(i, "home_team_id", e.target.value)}>
-            <option value="">Home ({eligibleTeams.length})</option>
-            {eligibleTeams.map((team) => (
-              <option key={team.id} value={team.id}>{team.clubs?.name ?? "Unknown"}</option>
-            ))}
-          </select>
-          <select className="input-select" value={row.away_team_id}
-                  onChange={(e) => setField(i, "away_team_id", e.target.value)}>
-            <option value="">Away</option>
-            {eligibleTeams.filter((team) => team.id !== row.home_team_id).map((team) => (
-              <option key={team.id} value={team.id}>{team.clubs?.name ?? "Unknown"}</option>
-            ))}
-          </select>
-          <input type="datetime-local" className="input-select" value={row.kickoff_at}
-                 onChange={(e) => setField(i, "kickoff_at", e.target.value)} />
-          <input className="input-select" placeholder="Round (e.g. MD 1)" value={row.round}
-                 onChange={(e) => setField(i, "round", e.target.value)} />
-          {venues.length > 0 ? (
-            <select className="input-select" value={row.venue}
-                    onChange={(e) => setField(i, "venue", e.target.value)}>
-              <option value="">Select venue...</option>
-              {venues.map((venue) => (
-                <option key={venue.id} value={venue.name}>{venue.name}</option>
+          <div key={i} className="grid grid-cols-2 sm:grid-cols-6 gap-2">
+            <select className="input-select" value={row.group_name}
+              onChange={(e) => setGroup(i, e.target.value)}>
+              <option value="">All / No group</option>
+              {groupNames.map((group) => (
+                <option key={group} value={group}>{groupLabel(group)}</option>
               ))}
             </select>
-          ) : (
-            <input className="input-select" placeholder="Venue (add in Venues tab)" value={row.venue}
-                   onChange={(e) => setField(i, "venue", e.target.value)} />
-          )}
-        </div>
+            <select className="input-select" value={row.home_team_id}
+              onChange={(e) => setField(i, "home_team_id", e.target.value)}>
+              <option value="">Home ({eligibleTeams.length})</option>
+              {eligibleTeams.map((team) => (
+                <option key={team.id} value={team.id}>{team.clubs?.name ?? "Unknown"}</option>
+              ))}
+            </select>
+            <select className="input-select" value={row.away_team_id}
+              onChange={(e) => setField(i, "away_team_id", e.target.value)}>
+              <option value="">Away</option>
+              {eligibleTeams.filter((team) => team.id !== row.home_team_id).map((team) => (
+                <option key={team.id} value={team.id}>{team.clubs?.name ?? "Unknown"}</option>
+              ))}
+            </select>
+            <input type="datetime-local" className="input-select" value={row.kickoff_at}
+              onChange={(e) => setField(i, "kickoff_at", e.target.value)} />
+            <input className="input-select" placeholder="Round (e.g. MD 1)" value={row.round}
+              onChange={(e) => setField(i, "round", e.target.value)} />
+            {venues.length > 0 ? (
+              <select className="input-select" value={row.venue}
+                onChange={(e) => setField(i, "venue", e.target.value)}>
+                <option value="">Select venue...</option>
+                {venues.map((venue) => (
+                  <option key={venue.id} value={venue.name}>{venue.name}</option>
+                ))}
+              </select>
+            ) : (
+              <input className="input-select" placeholder="Venue (add in Venues tab)" value={row.venue}
+                onChange={(e) => setField(i, "venue", e.target.value)} />
+            )}
+          </div>
         );
       })}
       <div className="flex items-center gap-4">
         <button type="button" className="text-volt2 text-sm font-semibold"
-                onClick={() => setRows((current) => [...current, blank()])}>
+          onClick={() => setRows((current) => [...current, blank()])}>
           + Add another fixture
         </button>
         {rows.length > 1 && (
           <button type="button" className="text-mt hover:text-red2 text-sm"
-                  onClick={() => setRows((current) => current.slice(0, -1))}>
+            onClick={() => setRows((current) => current.slice(0, -1))}>
             Remove last
           </button>
         )}
@@ -1486,13 +1430,13 @@ function TableTab({ tid }: { tid: string }) {
       </p>
       {data.grouped
         ? Object.keys(data.group_tables || {}).sort().map((g) => (
-            <div key={g}>
-              <p className="section-label mb-3">Group {g}</p>
-              <div className="card">
-                <StandingsTable rows={data.group_tables![g]} />
-              </div>
+          <div key={g}>
+            <p className="section-label mb-3">Group {g}</p>
+            <div className="card">
+              <StandingsTable rows={data.group_tables![g]} />
             </div>
-          ))
+          </div>
+        ))
         : <div className="card"><StandingsTable rows={data.standings || []} /></div>}
     </div>
   );
@@ -1528,16 +1472,16 @@ function ProofTab({ tid, proofs, editable, onChanged }: {
         <form onSubmit={add} className="card space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <select className="input-select" value={f.type}
-                    onChange={(e) => setF({ ...f, type: e.target.value })}>
+              onChange={(e) => setF({ ...f, type: e.target.value })}>
               <option value="link">Link</option>
               <option value="document">Document</option>
               <option value="screenshot">Screenshot</option>
             </select>
             <input className="input-select sm:col-span-2" required placeholder="URL"
-                   value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} />
+              value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} />
           </div>
           <input className="input-select" placeholder="Note (optional)"
-                 value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
+            value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
           <button className="btn-volt">Add proof</button>
           {error && <p className="text-red2 text-sm font-semibold">{error}</p>}
         </form>
@@ -1557,10 +1501,10 @@ function ProofTab({ tid, proofs, editable, onChanged }: {
               </div>
               {editable && (
                 <button className="text-mt hover:text-red2 text-sm shrink-0"
-                        onClick={async () => {
-                          try { await deleteProof(tid, p.id); onChanged(); }
-                          catch (e: any) { setError(e.message); }
-                        }}>
+                  onClick={async () => {
+                    try { await deleteProof(tid, p.id); onChanged(); }
+                    catch (e: any) { setError(e.message); }
+                  }}>
                   Remove
                 </button>
               )}
@@ -1572,16 +1516,6 @@ function ProofTab({ tid, proofs, editable, onChanged }: {
   );
 }
 
-
-/** Crest, click to replace.
- *
- * The file goes to our backend, which writes it to Supabase Storage
- * with the service role key. It never goes browser-to-bucket, because
- * that key cannot be in a browser and the bucket has no policies.
- *
- * Clubs are global, so this crest follows the club into every future
- * tournament, which is the point: the department side keeps its badge.
- */
 function CrestUpload({ club, onChanged }: {
   club: { id: string; name: string; crest_url: string | null } | null;
   onChanged: () => void;
@@ -1604,17 +1538,17 @@ function CrestUpload({ club, onChanged }: {
     <div className="shrink-0">
       <label className="cursor-pointer block" title="Upload a crest">
         <input type="file" accept="image/png,image/jpeg,image/gif,image/webp"
-               className="hidden" onChange={pick} disabled={busy} />
+          className="hidden" onChange={pick} disabled={busy} />
         <span className={busy ? "opacity-50 block" : "block"}>
           <Crest url={club.crest_url} name={club.name} size={36} />
         </span>
       </label>
       {club.crest_url && (
         <button className="text-mt2 hover:text-red2 text-[10px] mt-1 block"
-                onClick={async () => {
-                  try { await removeCrest(club.id); onChanged(); }
-                  catch (e: any) { setError(e.message); }
-                }}>
+          onClick={async () => {
+            try { await removeCrest(club.id); onChanged(); }
+            catch (e: any) { setError(e.message); }
+          }}>
           clear
         </button>
       )}
@@ -1623,11 +1557,6 @@ function CrestUpload({ club, onChanged }: {
   );
 }
 
-/* ── competition menu ───────────────────────────────────────────────
-   Crest and name, the publish state and its one action, then the three
-   groups. The state sits at the top rather than buried in a tab,
-   because "is this live yet" is the question an organiser has every
-   time they open the page. */
 function CompetitionNav({
   t, ready, role, editable, counts, active, onPick, onChanged,
 }: {
@@ -1710,8 +1639,6 @@ function BracketsSection({ fixtures, teams }: { fixtures: Fixture[]; teams: Team
     };
   }
 
-  // A league has no bracket. Saying so is better than an empty frame
-  // that looks like something failed to load.
   if (!fixtures.length) {
     return (
       <div className="card">
@@ -1726,10 +1653,7 @@ function BracketsSection({ fixtures, teams }: { fixtures: Fixture[]; teams: Team
   return <div className="card overflow-x-auto"><Bracket fixtures={fixtures} teams={teamMap} /></div>;
 }
 
-/* ── players ────────────────────────────────────────────────────────
-   Every squad in one place. Torneo has this as its own screen and it
-   is right: once there are twelve teams, finding one player by opening
-   twelve team rows is not a way to work. */
+/* ── players ──────────────────────────────────────────────────────── */
 function PlayersSection({ teams, editable }: { teams: TeamRow[]; editable: boolean }) {
   const [open, setOpen] = useState<string | null>(teams[0]?.id ?? null);
   const [q, setQ] = useState("");
@@ -1758,10 +1682,10 @@ function PlayersSection({ teams, editable }: { teams: TeamRow[]; editable: boole
       {teams.length > 3 && (
         <div className="flex flex-wrap gap-2 mb-4">
           <input className="input-select flex-1 min-w-[200px]" value={q}
-                 onChange={(e) => setQ(e.target.value)}
-                 placeholder="Search teams" />
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search teams" />
           <select className="input-select w-auto" value={only}
-                  onChange={(e) => setOnly(e.target.value)}>
+            onChange={(e) => setOnly(e.target.value)}>
             <option value="">All teams</option>
             {teams.map((tm) => (
               <option key={tm.id} value={tm.id}>{tm.clubs?.name ?? "Unknown"}</option>
@@ -1893,10 +1817,7 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-/* ── info ───────────────────────────────────────────────────────────
-   The competition's own details, editable in place. Torneo splits this
-   into General and Season tabs; with our smaller field set one form is
-   clearer than two. */
+/* ── info ─────────────────────────────────────────────────────────── */
 function InfoSection({ t, editable, onChanged }: {
   t: Tournament; editable: boolean; onChanged: () => void;
 }) {
@@ -1955,35 +1876,35 @@ function InfoSection({ t, editable, onChanged }: {
     <div className="space-y-4 max-w-2xl">
       <TournamentLogo t={t} onChanged={onChanged} />
 
-    <form onSubmit={save} className="card space-y-4">
-      <div className="grid sm:grid-cols-2 gap-4">
-        <Input label="Name" value={f.name} onChange={set("name")} required />
-        <Input label="Organising body" value={f.organizing_body}
-               onChange={set("organizing_body")} required />
-        <Input label="Country" value={f.country} onChange={set("country")} required />
-        <Input label="Contact email" type="email" value={f.contact_email}
-               onChange={set("contact_email")} required />
-        <Input label="Contact phone" value={f.organizer_phone}
-               onChange={set("organizer_phone")} />
-        <div />
-        <Input label="Starts" type="date" value={f.start_date}
-               onChange={set("start_date")} required />
-        <Input label="Ends" type="date" value={f.end_date}
-               onChange={set("end_date")} required />
-      </div>
+      <form onSubmit={save} className="card space-y-4">
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Input label="Name" value={f.name} onChange={set("name")} required />
+          <Input label="Organising body" value={f.organizing_body}
+            onChange={set("organizing_body")} required />
+          <Input label="Country" value={f.country} onChange={set("country")} required />
+          <Input label="Contact email" type="email" value={f.contact_email}
+            onChange={set("contact_email")} required />
+          <Input label="Contact phone" value={f.organizer_phone}
+            onChange={set("organizer_phone")} />
+          <div />
+          <Input label="Starts" type="date" value={f.start_date}
+            onChange={set("start_date")} required />
+          <Input label="Ends" type="date" value={f.end_date}
+            onChange={set("end_date")} required />
+        </div>
 
-      <p className="text-mt2 text-xs">
-        Level and format are fixed after creation. Both change what has
-        already been generated or reviewed.
-      </p>
+        <p className="text-mt2 text-xs">
+          Level and format are fixed after creation. Both change what has
+          already been generated or reviewed.
+        </p>
 
-      {error && <p className="text-red2 text-sm font-semibold">{error}</p>}
-      {saved && !error && <p className="text-grn text-sm font-semibold">Saved.</p>}
+        {error && <p className="text-red2 text-sm font-semibold">{error}</p>}
+        {saved && !error && <p className="text-grn text-sm font-semibold">Saved.</p>}
 
-      <button className="btn-volt" disabled={busy}>
-        {busy ? "Saving..." : "Save changes"}
-      </button>
-    </form>
+        <button className="btn-volt" disabled={busy}>
+          {busy ? "Saving..." : "Save changes"}
+        </button>
+      </form>
 
       <DangerZone t={t} />
     </div>
@@ -2024,11 +1945,11 @@ function TournamentLogo({ t, onChanged }: { t: Tournament; onChanged: () => void
               {busy ? "Uploading..." : t.crest_url ? "Replace" : "Add logo"}
             </span>
             <input type="file" accept="image/*" className="hidden"
-                   disabled={busy} onChange={pick} />
+              disabled={busy} onChange={pick} />
           </label>
           {t.crest_url && (
             <button type="button" onClick={clear} disabled={busy}
-                    className="text-mt hover:text-red2 text-sm font-semibold ml-3">
+              className="text-mt hover:text-red2 text-sm font-semibold ml-3">
               Remove
             </button>
           )}
@@ -2043,10 +1964,7 @@ function TournamentLogo({ t, onChanged }: { t: Tournament; onChanged: () => void
   );
 }
 
-/* ── danger zone ────────────────────────────────────────────────────
-   Deleting takes the teams, fixtures and every result with it, so it
-   asks the organiser to type the name. A confirm dialog is one careless
-   click; typing the name is not something you do by accident. */
+/* ── danger zone ──────────────────────────────────────────────────── */
 function DangerZone({ t }: { t: Tournament }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -2081,7 +1999,7 @@ function DangerZone({ t }: { t: Tournament }) {
 
       {!open ? (
         <button onClick={() => setOpen(true)}
-                className="mt-4 border border-red2/40 text-red2 font-semibold text-sm
+          className="mt-4 border border-red2/40 text-red2 font-semibold text-sm
                            px-4 py-2 rounded-lg hover:bg-red2 hover:text-bg
                            transition-colors">
           Delete competition
@@ -2093,17 +2011,17 @@ function DangerZone({ t }: { t: Tournament }) {
               Type <span className="text-white font-semibold">{t.name}</span> to confirm
             </span>
             <input className="input-select mt-1.5" value={typed} autoFocus
-                   onChange={(e) => setTyped(e.target.value)} />
+              onChange={(e) => setTyped(e.target.value)} />
           </label>
           {error && <p className="text-red2 text-sm font-semibold">{error}</p>}
           <div className="flex items-center gap-3">
             <button onClick={go} disabled={!matches || busy}
-                    className="bg-red2 text-bg font-bold text-sm px-4 py-2 rounded-lg
+              className="bg-red2 text-bg font-bold text-sm px-4 py-2 rounded-lg
                                disabled:opacity-30 disabled:cursor-not-allowed">
               {busy ? "Deleting..." : "Delete for good"}
             </button>
             <button onClick={() => { setOpen(false); setTyped(""); setError(null); }}
-                    className="text-mt hover:text-white text-sm font-semibold">
+              className="text-mt hover:text-white text-sm font-semibold">
               Cancel
             </button>
           </div>
@@ -2122,9 +2040,6 @@ function Input({ label, ...rest }: { label: string } & React.InputHTMLAttributes
   );
 }
 
-/* ── menu icons ─────────────────────────────────────────────────────
-   Inline rather than an icon package: nine glyphs are not worth a
-   dependency the organiser downloads on mobile data. */
 const ico = {
   width: 15, height: 15, viewBox: "0 0 24 24", fill: "none",
   stroke: "currentColor", strokeWidth: 2,
@@ -2168,21 +2083,16 @@ function IconPeople() {
   return <svg {...ico}><circle cx="9" cy="8" r="3" /><path d="M3 19c0-3 2.7-5 6-5s6 2 6 5" /><path d="M16 6a3 3 0 0 1 0 6M18 19c0-2-.8-3.6-2-4.5" /></svg>;
 }
 
-/* ── regulations ────────────────────────────────────────────────────
-   What a result is worth, and the order level teams are separated in.
-   Both are stored per competition, so neither is a constant anywhere in
-   the standings calculation. */
+/* ── regulations ──────────────────────────────────────────────────── */
 function RegulationsSection({ t, editable, onChanged }: {
   t: Tournament; editable: boolean; onChanged: () => void;
 }) {
   const [pts, setPts] = useState({
-    win:  t.points_rules?.win  ?? 3,
+    win: t.points_rules?.win ?? 3,
     draw: t.points_rules?.draw ?? 1,
     loss: t.points_rules?.loss ?? 0,
   });
 
-  // Selected keeps its order, because the order IS the rule. Anything
-  // not selected sits in the available list.
   const [selected, setSelected] = useState<string[]>(
     (t.tiebreakers || []).filter((x) => TIEBREAKERS.some((o) => o.id === x))
   );
@@ -2208,14 +2118,12 @@ function RegulationsSection({ t, editable, onChanged }: {
     setSaved(false);
   };
 
-  // Checked here as well as on the server, so the organiser is told
-  // before the round trip rather than after it.
   const localProblem =
     pts.win < pts.draw ? "A win can't be worth less than a draw."
-    : pts.draw < pts.loss ? "A draw can't be worth less than a loss."
-    : [pts.win, pts.draw, pts.loss].some((v) => v < 0 || v > 10)
-      ? "Points must be between 0 and 10."
-      : null;
+      : pts.draw < pts.loss ? "A draw can't be worth less than a loss."
+        : [pts.win, pts.draw, pts.loss].some((v) => v < 0 || v > 10)
+          ? "Points must be between 0 and 10."
+          : null;
 
   const save = async () => {
     if (localProblem) { setError(localProblem); return; }
@@ -2233,7 +2141,6 @@ function RegulationsSection({ t, editable, onChanged }: {
 
   return (
     <div className="space-y-4 max-w-2xl">
-      {/* points */}
       <div className="card">
         <p className="section-label mb-1">Points system</p>
         <p className="text-mt text-xs mb-4">
@@ -2243,8 +2150,6 @@ function RegulationsSection({ t, editable, onChanged }: {
         <div className="flex flex-wrap gap-4">
           {([["win", "Win"], ["draw", "Draw"], ["loss", "Loss"]] as const).map(([k, label]) => (
             <label key={k} className="block">
-              {/* block, not inline: a w-24 input stays on the same line as
-                  an inline label and the pair reads as one run of text. */}
               <span className="block text-mt text-xs uppercase tracking-wide">{label}</span>
               <input
                 type="number" min={0} max={10} disabled={!editable}
@@ -2256,7 +2161,6 @@ function RegulationsSection({ t, editable, onChanged }: {
         </div>
       </div>
 
-      {/* tiebreakers */}
       <div className="card">
         <p className="section-label mb-1">Tiebreakers</p>
         <p className="text-mt text-xs mb-4">
@@ -2272,7 +2176,7 @@ function RegulationsSection({ t, editable, onChanged }: {
           <ol className="space-y-2 mb-4">
             {selected.map((id, i) => (
               <li key={id}
-                  className="flex items-center gap-3 bg-sur2 border border-bd
+                className="flex items-center gap-3 bg-sur2 border border-bd
                              rounded-lg px-3 py-2">
                 <span className="font-mono text-[11px] text-mt2 w-4">{i + 1}</span>
                 <span className="text-white text-sm flex-1">{labelOf(id)}</span>
@@ -2282,20 +2186,20 @@ function RegulationsSection({ t, editable, onChanged }: {
                 {editable && (
                   <span className="flex items-center gap-1">
                     <button type="button" onClick={() => move(i, -1)} disabled={i === 0}
-                            aria-label={`Move ${labelOf(id)} up`}
-                            className="text-mt hover:text-white disabled:opacity-25 px-1">
+                      aria-label={`Move ${labelOf(id)} up`}
+                      className="text-mt hover:text-white disabled:opacity-25 px-1">
                       ↑
                     </button>
                     <button type="button" onClick={() => move(i, 1)}
-                            disabled={i === selected.length - 1}
-                            aria-label={`Move ${labelOf(id)} down`}
-                            className="text-mt hover:text-white disabled:opacity-25 px-1">
+                      disabled={i === selected.length - 1}
+                      aria-label={`Move ${labelOf(id)} down`}
+                      className="text-mt hover:text-white disabled:opacity-25 px-1">
                       ↓
                     </button>
                     <button type="button"
-                            onClick={() => { setSelected(selected.filter((x) => x !== id)); setSaved(false); }}
-                            aria-label={`Remove ${labelOf(id)}`}
-                            className="text-mt hover:text-red2 px-1">
+                      onClick={() => { setSelected(selected.filter((x) => x !== id)); setSaved(false); }}
+                      aria-label={`Remove ${labelOf(id)}`}
+                      className="text-mt hover:text-red2 px-1">
                       ×
                     </button>
                   </span>
@@ -2353,10 +2257,7 @@ function RegulationsSection({ t, editable, onChanged }: {
   );
 }
 
-/* ── venues ─────────────────────────────────────────────────────────
-   Per competition, not global: the same pitch is "Main Bowl" to one
-   organiser and "ABU Sports Complex Pitch 1" to another, and a shared
-   list would have them renaming each other's grounds. */
+/* ── venues ───────────────────────────────────────────────────────── */
 function VenuesSection({ tid, editable }: { tid: string; editable: boolean }) {
   const [rows, setRows] = useState<Venue[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2434,11 +2335,11 @@ function VenuesSection({ tid, editable }: { tid: string; editable: boolean }) {
             {editable && (
               <div className="flex items-center gap-3 shrink-0">
                 <button onClick={() => edit(v)}
-                        className="text-mt hover:text-volt text-sm font-semibold">
+                  className="text-mt hover:text-volt text-sm font-semibold">
                   Edit
                 </button>
                 <button onClick={() => remove(v)} disabled={busy}
-                        className="text-mt hover:text-red2 text-sm font-semibold">
+                  className="text-mt hover:text-red2 text-sm font-semibold">
                   Remove
                 </button>
               </div>
@@ -2452,13 +2353,13 @@ function VenuesSection({ tid, editable }: { tid: string; editable: boolean }) {
           <p className="section-label">{editing ? "Edit venue" : "Add a venue"}</p>
           <div className="grid sm:grid-cols-2 gap-3">
             <Input label="Name" value={f.name} required
-                   onChange={(e) => setF({ ...f, name: e.target.value })} />
+              onChange={(e) => setF({ ...f, name: e.target.value })} />
             <Input label="City" value={f.city}
-                   onChange={(e) => setF({ ...f, city: e.target.value })} />
+              onChange={(e) => setF({ ...f, city: e.target.value })} />
             <Input label="Address" value={f.address}
-                   onChange={(e) => setF({ ...f, address: e.target.value })} />
+              onChange={(e) => setF({ ...f, address: e.target.value })} />
             <Input label="Capacity" type="number" min={0} value={f.capacity}
-                   onChange={(e) => setF({ ...f, capacity: e.target.value })} />
+              onChange={(e) => setF({ ...f, capacity: e.target.value })} />
           </div>
           <div className="flex items-center gap-3">
             <button className="btn-volt" disabled={busy || !f.name.trim()}>
@@ -2466,7 +2367,7 @@ function VenuesSection({ tid, editable }: { tid: string; editable: boolean }) {
             </button>
             {editing && (
               <button type="button" onClick={() => { setEditing(null); setF(blank); }}
-                      className="text-mt hover:text-white text-sm font-semibold">
+                className="text-mt hover:text-white text-sm font-semibold">
                 Cancel
               </button>
             )}
@@ -2482,10 +2383,7 @@ function VenuesSection({ tid, editable }: { tid: string; editable: boolean }) {
   );
 }
 
-/* ── sub-competitions ───────────────────────────────────────────────
-   The named parts a competition divides into. The backend keeps
-   tournament_teams.group_name equal to the part's name, because that
-   column is what standings and fixture generation read. */
+/* ── sub-competitions ─────────────────────────────────────────────── */
 function SubCompetitions({ tid, editable, onChanged }: {
   tid: string; editable: boolean; onChanged: () => void;
 }) {
@@ -2546,8 +2444,8 @@ function SubCompetitions({ tid, editable, onChanged }: {
               </div>
               {editable && (
                 <button disabled={busy}
-                        onClick={() => run(() => deleteSubCompetition(tid, sc.id))}
-                        className="text-mt hover:text-red2 text-xs font-semibold shrink-0">
+                  onClick={() => run(() => deleteSubCompetition(tid, sc.id))}
+                  className="text-mt hover:text-red2 text-xs font-semibold shrink-0">
                   Remove
                 </button>
               )}
@@ -2557,14 +2455,14 @@ function SubCompetitions({ tid, editable, onChanged }: {
               <div className="flex flex-wrap gap-1.5 mt-3">
                 {sc.teams.map((tm) => (
                   <span key={tm.id}
-                        className="inline-flex items-center gap-1.5 bg-sur border border-bd
+                    className="inline-flex items-center gap-1.5 bg-sur border border-bd
                                    rounded-md px-2 py-1 text-xs text-mt">
                     {tm.clubs?.name ?? "Unknown"}
                     {editable && (
                       <button disabled={busy}
-                              onClick={() => run(() => unassignTeam(tid, tm.id))}
-                              aria-label={`Remove ${tm.clubs?.name} from ${sc.name}`}
-                              className="hover:text-red2">
+                        onClick={() => run(() => unassignTeam(tid, tm.id))}
+                        aria-label={`Remove ${tm.clubs?.name} from ${sc.name}`}
+                        className="hover:text-red2">
                         ×
                       </button>
                     )}
@@ -2584,12 +2482,12 @@ function SubCompetitions({ tid, editable, onChanged }: {
             </p>
             {editable && (
               <button type="button"
-                      onClick={() => setSelectedIds(
-                        loose.every((team) => selectedIds.includes(team.id))
-                          ? []
-                          : loose.map((team) => team.id)
-                      )}
-                      className="text-volt2 text-xs font-semibold hover:underline shrink-0">
+                onClick={() => setSelectedIds(
+                  loose.every((team) => selectedIds.includes(team.id))
+                    ? []
+                    : loose.map((team) => team.id)
+                )}
+                className="text-volt2 text-xs font-semibold hover:underline shrink-0">
                 {loose.length > 0 && loose.every((team) => selectedIds.includes(team.id))
                   ? "Clear selection"
                   : "Select all"}
@@ -2602,13 +2500,13 @@ function SubCompetitions({ tid, editable, onChanged }: {
               const picked = selectedIds.includes(tm.id);
               return (
                 <button type="button" key={tm.id} disabled={!editable || busy}
-                        onClick={() => togglePick(tm.id)}
-                        className={clsx(
-                          "rounded-md px-2.5 py-1.5 text-xs font-semibold border transition-colors",
-                          picked
-                            ? "bg-volt text-bg border-volt"
-                            : "bg-sur2 border-amber/30 text-amber hover:border-volt/50"
-                        )}>
+                  onClick={() => togglePick(tm.id)}
+                  className={clsx(
+                    "rounded-md px-2.5 py-1.5 text-xs font-semibold border transition-colors",
+                    picked
+                      ? "bg-volt text-bg border-volt"
+                      : "bg-sur2 border-amber/30 text-amber hover:border-volt/50"
+                  )}>
                   {picked ? "✓ " : ""}{tm.clubs?.name ?? "Unknown"}
                 </button>
               );
@@ -2622,7 +2520,7 @@ function SubCompetitions({ tid, editable, onChanged }: {
                   Assign {selectedIds.length > 0 ? `${selectedIds.length} selected` : `all ${loose.length}`} to
                 </span>
                 <select className="input-select mt-1.5 w-auto" value={target}
-                        onChange={(e) => setTarget(e.target.value)}>
+                  onChange={(e) => setTarget(e.target.value)}>
                   <option value="">Choose...</option>
                   {(subs || []).map((sc) => (
                     <option key={sc.id} value={sc.id}>{sc.name}</option>
@@ -2630,16 +2528,16 @@ function SubCompetitions({ tid, editable, onChanged }: {
                 </select>
               </label>
               <button type="button" disabled={busy || !target}
-                      onClick={() => {
-                        const ids = selectedIds.length > 0
-                          ? selectedIds
-                          : loose.map((team) => team.id);
-                        run(async () => {
-                          await assignTeams(tid, target, ids);
-                          setSelectedIds([]);
-                        });
-                      }}
-                      className="btn-volt text-[13px] px-4 py-2 disabled:opacity-40">
+                onClick={() => {
+                  const ids = selectedIds.length > 0
+                    ? selectedIds
+                    : loose.map((team) => team.id);
+                  run(async () => {
+                    await assignTeams(tid, target, ids);
+                    setSelectedIds([]);
+                  });
+                }}
+                className="btn-volt text-[13px] px-4 py-2 disabled:opacity-40">
                 Place {selectedIds.length > 0 ? selectedIds.length : loose.length}
               </button>
             </div>
@@ -2649,32 +2547,32 @@ function SubCompetitions({ tid, editable, onChanged }: {
 
       {editable && (
         <form className="border-t border-bd pt-4 flex flex-wrap items-end gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!name.trim()) return;
-                run(async () => {
-                  await addSubCompetition(tid, {
-                    name: name.trim(), kind, sort_order: (subs || []).length,
-                  });
-                  setName("");
-                });
-              }}>
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!name.trim()) return;
+            run(async () => {
+              await addSubCompetition(tid, {
+                name: name.trim(), kind, sort_order: (subs || []).length,
+              });
+              setName("");
+            });
+          }}>
           <label className="block flex-1 min-w-[160px]">
             <span className="block text-mt text-xs uppercase tracking-wide">Name</span>
             <input className="input-select mt-1.5" value={name} placeholder="Group A"
-                   onChange={(e) => setName(e.target.value)} />
+              onChange={(e) => setName(e.target.value)} />
           </label>
           <label className="block">
             <span className="block text-mt text-xs uppercase tracking-wide">Kind</span>
             <select className="input-select mt-1.5 w-auto" value={kind}
-                    onChange={(e) => setKind(e.target.value as SubCompKind)}>
+              onChange={(e) => setKind(e.target.value as SubCompKind)}>
               {SUB_KINDS.map((k) => (
                 <option key={k.id} value={k.id}>{k.label}</option>
               ))}
             </select>
           </label>
           <button className="btn-volt text-[13px] px-4 py-2"
-                  disabled={busy || !name.trim()}>
+            disabled={busy || !name.trim()}>
             Add
           </button>
         </form>
@@ -2683,10 +2581,7 @@ function SubCompetitions({ tid, editable, onChanged }: {
   );
 }
 
-/* ── suspensions ────────────────────────────────────────────────────
-   A ban is a record with a start date, not a countdown: a countdown has
-   to be decremented by something, and nothing reliably runs between
-   matches. The organiser closes it out when it is served. */
+/* ── suspensions ──────────────────────────────────────────────────── */
 function SuspensionsSection({ tid, teams, editable }: {
   tid: string; teams: TeamRow[]; editable: boolean;
 }) {
@@ -2710,8 +2605,6 @@ function SuspensionsSection({ tid, teams, editable }: {
   }, [tid, served]);
   useEffect(() => { load(); }, [load]);
 
-  // The player list follows the team, because a ban is always against a
-  // player registered to that team in this competition.
   useEffect(() => {
     if (!teamId) { setSquad([]); setPlayerId(""); return; }
     squadOf(teamId).then((d: any) => setSquad(d.squad || [])).catch(() => setSquad([]));
@@ -2744,7 +2637,7 @@ function SuspensionsSection({ tid, teams, editable }: {
       <div className="flex items-center justify-between gap-4">
         <label className="flex items-center gap-2 text-mt text-sm">
           <input type="checkbox" checked={served}
-                 onChange={(e) => setServed(e.target.checked)} />
+            onChange={(e) => setServed(e.target.checked)} />
           Include bans already served
         </label>
         {editable && !open && (
@@ -2763,7 +2656,7 @@ function SuspensionsSection({ tid, teams, editable }: {
             <label className="block">
               <span className="block text-mt text-xs uppercase tracking-wide">Team</span>
               <select className="input-select mt-1.5" value={teamId} required
-                      onChange={(e) => setTeamId(e.target.value)}>
+                onChange={(e) => setTeamId(e.target.value)}>
                 <option value="">Choose a team</option>
                 {teams.map((tm) => (
                   <option key={tm.id} value={tm.id}>{tm.clubs?.name ?? "Unknown"}</option>
@@ -2773,7 +2666,7 @@ function SuspensionsSection({ tid, teams, editable }: {
             <label className="block">
               <span className="block text-mt text-xs uppercase tracking-wide">Player</span>
               <select className="input-select mt-1.5" value={playerId} required
-                      disabled={!teamId} onChange={(e) => setPlayerId(e.target.value)}>
+                disabled={!teamId} onChange={(e) => setPlayerId(e.target.value)}>
                 <option value="">
                   {!teamId ? "Pick a team first"
                     : squad.length ? "Choose a player" : "Nobody registered yet"}
@@ -2787,18 +2680,18 @@ function SuspensionsSection({ tid, teams, editable }: {
               </select>
             </label>
             <Input label="Matches" type="number" min={1} max={50} value={matches}
-                   onChange={(e) => setMatches(e.target.value)} />
+              onChange={(e) => setMatches(e.target.value)} />
             <Input label="Starts" type="date" value={startDate}
-                   onChange={(e) => setStartDate(e.target.value)} />
+              onChange={(e) => setStartDate(e.target.value)} />
           </div>
           <Input label="Reason" value={reason} placeholder="Violent conduct, 78'"
-                 onChange={(e) => setReason(e.target.value)} />
+            onChange={(e) => setReason(e.target.value)} />
           <div className="flex items-center gap-3">
             <button className="btn-volt" disabled={busy || !teamId || !playerId}>
               {busy ? "Saving..." : "Add suspension"}
             </button>
             <button type="button" onClick={() => setOpen(false)}
-                    className="text-mt hover:text-white text-sm font-semibold">
+              className="text-mt hover:text-white text-sm font-semibold">
               Cancel
             </button>
           </div>
@@ -2820,7 +2713,7 @@ function SuspensionsSection({ tid, teams, editable }: {
           <div key={sp.id} className="card flex items-start justify-between gap-4">
             <div className="min-w-0">
               <p className={clsx("font-semibold truncate",
-                                 sp.active ? "text-white" : "text-mt line-through")}>
+                sp.active ? "text-white" : "text-mt line-through")}>
                 {sp.players?.first_name} {sp.players?.last_name}
               </p>
               <p className="text-mt text-xs mt-1">
@@ -2834,12 +2727,12 @@ function SuspensionsSection({ tid, teams, editable }: {
               <div className="flex items-center gap-3 shrink-0">
                 {sp.active && (
                   <button disabled={busy} onClick={() => run(() => markServed(tid, sp.id))}
-                          className="text-mt hover:text-grn text-sm font-semibold">
+                    className="text-mt hover:text-grn text-sm font-semibold">
                     Mark served
                   </button>
                 )}
                 <button disabled={busy} onClick={() => run(() => deleteSuspension(tid, sp.id))}
-                        className="text-mt hover:text-red2 text-sm font-semibold">
+                  className="text-mt hover:text-red2 text-sm font-semibold">
                   Delete
                 </button>
               </div>

@@ -87,9 +87,9 @@ export type PointsRules = { win: number; draw: number; loss: number };
  *  they run. */
 export const TIEBREAKERS: { id: string; label: string; implemented: boolean }[] = [
   { id: "goal_difference", label: "Goal difference", implemented: true },
-  { id: "goals_scored",    label: "Goals scored",    implemented: true },
-  { id: "wins",            label: "Wins",            implemented: true },
-  { id: "head_to_head",    label: "Head to head",    implemented: false },
+  { id: "goals_scored", label: "Goals scored", implemented: true },
+  { id: "wins", label: "Wins", implemented: true },
+  { id: "head_to_head", label: "Head to head", implemented: false },
 ];
 
 export type Tournament = {
@@ -560,10 +560,10 @@ export type Suspension = {
 };
 
 export const SUB_KINDS: { id: SubCompKind; label: string; blurb: string }[] = [
-  { id: "group",    label: "Group",    blurb: "A mini league that feeds a knockout." },
-  { id: "league",   label: "League",   blurb: "One table, everyone plays everyone." },
+  { id: "group", label: "Group", blurb: "A mini league that feeds a knockout." },
+  { id: "league", label: "League", blurb: "One table, everyone plays everyone." },
   { id: "knockout", label: "Knockout", blurb: "A single-elimination bracket." },
-  { id: "playoff",  label: "Playoff",  blurb: "A deciding stage after the league." },
+  { id: "playoff", label: "Playoff", blurb: "A deciding stage after the league." },
 ];
 
 export const listVenues = (tid: string) =>
@@ -714,3 +714,48 @@ export const setLineup = (fixtureId: string, body: {
 
 export const clearLineup = (fixtureId: string, teamId: string) =>
   req<void>(`/api/editor/fixtures/${fixtureId}/lineup/${teamId}`, { method: "DELETE" });
+
+
+// ── match graphics ────────────────────────────────────────────────────
+
+export type FixturePrediction = {
+  home_attack: number;
+  home_defence: number;
+  away_attack: number;
+  away_defence: number;
+  home_win_prob: number;
+  draw_prob: number;
+  away_win_prob: number;
+};
+
+export const getFixturePrediction = (fixtureId: string) =>
+  req<{ fixture_id: string; prediction: FixturePrediction }>(
+    `/api/editor/fixtures/${fixtureId}/prediction`
+  );
+
+export async function uploadMatchGraphic(
+  fixtureId: string,
+  kind: "prematch" | "ft",
+  blob: Blob,
+  filename = `${kind}.png`
+): Promise<{
+  image_url: string;
+  kind: "prematch" | "ft";
+  remaining: number | null;
+  unlimited: boolean;
+}> {
+  const form = new FormData();
+  form.append("kind", kind);
+  form.append("file", blob, filename);
+
+  const res = await fetch(`${API_BASE}/api/editor/fixtures/${fixtureId}/graphic`, {
+    method: "POST",
+    headers: { ...(await authHeaders()) },
+    body: form,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((body as any)?.detail || `Graphic upload failed (${res.status})`);
+  }
+  return body;
+}
