@@ -4,7 +4,15 @@ import Link from "next/link";
 import { BSD_IMG_BASE, type StandingsRow } from "@/lib/api";
 import clsx from "clsx";
 
-function ClubBadge({ teamId, name }: { teamId: number | null; name: string }) {
+function ClubBadge({
+  teamId,
+  crestUrl,
+  name,
+}: {
+  teamId: number | string | null;
+  crestUrl?: string | null;
+  name: string;
+}) {
   const [failed, setFailed] = useState(false);
   const initials = (name || "?")
     .split(/\s+/)
@@ -13,7 +21,14 @@ function ClubBadge({ teamId, name }: { teamId: number | null; name: string }) {
     .map((w) => w[0]!.toUpperCase())
     .join("");
 
-  if (teamId == null || failed) {
+  const isLocal = typeof teamId === "string" && !/^\d+$/.test(teamId);
+  const src = isLocal
+    ? crestUrl || ""
+    : teamId != null
+      ? `${BSD_IMG_BASE}/img/team/${teamId}/?sor=true&bg=transparent`
+      : "";
+
+  if (!src || failed) {
     return (
       <span className="w-5 h-5 rounded-full bg-sur2 border border-bd text-mt text-[8px] font-bold flex items-center justify-center shrink-0">
         {initials}
@@ -24,7 +39,7 @@ function ClubBadge({ teamId, name }: { teamId: number | null; name: string }) {
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={`${BSD_IMG_BASE}/img/team/${teamId}/?sor=true&bg=transparent`}
+      src={src}
       alt=""
       onError={() => setFailed(true)}
       className="w-5 h-5 object-contain shrink-0"
@@ -37,7 +52,7 @@ export default function StandingsTable({
   highlightTeamId,
 }: {
   rows: StandingsRow[];
-  highlightTeamId?: number;
+  highlightTeamId?: number | string;
 }) {
   return (
     <table className="w-full text-sm">
@@ -57,7 +72,7 @@ export default function StandingsTable({
       </thead>
       <tbody>
         {rows.map((r, i) => {
-          const isHighlighted = highlightTeamId && r.team_id === highlightTeamId;
+          const isHighlighted = highlightTeamId != null && r.team_id === highlightTeamId;
           const form = (r as any).form as string[] | undefined;
           return (
             <tr
@@ -72,7 +87,7 @@ export default function StandingsTable({
               </td>
               <td className="py-2.5 pr-2">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <ClubBadge teamId={r.team_id} name={r.team} />
+                  <ClubBadge teamId={r.team_id} crestUrl={r.crest_url} name={r.team} />
                   {r.team_id ? (
                     <Link
                       href={`/team/${r.team_id}`}
@@ -116,8 +131,8 @@ export default function StandingsTable({
                         res === "W"
                           ? "bg-emerald-500/20 text-emerald-400"
                           : res === "L"
-                          ? "bg-red2/20 text-red2"
-                          : "bg-white/10 text-mt"
+                            ? "bg-red2/20 text-red2"
+                            : "bg-white/10 text-mt"
                       )}
                     >
                       {res}
