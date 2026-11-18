@@ -1,19 +1,20 @@
 // App.tsx — Tactica Scout mobile root navigation & theme
 import "react-native-url-polyfill/auto";
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 import type { NavigationContainerRef } from '@react-navigation/native';
+import * as Notifications from 'expo-notifications';
 
 import { COLORS } from './src/theme';
 import { Header } from './src/components/Header';
 import { SearchModal } from './src/components/SearchModal';
-import { isSignedIn } from './src/services/auth';
+import { initPushNotifications } from './src/services/notifications';
 
 // Screens
 import { MatchesScreen } from './src/screens/MatchesScreen';
@@ -143,6 +144,28 @@ function MainTabs({ navigation, onOpenSearch }: { navigation: any; onOpenSearch:
 export default function App() {
   const [searchVisible, setSearchVisible] = useState(false);
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
+
+  useEffect(() => {
+    initPushNotifications();
+
+    const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data as any;
+      if (!data) return;
+
+      if (data.source === 'local' && data.tournamentId && data.fixtureId) {
+        navigationRef.current?.navigate('TournamentMatch', {
+          tournamentId: String(data.tournamentId),
+          fixtureId: String(data.fixtureId),
+        });
+      } else if (data.eventId) {
+        navigationRef.current?.navigate('MatchDetail', {
+          eventId: Number(data.eventId),
+        });
+      }
+    });
+
+    return () => responseSub.remove();
+  }, []);
 
   return (
     <SafeAreaProvider>

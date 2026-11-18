@@ -1,5 +1,6 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Analytics } from "@vercel/analytics/next";
+import AppInstallBanner from "@/components/AppInstallBanner";
 import BottomNav from "@/components/BottomNav";
 import TopBar from "@/components/TopBar";
 import "./globals.css";
@@ -11,13 +12,9 @@ const DESCRIPTION =
   "head to head, stats and player comparison. Built by Cantera Football.";
 
 export const metadata: Metadata = {
-  // metadataBase lets every relative URL below (and any openGraph image on
-  // a child page) resolve to the real domain. Without it, Next falls back
-  // to localhost in development and strips the image in production.
   metadataBase: new URL("https://scout.tacticaengine.com"),
   title: {
     default: TITLE,
-    // Child pages set their own title and it lands inside this.
     template: "%s — Scout by Tactica",
   },
   description: DESCRIPTION,
@@ -51,12 +48,17 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  themeColor: "#0d1117",
+};
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className="pb-20">
         <TopBar />
         <main className="max-w-screen-md mx-auto px-4 pt-4">{children}</main>
+        <AppInstallBanner />
         <BottomNav />
         <Analytics />
       </body>

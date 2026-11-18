@@ -458,3 +458,17 @@ export async function voteMotm(
   if (!res.ok) throw new Error(`motm vote failed: ${res.status}`);
   return res.json();
 }
+
+export async function registerPushToken(
+  expoPushToken: string,
+  followedMatches?: string[]
+): Promise<void> {
+  await fetch(`${PRODUCTION_API_URL}/api/me/push-token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+    body: JSON.stringify({
+      expo_push_token: expoPushToken,
+      ...(followedMatches ? { followed_matches: followedMatches } : {}),
+    }),
+  });
+}

@@ -19,6 +19,7 @@
     "android": {
       "package": "com.tacticaengine.scout",
       "versionCode": 1,
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
@@ -32,7 +33,14 @@
     "plugins": [
       "expo-asset",
       "expo-font",
-      "expo-status-bar"
+      "expo-status-bar",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#c8ff00"
+        }
+      ]
     ]
   }
 }

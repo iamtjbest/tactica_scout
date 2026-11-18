@@ -1,0 +1,14 @@
+[
+    {
+        "relation": [
+            "delegate_permission/common.handle_all_urls"
+        ],
+        "target": {
+            "namespace": "android_app",
+            "package_name": "com.tacticaengine.scout",
+            "sha256_cert_fingerprints": [
+                "PASTE_YOUR_SHA256_FINGERPRINT_HERE"
+            ]
+        }
+    }
+]

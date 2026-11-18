@@ -2,35 +2,23 @@
 app/routers/editor_fixtures.py
 
 Fixtures and live match events: the pitchside half of the editor.
-
-Fixture generation covers the three formats in the schema enum:
-  league           round robin, every team plays every other once
-  knockout         single-elimination bracket
-  groups_knockout  round robin inside each group; the bracket is made
-                   later from the group tables, not up front
-
-Live entry is deliberately two separate things:
-  PATCH .../score   the number on the scoreboard
-  POST  .../events  who scored, who was booked, who came off
-Keeping them apart means a scorer can correct a score without deleting
-goal events, and can log a goal without being forced to recompute the
-score in their head. The score is never derived from events, because a
-match can be 2-1 with nobody having entered a scorer yet, and a half
-empty event log must not quietly rewrite the result.
 """
-import itertools
 import random
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.deps import require_user
+from app.notifications import (
+    notify_local_event_created,
+    notify_local_event_deleted,
+    notify_local_score_or_status,
+)
 from app.routers.editor import _db, _rows, _one, _owned_tournament, _require_editable
 
 router = APIRouter()
 
-# Mirrors the fixture_status enum in schema.sql.
 LIVE_STATUSES     = {"live", "ht"}
 FINISHED_STATUSES = {"ft"}
 
@@ -39,24 +27,18 @@ EVENT_TYPES = {
     "yellow", "second_yellow", "red", "substitution",
 }
 
-# Event types that put the ball in the net FOR the team credited.
-# own_goal is deliberately absent: it counts for the opposition, and
-# that asymmetry is the single easiest thing to get wrong here.
 SCORING_EVENTS = {"goal", "penalty_scored"}
 
 
 # ── models ────────────────────────────────────────────────────────────
 
 class GenerateIn(BaseModel):
-    """Kickoff times are laid out on a simple grid. Organisers almost
-    always move them afterwards, so this is a starting point, not a
-    scheduler."""
     first_kickoff: datetime
     minutes_between: int = Field(default=120, ge=30, le=1440)
     matches_per_day: int = Field(default=4, ge=1, le=20)
     venue: str | None = None
-    double_round: bool = False       # league only: home and away
-    shuffle: bool = True             # vary the order rather than alphabetical
+    double_round: bool = False
+    shuffle: bool = True
 
 
 class FixtureIn(BaseModel):
@@ -88,7 +70,7 @@ class EventIn(BaseModel):
     tournament_team_id: str
     type: str
     player_id: str | None = None
-    related_player_id: str | None = None      # assist, or the player coming on
+    related_player_id: str | None = None
     minute: int | None = Field(default=None, ge=0, le=130)
 
 
@@ -96,13 +78,6 @@ class EventIn(BaseModel):
 
 def _fixture_with_tournament(fixture_id: str, user: dict,
                              need: str = "owner") -> tuple[dict, dict]:
-    """Load a fixture and prove the caller may act on its tournament.
-
-    Defaults to owner, because moving or deleting a fixture is the
-    organiser's call. The score and event routes pass need="editor":
-    a match commissioner exists to do those two things, not to
-    reshape the schedule.
-    """
     fx = _one(
         _db().table("fixtures").select("*").eq("id", fixture_id).limit(1).execute()
     )
@@ -143,9 +118,6 @@ def _teams(tournament_id: str) -> list[dict]:
 
 
 def _round_robin(team_ids: list[str], double: bool) -> list[tuple[str, str]]:
-    """Every team plays every other once, home/away alternating so one
-    side isn't always at home. With `double`, the reverse fixture is
-    appended as a second half of the season."""
     pairs = [(a, b) for i, a in enumerate(team_ids) for b in team_ids[i + 1:]]
     out: list[tuple[str, str]] = []
     for idx, (a, b) in enumerate(pairs):
@@ -155,14 +127,10 @@ def _round_robin(team_ids: list[str], double: bool) -> list[tuple[str, str]]:
     return out
 
 
-# Bracket size -> what that round is called. Naming rounds properly is
-# not cosmetic: it's how the UI knows the order to draw columns in, and
-# "Round 1" tells you nothing about whether 4 teams are left or 32.
 ROUND_NAMES = {2: "Final", 4: "Semi-final", 8: "Quarter-final"}
 
 
 def round_name(bracket_size: int) -> str:
-    """bracket_size is how many teams are still in at the start of it."""
     return ROUND_NAMES.get(bracket_size, f"Round of {bracket_size}")
 
 
@@ -174,13 +142,6 @@ def _bracket_size(n_teams: int) -> int:
 
 
 def _knockout_round_one(team_ids: list[str]) -> list[tuple[str, str]]:
-    """First round of a single-elimination bracket.
-
-    A field that isn't a power of two gives some teams a bye. Byes are
-    NOT fabricated as fixtures against a phantom opponent -- they're
-    simply left out of round one, and those teams enter in round two.
-    The response says who they are so the organiser can see it.
-    """
     n = len(team_ids)
     size = 1
     while size < n:
@@ -191,8 +152,6 @@ def _knockout_round_one(team_ids: list[str]) -> list[tuple[str, str]]:
 
 
 def _schedule(pairs: list[tuple[str, str]], opts: GenerateIn) -> list[datetime]:
-    """Spread kickoffs across days: matches_per_day on the grid, then
-    jump to the same time the next day."""
     times: list[datetime] = []
     start = opts.first_kickoff
     if start.tzinfo is None:
@@ -208,11 +167,6 @@ def _schedule(pairs: list[tuple[str, str]], opts: GenerateIn) -> list[datetime]:
 @router.post("/editor/tournaments/{tournament_id}/fixtures/generate", status_code=201)
 def generate_fixtures(tournament_id: str, body: GenerateIn,
                       user: dict = Depends(require_user)):
-    """Build the fixture list from the teams already entered.
-
-    Refuses if fixtures exist. Regenerating silently would wipe results
-    that have already been played, so clearing them is an explicit act.
-    """
     t = _owned_tournament(tournament_id, user, need="owner")
     _require_editable(t)
 
@@ -308,7 +262,6 @@ def generate_fixtures(tournament_id: str, body: GenerateIn,
             "venue":         body.venue,
             "round":         "Group stage",
         } for i, (h, a, g) in enumerate(all_pairs)]
-        # The bracket is built from the final group tables, not now.
         notes.append(
             "Group fixtures created. Knockout rounds are added once the group "
             "tables are final."
@@ -323,8 +276,6 @@ def generate_fixtures(tournament_id: str, body: GenerateIn,
 @router.post("/editor/tournaments/{tournament_id}/fixtures", status_code=201)
 def add_fixture(tournament_id: str, body: FixtureIn,
                 user: dict = Depends(require_user)):
-    """Add one fixture by hand. Also how knockout rounds after the first
-    get created, once the organiser knows who advanced."""
     _owned_tournament(tournament_id, user, need="owner")
     if body.home_team_id == body.away_team_id:
         raise HTTPException(status_code=400, detail="A team cannot play itself")
@@ -347,23 +298,13 @@ def add_fixture(tournament_id: str, body: FixtureIn,
 
 
 class BulkFixturesIn(BaseModel):
-    """An organiser who already has a draw. Most tournaments at ABU are
-    drawn at a ceremony before anyone opens an app, so the generator is
-    one option, not the only route in."""
     fixtures: list[FixtureIn] = Field(min_length=1, max_length=400)
-    replace: bool = False      # clear existing first (refused if any played)
+    replace: bool = False
 
 
 @router.post("/editor/tournaments/{tournament_id}/fixtures/bulk", status_code=201)
 def bulk_fixtures(tournament_id: str, body: BulkFixturesIn,
                   user: dict = Depends(require_user)):
-    """Import a whole draw at once.
-
-    Validated as a set before anything is written: a half-imported draw
-    with three good rows and a typo in the fourth is worse than a clear
-    refusal, because the organiser then has to work out which ones
-    landed.
-    """
     t = _owned_tournament(tournament_id, user, need="owner")
     _require_editable(t)
 
@@ -409,11 +350,6 @@ def bulk_fixtures(tournament_id: str, body: BulkFixturesIn,
 
 @router.delete("/editor/tournaments/{tournament_id}/fixtures", status_code=200)
 def clear_fixtures(tournament_id: str, user: dict = Depends(require_user)):
-    """Delete every fixture, so the list can be regenerated.
-
-    Refused once any match has been played. Those results are the
-    tournament's history and a regenerate must not quietly erase them.
-    """
     t = _owned_tournament(tournament_id, user, need="owner")
     _require_editable(t)
 
@@ -434,15 +370,17 @@ def clear_fixtures(tournament_id: str, user: dict = Depends(require_user)):
 
 @router.patch("/editor/fixtures/{fixture_id}")
 def update_fixture(fixture_id: str, body: FixturePatch,
+                   background_tasks: BackgroundTasks,
                    user: dict = Depends(require_user)):
-    """Move a kickoff, change the venue, postpone it."""
-    _fixture_with_tournament(fixture_id, user)
+    old_fx, _ = _fixture_with_tournament(fixture_id, user)
     patch = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
     if "kickoff_at" in patch:
         patch["kickoff_at"] = patch["kickoff_at"].isoformat()
     if not patch:
         raise HTTPException(status_code=400, detail="Nothing to update")
     updated = _one(_db().table("fixtures").update(patch).eq("id", fixture_id).execute())
+    if updated:
+        background_tasks.add_task(notify_local_score_or_status, fixture_id, old_fx, updated)
     return updated
 
 
@@ -456,15 +394,14 @@ def delete_fixture(fixture_id: str, user: dict = Depends(require_user)):
 # ── live scoring ──────────────────────────────────────────────────────
 
 @router.patch("/editor/fixtures/{fixture_id}/score")
-def set_score(fixture_id: str, body: ScoreIn, user: dict = Depends(require_user)):
-    """Set the scoreboard.
-
-    Separate from events on purpose. A scorer pitchside needs to fix a
-    wrong score in one tap without touching the goal log, and needs to
-    be able to put a score up before anyone has keyed in who scored.
-    """
-    fx, _ = _fixture_with_tournament(fixture_id, user, need="editor")
-    _require_kickoff_reached(fx)
+def set_score(
+    fixture_id: str,
+    body: ScoreIn,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(require_user),
+):
+    old_fx, _ = _fixture_with_tournament(fixture_id, user, need="editor")
+    _require_kickoff_reached(old_fx)
 
     raw = body.model_dump(exclude_unset=True)
     patch = {
@@ -480,13 +417,9 @@ def set_score(fixture_id: str, body: ScoreIn, user: dict = Depends(require_user)
     }:
         raise HTTPException(status_code=400, detail=f"Unknown status '{status}'")
 
-    # A finished match needs a result. Marking ft with an empty
-    # scoreboard produces a fixture that looks played and says nothing.
     if status == "ft":
-        fx = _one(_db().table("fixtures").select("home_score, away_score")
-                  .eq("id", fixture_id).limit(1).execute()) or {}
-        home = patch.get("home_score", fx.get("home_score"))
-        away = patch.get("away_score", fx.get("away_score"))
+        home = patch.get("home_score", old_fx.get("home_score"))
+        away = patch.get("away_score", old_fx.get("away_score"))
         if home is None or away is None:
             raise HTTPException(
                 status_code=400,
@@ -494,6 +427,8 @@ def set_score(fixture_id: str, body: ScoreIn, user: dict = Depends(require_user)
             )
 
     updated = _one(_db().table("fixtures").update(patch).eq("id", fixture_id).execute())
+    if updated:
+        background_tasks.add_task(notify_local_score_or_status, fixture_id, old_fx, updated)
     return updated
 
 
@@ -515,14 +450,12 @@ def list_events(fixture_id: str, user: dict = Depends(require_user)):
 
 
 @router.post("/editor/fixtures/{fixture_id}/events", status_code=201)
-def add_event(fixture_id: str, body: EventIn, user: dict = Depends(require_user)):
-    """Log a goal, card or substitution.
-
-    Does NOT touch the score. The response carries `score_from_events`
-    so the UI can show "events say 2-1, scoreboard says 2-0" and let a
-    human decide, rather than this endpoint silently overwriting a
-    result the referee gave.
-    """
+def add_event(
+    fixture_id: str,
+    body: EventIn,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(require_user),
+):
     fx, t = _fixture_with_tournament(fixture_id, user, need="editor")
     _require_kickoff_reached(fx)
 
@@ -549,6 +482,9 @@ def add_event(fixture_id: str, body: EventIn, user: dict = Depends(require_user)
         "created_by":         user["id"],
     }).execute())
 
+    if created:
+        background_tasks.add_task(notify_local_event_created, fixture_id, created)
+
     return {
         "event": created,
         "score_from_events": _score_from_events(fixture_id, fx),
@@ -557,20 +493,31 @@ def add_event(fixture_id: str, body: EventIn, user: dict = Depends(require_user)
 
 
 @router.delete("/editor/fixtures/{fixture_id}/events/{event_id}", status_code=204)
-def delete_event(fixture_id: str, event_id: str, user: dict = Depends(require_user)):
+def delete_event(
+    fixture_id: str,
+    event_id: str,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(require_user),
+):
     _fixture_with_tournament(fixture_id, user, need="editor")
+    existing_event = _one(
+        _db()
+        .table("match_events")
+        .select("*")
+        .eq("id", event_id)
+        .eq("fixture_id", fixture_id)
+        .limit(1)
+        .execute()
+    )
     _db().table("match_events").delete() \
         .eq("id", event_id).eq("fixture_id", fixture_id).execute()
+
+    if existing_event:
+        background_tasks.add_task(notify_local_event_deleted, fixture_id, existing_event)
     return None
 
 
 def _score_from_events(fixture_id: str, fx: dict) -> dict:
-    """What the event log alone implies the score is.
-
-    Offered for comparison, never written to the fixture. An own goal
-    counts for the OTHER side, which is the one rule worth stating out
-    loud because getting it backwards is silent and plausible.
-    """
     events = _rows(
         _db().table("match_events").select("type, tournament_team_id")
         .eq("fixture_id", fixture_id).execute()
@@ -594,15 +541,6 @@ def _score_from_events(fixture_id: str, fx: dict) -> dict:
 
 @router.get("/editor/tournaments/{tournament_id}/standings")
 def editor_standings(tournament_id: str, user: dict = Depends(require_user)):
-    """The table as it stands, for the organiser's own view.
-
-    Deliberately calls the SAME computation the public Scout endpoint
-    uses. Two implementations would eventually disagree, and the one
-    the organiser checks before publishing has to be the one fans see.
-    """
-    # Imported here, not at module load: tournaments_public imports
-    # helpers from app.routers.editor, and a top-level import would make
-    # the two modules depend on each other's import order.
     from app.routers.tournaments_public import _standings, _team_lookup, _points
 
     t = _owned_tournament(tournament_id, user, need="editor")
