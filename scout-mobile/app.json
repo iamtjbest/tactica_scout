@@ -7,11 +7,6 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0c0e12",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "backgroundColor": "#0c0e12",
-      "resizeMode": "contain"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.tacticaengine.scout"
@@ -35,12 +30,26 @@
       "expo-font",
       "expo-status-bar",
       [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "backgroundColor": "#0c0e12",
+          "resizeMode": "contain"
+        }
+      ],
+      [
         "expo-notifications",
         {
           "icon": "./assets/android-icon-monochrome.png",
           "color": "#c8ff00"
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "f4b9b163-9891-4770-aa46-a360f9eaeb90"
+      }
+    },
+    "owner": "iamtjbest"
   }
 }
