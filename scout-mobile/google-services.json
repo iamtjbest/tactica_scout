@@ -1,0 +1,68 @@
+{
+  "project_info": {
+    "project_number": "749983115247",
+    "project_id": "tactica-backend",
+    "storage_bucket": "tactica-backend.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:749983115247:android:b94d59598db4d08d76781a",
+        "android_client_info": {
+          "package_name": "com.tactica.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "749983115247-5cs151ivc2kv5anncs6dmqiis03iv5p8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD-YPE9V1h2_fk-1P-ldHJtsmLAhzPiiGY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "749983115247-5cs151ivc2kv5anncs6dmqiis03iv5p8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:749983115247:android:7e617a7d57f168e076781a",
+        "android_client_info": {
+          "package_name": "com.tacticaengine.scout"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "749983115247-5cs151ivc2kv5anncs6dmqiis03iv5p8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD-YPE9V1h2_fk-1P-ldHJtsmLAhzPiiGY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "749983115247-5cs151ivc2kv5anncs6dmqiis03iv5p8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
