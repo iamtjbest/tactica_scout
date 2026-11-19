@@ -1,4 +1,4 @@
-// src/screens/MatchDetailScreen.tsx — Comprehensive match breakdown
+// src/screens/MatchDetailScreen.tsx - Comprehensive match breakdown
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme';
 import {
@@ -17,7 +18,6 @@ import {
   getMatchFacts,
   type MatchFacts,
   MatchDetail,
-  MatchSummary,
 } from '../services/api';
 import RatingsTab from '../components/RatingsTab';
 import { buildLineupRows, lineupRowWidth, lineupPlayerId } from '../lib/lineup';
@@ -30,6 +30,7 @@ interface MatchDetailScreenProps {
 type TabType = 'overview' | 'timeline' | 'lineups' | 'ratings' | 'stats' | 'h2h' | 'facts';
 
 export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, navigation }) => {
+  const insets = useSafeAreaInsets();
   const { eventId, matchSummary } = route.params;
   const [detail, setDetail] = useState<MatchDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -62,10 +63,47 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
   const awayScore = detail?.away_score ?? matchSummary?.away_score ?? 0;
   const isLive = detail?.status?.toLowerCase().includes('live') || matchSummary?.minute > 0;
 
+  const incidents = Array.isArray(detail?.incidents) ? detail!.incidents : [];
+  const rawScorers = Array.isArray(detail?.goalscorers) ? detail!.goalscorers : [];
+
+  const isHomeEvent = (item: any): boolean => {
+    if (typeof item?.is_home === 'boolean') return item.is_home;
+    if (item?.side === 'home') return true;
+    if (item?.side === 'away') return false;
+    if (homeId != null && item?.team_id != null) return Number(item.team_id) === Number(homeId);
+    if (awayId != null && item?.team_id != null) return Number(item.team_id) !== Number(awayId);
+    const teamStr = String(item?.team || item?.team_name || '').toLowerCase();
+    if (teamStr && home && teamStr === home.toLowerCase()) return true;
+    return true;
+  };
+
+  const goalSource =
+    rawScorers.length > 0
+      ? rawScorers
+      : incidents.filter((inc: any) =>
+        String(inc.type || inc.incident_type || '').toLowerCase().includes('goal')
+      );
+
+  const homeGoals = goalSource.filter((g: any) => isHomeEvent(g));
+  const awayGoals = goalSource.filter((g: any) => !isHomeEvent(g));
+
+  const keyIncidents = incidents.filter((inc: any) => {
+    const t = String(inc.type || inc.incident_type || '').toLowerCase();
+    return t.includes('goal') || t.includes('card') || t.includes('yellow') || t.includes('red') || t.includes('penalty');
+  });
+
+  const sortedTimeline = [...incidents].sort((a: any, b: any) => {
+    const aMin = a.minute ?? (a.period_second != null ? Math.floor(a.period_second / 60) : 0);
+    const bMin = b.minute ?? (b.period_second != null ? Math.floor(b.period_second / 60) : 0);
+    return bMin - aMin;
+  });
+
+  const isConfirmedLineup = String(detail?.lineup_status || '').toLowerCase() === 'confirmed';
+
   return (
     <View style={styles.container}>
-      {/* Top Header Bar with Back Button */}
-      <View style={styles.topNav}>
+      {/* Top Header Bar with Safe Area Inset */}
+      <View style={[styles.topNav, { paddingTop: Math.max(insets.top, 12) + 4 }]}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={styles.backBtn}
@@ -140,17 +178,38 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
           </TouchableOpacity>
         </View>
 
-        {/* Goal Scorers ticker if any */}
-        {detail?.goalscorers && detail.goalscorers.length > 0 && (
-          <View style={styles.scorersStrip}>
-            {detail.goalscorers.map((g, idx) => (
-              <View key={`goal-${idx}`} style={styles.scorerItem}>
-                <Ionicons name="football" size={11} color={COLORS.volt} style={{ marginRight: 4 }} />
-                <Text style={styles.scorerText}>
-                  {g.player || 'Goal'} ({g.minute}')
-                </Text>
-              </View>
-            ))}
+        {/* Goalscorers Underneath Their Respective Teams */}
+        {(homeGoals.length > 0 || awayGoals.length > 0) && (
+          <View style={styles.scorersSplitStrip}>
+            <View style={styles.scorersColLeft}>
+              {homeGoals.map((g: any, idx: number) => {
+                const name = g.player || g.player_name || g.scorer || 'Goal';
+                const min = g.minute ?? (g.period_second != null ? Math.floor(g.period_second / 60) : '');
+                return (
+                  <View key={`hg-${idx}`} style={styles.scorerLine}>
+                    <Ionicons name="football" size={11} color={COLORS.volt} />
+                    <Text style={styles.scorerText} numberOfLines={1}>
+                      {name} {min !== '' ? `(${min}')` : ''}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+
+            <View style={styles.scorersColRight}>
+              {awayGoals.map((g: any, idx: number) => {
+                const name = g.player || g.player_name || g.scorer || 'Goal';
+                const min = g.minute ?? (g.period_second != null ? Math.floor(g.period_second / 60) : '');
+                return (
+                  <View key={`ag-${idx}`} style={styles.scorerLine}>
+                    <Text style={[styles.scorerText, { textAlign: 'right' }]} numberOfLines={1}>
+                      {name} {min !== '' ? `(${min}')` : ''}
+                    </Text>
+                    <Ionicons name="football" size={11} color={COLORS.volt} />
+                  </View>
+                );
+              })}
+            </View>
           </View>
         )}
       </View>
@@ -188,235 +247,313 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
             <View>
               {facts &&
                 (facts.home?.win_prob != null || facts.away?.win_prob != null) && (
-                <TouchableOpacity
-                  activeOpacity={0.8}
-                  onPress={() => setActiveTab('facts')}
-                  style={[styles.cardSection, { marginBottom: 12 }]}
-                >
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>TACTICA WIN PROBABILITY</Text>
-                    <Text style={{ color: COLORS.volt, fontSize: 11, fontWeight: '700' }}>Full ratings →</Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', height: 6, borderRadius: 999, backgroundColor: COLORS.bg, overflow: 'hidden', gap: 2 }}>
-                    <View style={{ width: `${facts.home?.win_prob ?? 0}%`, backgroundColor: COLORS.volt }} />
-                    {facts.draw_prob != null && (
-                      <View style={{ width: `${facts.draw_prob}%`, backgroundColor: 'rgba(255,255,255,0.25)' }} />
-                    )}
-                    <View style={{ width: `${facts.away?.win_prob ?? 0}%`, backgroundColor: '#38bdf8' }} />
-                  </View>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-                    <Text style={{ color: COLORS.volt, fontSize: 12, fontWeight: '800' }}>
-                      {facts.home?.win_prob?.toFixed(1)}%
-                    </Text>
-                    {facts.draw_prob != null && (
-                      <Text style={{ color: COLORS.textSecondary, fontSize: 11, fontWeight: '600' }}>
-                        Draw {facts.draw_prob.toFixed(1)}%
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => setActiveTab('facts')}
+                    style={[styles.cardSection, { marginBottom: 12 }]}
+                  >
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>TACTICA WIN PROBABILITY</Text>
+                      <Text style={{ color: COLORS.volt, fontSize: 11, fontWeight: '700' }}>Full ratings →</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', height: 6, borderRadius: 999, backgroundColor: COLORS.bg, overflow: 'hidden', gap: 2 }}>
+                      <View style={{ width: `${facts.home?.win_prob ?? 0}%`, backgroundColor: COLORS.volt }} />
+                      {facts.draw_prob != null && (
+                        <View style={{ width: `${facts.draw_prob}%`, backgroundColor: 'rgba(255,255,255,0.25)' }} />
+                      )}
+                      <View style={{ width: `${facts.away?.win_prob ?? 0}%`, backgroundColor: '#38bdf8' }} />
+                    </View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+                      <Text style={{ color: COLORS.volt, fontSize: 12, fontWeight: '800' }}>
+                        {facts.home?.win_prob?.toFixed(1)}%
                       </Text>
-                    )}
-                    <Text style={{ color: '#38bdf8', fontSize: 12, fontWeight: '800' }}>
-                      {facts.away?.win_prob?.toFixed(1)}%
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              )}
-              {/* Form Strip -- mirrors scout-web's TeamFormCard:
-                  opponent crest, name and score, tappable through to the
-                  match. Was W/D/L pills only, which told you a result
-                  happened but not against whom. */}
-              {((detail?.home_form?.length || 0) > 0 ||
-                (detail?.away_form?.length || 0) > 0) && (
-                <View style={styles.cardSection}>
-                  <Text style={styles.sectionTitle}>TEAM FORM</Text>
-                  <View style={styles.formColumns}>
-                    {[
-                      { label: home, id: homeId, rows: detail?.home_form || [] },
-                      { label: away, id: awayId, rows: detail?.away_form || [] },
-                    ].map((col, ci) => (
-                      <View key={`fc-${ci}`} style={styles.formColumn}>
-                        <Text
-                          style={styles.formTeamLabel}
-                          numberOfLines={1}
-                          onPress={() =>
-                            col.id &&
-                            navigation.navigate('TeamDetail', {
-                              teamId: col.id,
-                              teamName: col.label,
-                            })
-                          }
-                        >
-                          {col.label}
+                      {facts.draw_prob != null && (
+                        <Text style={{ color: COLORS.textSecondary, fontSize: 11, fontWeight: '600' }}>
+                          Draw {facts.draw_prob.toFixed(1)}%
                         </Text>
-
-                        {col.rows.length === 0 ? (
-                          <Text style={styles.factsEmpty}>No recent form yet.</Text>
-                        ) : (
-                          col.rows.map((f, i) => {
-                            const score = f.is_home
-                              ? `${f.own_score ?? '-'}-${f.opp_score ?? '-'}`
-                              : `${f.opp_score ?? '-'}-${f.own_score ?? '-'}`;
-                            const tone =
-                              f.result === 'W'
-                                ? styles.pillW
-                                : f.result === 'D'
-                                ? styles.pillD
-                                : styles.pillL;
-                            return (
-                              <TouchableOpacity
-                                key={f.event_id ?? `f-${ci}-${i}`}
-                                activeOpacity={f.event_id ? 0.6 : 1}
-                                disabled={!f.event_id}
-                                onPress={() =>
-                                  f.event_id &&
-                                  navigation.navigate('MatchDetail', {
-                                    eventId: f.event_id,
-                                  })
-                                }
-                                style={[styles.formResultRow, tone]}
-                              >
-                                {/* Fixed-width slot either way, so rows
-                                    without a crest still line up. */}
-                                <View style={styles.formCrestSlot}>
-                                  {f.opponent_id != null && (
-                                    <Image
-                                      source={{ uri: teamLogoUrl(f.opponent_id) || '' }}
-                                      style={styles.formCrest}
-                                      resizeMode="contain"
-                                    />
-                                  )}
-                                </View>
-                                <Text style={styles.formOpponent} numberOfLines={1}>
-                                  {f.opponent}
-                                </Text>
-                                <Text style={styles.formScore}>{score}</Text>
-                              </TouchableOpacity>
-                            );
-                          })
-                        )}
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              )}
-
-              {/* Match Incidents */}
-              <View style={[styles.cardSection, { marginTop: 12 }]}>
-                <Text style={styles.sectionTitle}>KEY EVENTS & INCIDENTS</Text>
-                {detail?.incidents && detail.incidents.length > 0 ? (
-                  detail.incidents.map((inc: any, idx: number) => (
-                    <View key={`inc-${idx}`} style={styles.incidentRow}>
-                      <Text style={styles.incidentMin}>{inc.minute ? `${inc.minute}'` : '-'}</Text>
-                      <View style={styles.incidentIconWrap}>
-                        <Ionicons
-                          name={
-                            inc.incident_type === 'goal'
-                              ? 'football'
-                              : inc.incident_type === 'card'
-                              ? 'square'
-                              : 'swap-horizontal'
-                          }
-                          size={13}
-                          color={
-                            inc.incident_type === 'goal'
-                              ? COLORS.volt
-                              : inc.card_type === 'red'
-                              ? COLORS.loss
-                              : COLORS.draw
-                          }
-                        />
-                      </View>
-                      <Text style={styles.incidentDesc} numberOfLines={1}>
-                        {inc.player_name || inc.text || inc.incident_type}
+                      )}
+                      <Text style={{ color: '#38bdf8', fontSize: 12, fontWeight: '800' }}>
+                        {facts.away?.win_prob?.toFixed(1)}%
                       </Text>
                     </View>
-                  ))
+                  </TouchableOpacity>
+                )}
+
+              {/* Team Form */}
+              {((detail?.home_form?.length || 0) > 0 ||
+                (detail?.away_form?.length || 0) > 0) && (
+                  <View style={styles.cardSection}>
+                    <Text style={styles.sectionTitle}>TEAM FORM</Text>
+                    <View style={styles.formColumns}>
+                      {[
+                        { label: home, id: homeId, rows: detail?.home_form || [] },
+                        { label: away, id: awayId, rows: detail?.away_form || [] },
+                      ].map((col, ci) => (
+                        <View key={`fc-${ci}`} style={styles.formColumn}>
+                          <Text
+                            style={styles.formTeamLabel}
+                            numberOfLines={1}
+                            onPress={() =>
+                              col.id &&
+                              navigation.navigate('TeamDetail', {
+                                teamId: col.id,
+                                teamName: col.label,
+                              })
+                            }
+                          >
+                            {col.label}
+                          </Text>
+
+                          {col.rows.length === 0 ? (
+                            <Text style={styles.factsEmpty}>No recent form yet.</Text>
+                          ) : (
+                            col.rows.map((f, i) => {
+                              const score = f.is_home
+                                ? `${f.own_score ?? '-'}-${f.opp_score ?? '-'}`
+                                : `${f.opp_score ?? '-'}-${f.own_score ?? '-'}`;
+                              const tone =
+                                f.result === 'W'
+                                  ? styles.pillW
+                                  : f.result === 'D'
+                                    ? styles.pillD
+                                    : styles.pillL;
+                              return (
+                                <TouchableOpacity
+                                  key={f.event_id ?? `f-${ci}-${i}`}
+                                  activeOpacity={f.event_id ? 0.6 : 1}
+                                  disabled={!f.event_id}
+                                  onPress={() =>
+                                    f.event_id &&
+                                    navigation.navigate('MatchDetail', {
+                                      eventId: f.event_id,
+                                    })
+                                  }
+                                  style={[styles.formResultRow, tone]}
+                                >
+                                  <View style={styles.formCrestSlot}>
+                                    {f.opponent_id != null && (
+                                      <Image
+                                        source={{ uri: teamLogoUrl(f.opponent_id) || '' }}
+                                        style={styles.formCrest}
+                                        resizeMode="contain"
+                                      />
+                                    )}
+                                  </View>
+                                  <Text style={styles.formOpponent} numberOfLines={1}>
+                                    {f.opponent}
+                                  </Text>
+                                  <Text style={styles.formScore}>{score}</Text>
+                                </TouchableOpacity>
+                              );
+                            })
+                          )}
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+              {/* Key Events & Incidents (Goals & Cards only) */}
+              <View style={[styles.cardSection, { marginTop: 12 }]}>
+                <Text style={styles.sectionTitle}>KEY EVENTS &amp; INCIDENTS</Text>
+                {keyIncidents.length > 0 ? (
+                  keyIncidents.map((inc: any, idx: number) => {
+                    const type = String(inc.type || inc.incident_type || '').toLowerCase();
+                    const minute = inc.minute ?? (inc.period_second != null ? Math.floor(inc.period_second / 60) : '-');
+                    const player = inc.player || inc.player_name || inc.scorer || inc.text || 'Event';
+                    const isHome = isHomeEvent(inc);
+
+                    let iconName: keyof typeof Ionicons.glyphMap = 'football';
+                    let tint = COLORS.volt;
+                    if (type.includes('red')) {
+                      iconName = 'square';
+                      tint = '#FF4444';
+                    } else if (type.includes('yellow') || type.includes('card')) {
+                      iconName = 'square';
+                      tint = '#FFC53D';
+                    }
+
+                    return (
+                      <View key={inc.id || `key-inc-${idx}`} style={styles.incidentRow}>
+                        <Text style={styles.incidentMin}>{minute}&apos;</Text>
+                        <View style={styles.incidentIconWrap}>
+                          <Ionicons name={iconName} size={13} color={tint} />
+                        </View>
+                        <Text style={[styles.incidentDesc, { fontWeight: '600' }]} numberOfLines={1}>
+                          {player}
+                        </Text>
+                        <Text style={{ color: COLORS.textDim, fontSize: 10, maxWidth: 90 }} numberOfLines={1}>
+                          {isHome ? home : away}
+                        </Text>
+                      </View>
+                    );
+                  })
                 ) : (
-                  <Text style={styles.noDataText}>No incidents recorded for this event.</Text>
+                  <Text style={styles.noDataText}>No goals or cards recorded for this match.</Text>
                 )}
               </View>
             </View>
           )}
 
+          {/* TAB 2: SPLIT CENTER-SPINE TIMELINE */}
           {activeTab === 'timeline' && (
             <View style={styles.cardSection}>
-              <Text style={styles.sectionTitle}>MATCH TIMELINE</Text>
-              {detail?.incidents && detail.incidents.length > 0 ? (
-                [...detail.incidents]
-                  .sort((a: any, b: any) => {
-                    const aMin = a.minute ?? (a.period_second != null ? Math.floor(a.period_second / 60) : 0);
-                    const bMin = b.minute ?? (b.period_second != null ? Math.floor(b.period_second / 60) : 0);
-                    return bMin - aMin;
-                  })
-                  .map((inc: any, idx: number) => {
-                    const type = String(inc.type || inc.incident_type || '').toLowerCase();
-                    const minute = inc.minute ?? (inc.period_second != null ? Math.floor(inc.period_second / 60) : '-');
-                    const player = inc.player || inc.player_name || inc.scorer || '';
-                    const sideLabel = inc.is_home === true ? home : inc.is_home === false ? away : 'Event';
-                    let iconName: keyof typeof Ionicons.glyphMap = 'time-outline';
-                    let tint = COLORS.text;
-                    if (type.includes('goal')) {
-                      iconName = 'football';
-                      tint = COLORS.volt;
-                    } else if (type.includes('red')) {
-                      iconName = 'square';
-                      tint = '#FF4444';
-                    } else if (type.includes('yellow')) {
-                      iconName = 'square';
-                      tint = '#FFC53D';
-                    } else if (type.includes('sub')) {
-                      iconName = 'swap-horizontal';
-                      tint = '#38bdf8';
-                    }
+              <View style={styles.timelineHeaderRow}>
+                <Text style={[styles.timelineTeamHeader, { color: COLORS.volt }]} numberOfLines={1}>
+                  {home}
+                </Text>
+                <Text style={styles.sectionTitle}>TIMELINE</Text>
+                <Text style={[styles.timelineTeamHeader, { color: '#38bdf8', textAlign: 'right' }]} numberOfLines={1}>
+                  {away}
+                </Text>
+              </View>
 
+              {sortedTimeline.length > 0 ? (
+                sortedTimeline.map((inc: any, idx: number) => {
+                  const type = String(inc.type || inc.incident_type || '').toLowerCase();
+                  const minute = inc.minute ?? (inc.period_second != null ? Math.floor(inc.period_second / 60) : '-');
+                  const player = inc.player || inc.player_name || inc.scorer || '';
+                  const textLabel = inc.text || type.toUpperCase().replace(/_/g, ' ');
+
+                  if (type.includes('period')) {
                     return (
-                      <View key={inc.id || `tl-${idx}`} style={styles.incidentRow}>
-                        <Text style={styles.incidentMin}>{minute}&apos;</Text>
-                        <View style={styles.incidentIconWrap}>
-                          <Ionicons name={iconName} size={13} color={tint} />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.incidentDesc, { color: tint, fontWeight: '700' }]} numberOfLines={1}>
-                            {type.toUpperCase().replace(/_/g, ' ')}{player ? ` • ${player}` : ''}
+                      <View key={inc.id || `tl-p-${idx}`} style={styles.periodRow}>
+                        <View style={styles.periodPill}>
+                          <Text style={styles.periodText}>
+                            {minute}&apos; {textLabel}
                           </Text>
-                          {!!inc.assist && (
-                            <Text style={{ color: COLORS.textSecondary, fontSize: 11 }}>Assist: {inc.assist}</Text>
-                          )}
-                          {!!inc.player_in && (
-                            <Text style={{ color: COLORS.textSecondary, fontSize: 11 }}>
-                              In: {inc.player_in} {inc.player_out ? `• Out: ${inc.player_out}` : ''}
-                            </Text>
-                          )}
                         </View>
-                        <Text style={{ color: COLORS.textDim, fontSize: 10, maxWidth: 80 }} numberOfLines={1}>
-                          {sideLabel}
-                        </Text>
                       </View>
                     );
-                  })
+                  }
+
+                  const isHome = isHomeEvent(inc);
+                  let iconName: keyof typeof Ionicons.glyphMap = 'time-outline';
+                  let tint = COLORS.text;
+                  let title = textLabel;
+
+                  if (type.includes('goal')) {
+                    iconName = 'football';
+                    tint = COLORS.volt;
+                    title = player || 'Goal';
+                  } else if (type.includes('red')) {
+                    iconName = 'square';
+                    tint = '#FF4444';
+                    title = player || 'Red Card';
+                  } else if (type.includes('yellow') || type.includes('card')) {
+                    iconName = 'square';
+                    tint = '#FFC53D';
+                    title = player || 'Yellow Card';
+                  } else if (type.includes('sub')) {
+                    iconName = 'swap-horizontal';
+                    tint = '#38bdf8';
+                    title = inc.player_in ? `In: ${inc.player_in}` : player || 'Substitution';
+                  }
+
+                  const subDetail = type.includes('sub')
+                    ? inc.player_out
+                      ? `Out: ${inc.player_out}`
+                      : ''
+                    : inc.assist
+                      ? `Assist: ${inc.assist}`
+                      : '';
+
+                  return (
+                    <View key={inc.id || `tl-${idx}`} style={styles.spineRow}>
+                      {/* Left Column: Home Event */}
+                      <View style={styles.spineSideLeft}>
+                        {isHome && (
+                          <View style={styles.spineEventCardLeft}>
+                            <View style={styles.spineEventTitleRow}>
+                              <Text style={[styles.spinePlayerName, { color: tint }]} numberOfLines={1}>
+                                {title}
+                              </Text>
+                              <Ionicons name={iconName} size={13} color={tint} style={{ marginLeft: 5 }} />
+                            </View>
+                            {!!subDetail && (
+                              <Text style={styles.spineSubText} numberOfLines={1}>
+                                {subDetail}
+                              </Text>
+                            )}
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Center Spine & Minute Pill */}
+                      <View style={styles.spineCenter}>
+                        <View style={styles.spineLine} />
+                        <View style={styles.spineMinuteBadge}>
+                          <Text style={styles.spineMinuteText}>{minute}&apos;</Text>
+                        </View>
+                      </View>
+
+                      {/* Right Column: Away Event */}
+                      <View style={styles.spineSideRight}>
+                        {!isHome && (
+                          <View style={styles.spineEventCardRight}>
+                            <View style={styles.spineEventTitleRow}>
+                              <Ionicons name={iconName} size={13} color={tint} style={{ marginRight: 5 }} />
+                              <Text style={[styles.spinePlayerName, { color: tint }]} numberOfLines={1}>
+                                {title}
+                              </Text>
+                            </View>
+                            {!!subDetail && (
+                              <Text style={styles.spineSubText} numberOfLines={1}>
+                                {subDetail}
+                              </Text>
+                            )}
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })
               ) : (
                 <Text style={styles.noDataText}>No key events (goals, cards, subs) reported yet.</Text>
               )}
             </View>
           )}
 
-          {/* TAB 2: LINEUPS */}
+          {/* TAB 3: LINEUPS */}
           {activeTab === 'lineups' && (
             <View style={styles.cardSection}>
-              <Text style={styles.sectionTitle}>TACTICAL LINEUPS</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>TACTICAL LINEUPS</Text>
+                {detail?.lineups && Object.keys(detail.lineups).length > 0 && (
+                  <View
+                    style={[
+                      styles.lineupBadge,
+                      isConfirmedLineup ? styles.lineupBadgeConfirmed : styles.lineupBadgePredicted,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.lineupBadgeText,
+                        { color: isConfirmedLineup ? COLORS.volt : '#fbbf24' },
+                      ]}
+                    >
+                      {isConfirmedLineup ? 'CONFIRMED LINEUP' : 'PREDICTED LINEUP'}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
               {detail?.lineups && Object.keys(detail.lineups).length > 0 ? (
                 <View>
-                  <Text style={styles.lineupNote}>
-                    Status: {detail.lineup_status || 'Not confirmed'}
-                  </Text>
                   {['home', 'away'].map((side) => {
                     const sideData: any = (detail.lineups as any)[side] || {};
                     const squad: any[] = sideData.players || [];
                     const teamTitle = side === 'home' ? home : away;
                     const rows = buildLineupRows(squad.slice(0, 11), sideData.formation);
                     return (
-                      <View key={side} style={{ marginTop: 16 }}>
+                      <View key={side} style={{ marginTop: 14 }}>
                         <View style={styles.lineupHeadRow}>
-                          <Text style={[styles.lineupSideTitle,
-                                        { color: side === 'home' ? COLORS.volt : '#38bdf8' }]}>
+                          <Text
+                            style={[
+                              styles.lineupSideTitle,
+                              { color: side === 'home' ? COLORS.volt : '#38bdf8' },
+                            ]}
+                          >
                             {teamTitle}
                           </Text>
                           {!!sideData.formation && (
@@ -424,7 +561,6 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
                           )}
                         </View>
 
-                        {/* Keeper at the bottom, attack at the top. */}
                         <View style={styles.pitch}>
                           <View style={styles.pitchHalfLine} />
                           <View style={styles.pitchCircle} />
@@ -440,9 +576,12 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
                                     key={`p-${ri}-${pi}`}
                                     style={styles.pitchPlayer}
                                     disabled={pid == null}
-                                    onPress={() => navigation.navigate('PlayerDetail', {
-                                      playerId: pid, playerName: p.name ?? p.short_name,
-                                    })}
+                                    onPress={() =>
+                                      navigation.navigate('PlayerDetail', {
+                                        playerId: pid,
+                                        playerName: p.name ?? p.short_name,
+                                      })
+                                    }
                                   >
                                     <View style={styles.shirt}>
                                       <Text style={styles.shirtNumText}>
@@ -468,6 +607,7 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
             </View>
           )}
 
+          {/* TAB 4: RATINGS */}
           {activeTab === 'ratings' && (
             <RatingsTab
               source="bsd"
@@ -479,6 +619,7 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
             />
           )}
 
+          {/* TAB 5: STATS */}
           {activeTab === 'stats' && (
             <View style={styles.cardSection}>
               <Text style={styles.sectionTitle}>MATCH STATISTICS</Text>
@@ -496,7 +637,7 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
             </View>
           )}
 
-          {/* TAB 4: H2H */}
+          {/* TAB 6: H2H */}
           {activeTab === 'h2h' && (
             <View>
               {detail?.h2h?.summary && (
@@ -525,7 +666,6 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
                 </View>
               )}
 
-              {/* Recent Meetings */}
               <View style={[styles.cardSection, { marginTop: 12 }]}>
                 <Text style={styles.sectionTitle}>RECENT MEETINGS</Text>
                 {detail?.h2h?.recent_matches && detail.h2h.recent_matches.length > 0 ? (
@@ -544,12 +684,7 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
             </View>
           )}
 
-          {/* TAB 5: FACTS -- Tactica ratings from the main backend.
-              Mirrors scout-web's FactsTab: same conditions, same copy.
-              NEVER put a placeholder rating here. This used to fall back
-              to a hardcoded '7.4' / '6.8', which meant every match in the
-              app showed the same two invented numbers under Tactica's
-              name. */}
+          {/* TAB 7: FACTS */}
           {activeTab === 'facts' && (
             <View style={styles.cardSection}>
               {(() => {
@@ -563,7 +698,7 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
                     <>
                       <Text style={styles.sectionTitle}>TACTICA NUMBERS</Text>
                       <Text style={styles.factsEmpty}>
-                        Tactica ratings couldn't be loaded right now.
+                        Tactica ratings couldn&apos;t be loaded right now.
                       </Text>
                     </>
                   );
@@ -579,15 +714,12 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
                   );
                 }
                 if (!hasRatings && !hasProbs) {
-                  // unavailable_reason is permanent; degraded means "try
-                  // again later". Collapsing them would tell someone to
-                  // retry a match that will never have numbers.
                   const message =
-                    f.unavailable_reason === 'no_prematch_snapshot'
+                    (f as any).unavailable_reason === 'no_prematch_snapshot'
                       ? "No pre-match numbers were saved for this match. Ratings calculated now would include this match's own result, so they wouldn't be pre-match numbers."
                       : f.degraded
-                      ? "Tactica ratings couldn't be loaded right now."
-                      : "Tactica ratings aren't available for this match yet.";
+                        ? "Tactica ratings couldn't be loaded right now."
+                        : "Tactica ratings aren't available for this match yet.";
                   return (
                     <>
                       <Text style={styles.sectionTitle}>TACTICA NUMBERS</Text>
@@ -606,10 +738,13 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
                     </View>
                     <View style={styles.probTrack}>
                       <View
-                        style={[styles.probFill, {
-                          backgroundColor: color,
-                          width: `${Math.max(0, Math.min(100, value ?? 0))}%`,
-                        }]}
+                        style={[
+                          styles.probFill,
+                          {
+                            backgroundColor: color,
+                            width: `${Math.max(0, Math.min(100, value ?? 0))}%`,
+                          },
+                        ]}
                       />
                     </View>
                   </View>
@@ -617,12 +752,10 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
 
                 return (
                   <>
-                    {/* Which kind of number this is. Provisional can still
-                        move; frozen is what the match was played under. */}
                     {f.provisional && (
                       <Text style={[styles.factsEmpty, { marginBottom: 12 }]}>
                         Provisional. These update until kickoff gets close,
-                        then they're locked in.
+                        then they&apos;re locked in.
                       </Text>
                     )}
                     {f.frozen && (
@@ -641,7 +774,7 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
                         <Bar label={detail?.away_team} value={f.away?.win_prob} color="#38bdf8" />
                         {f.draw_prob == null && (
                           <Text style={styles.factsEmpty}>
-                            Each figure is that side's own model run, so they won't
+                            Each figure is that side&apos;s own model run, so they won&apos;t
                             always total 100.
                           </Text>
                         )}
@@ -680,7 +813,7 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
 
                     {!!f.best_formation && (
                       <View style={{ marginTop: 18 }}>
-                        <Text style={styles.sectionTitle}>MODEL'S BEST SHAPE</Text>
+                        <Text style={styles.sectionTitle}>MODEL&apos;S BEST SHAPE</Text>
                         <Text style={styles.bestShape}>{f.best_formation}</Text>
                       </View>
                     )}
@@ -697,42 +830,87 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
 
 const styles = StyleSheet.create({
   lineupHeadRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 8,
   },
+  lineupBadge: {
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  lineupBadgeConfirmed: {
+    backgroundColor: 'rgba(200, 255, 0, 0.14)',
+    borderColor: COLORS.volt,
+  },
+  lineupBadgePredicted: {
+    backgroundColor: 'rgba(251, 191, 36, 0.14)',
+    borderColor: '#fbbf24',
+  },
+  lineupBadgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+  },
   formationLabel: {
-    color: COLORS.textSecondary, fontSize: 11, fontFamily: 'monospace',
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    fontFamily: 'monospace',
   },
   pitch: {
-    backgroundColor: '#0F1A14', borderRadius: 12, borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)', paddingVertical: 14,
-    gap: 14, overflow: 'hidden',
+    backgroundColor: '#0F1A14',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    paddingVertical: 14,
+    gap: 14,
+    overflow: 'hidden',
   },
   pitchHalfLine: {
-    position: 'absolute', left: 0, right: 0, top: '50%',
-    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.10)',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: '50%',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.10)',
   },
   pitchCircle: {
-    position: 'absolute', alignSelf: 'center', top: '50%',
-    width: 64, height: 64, marginTop: -32, borderRadius: 32,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
+    position: 'absolute',
+    alignSelf: 'center',
+    top: '50%',
+    width: 64,
+    height: 64,
+    marginTop: -32,
+    borderRadius: 32,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
   },
   pitchRow: {
-    flexDirection: 'row', justifyContent: 'space-around',
+    flexDirection: 'row',
+    justifyContent: 'space-around',
     alignSelf: 'center',
   },
   pitchPlayer: { alignItems: 'center', width: 58 },
   shirt: {
-    width: 30, height: 30, borderRadius: 15, backgroundColor: COLORS.cardElevated,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
-    alignItems: 'center', justifyContent: 'center',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: COLORS.cardElevated,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   shirtNumText: { color: COLORS.volt, fontSize: 11, fontWeight: '800' },
   pitchName: {
-    color: COLORS.text, fontSize: 9, fontWeight: '600',
-    marginTop: 3, textAlign: 'center',
+    color: COLORS.text,
+    fontSize: 9,
+    fontWeight: '600',
+    marginTop: 3,
+    textAlign: 'center',
   },
-
   container: {
     flex: 1,
     backgroundColor: COLORS.bg,
@@ -742,8 +920,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 8,
+    paddingBottom: 10,
+    backgroundColor: COLORS.card,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.cardBorder,
   },
@@ -843,22 +1021,28 @@ const styles = StyleSheet.create({
     fontSize: 10,
     marginTop: 6,
   },
-  scorersStrip: {
+  scorersSplitStrip: {
     marginTop: 14,
     paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: COLORS.cardBorder,
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
+    gap: 12,
   },
-  scorerItem: {
+  scorersColLeft: {
+    flex: 1,
+    alignItems: 'flex-start',
+    gap: 4,
+  },
+  scorersColRight: {
+    flex: 1,
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  scorerLine: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.cardElevated,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+    gap: 5,
   },
   scorerText: {
     color: COLORS.textSecondary,
@@ -912,36 +1096,15 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     marginBottom: 12,
   },
-  formRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
   formTeamLabel: {
     color: COLORS.text,
     fontSize: 13,
     fontWeight: '600',
     flex: 1,
   },
-  formPills: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  formPill: {
-    width: 24,
-    height: 24,
-    borderRadius: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   pillW: { backgroundColor: COLORS.win },
   pillD: { backgroundColor: COLORS.draw },
   pillL: { backgroundColor: COLORS.loss },
-  formPillText: {
-    color: '#000',
-    fontSize: 11,
-    fontWeight: '800',
-  },
   incidentRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -966,42 +1129,101 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     flex: 1,
   },
-  lineupNote: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
+  timelineHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 8,
+  },
+  timelineTeamHeader: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  periodRow: {
+    alignItems: 'center',
+    marginVertical: 10,
+  },
+  periodPill: {
+    backgroundColor: COLORS.cardElevated,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  periodText: {
+    color: COLORS.textSecondary,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  spineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 48,
+  },
+  spineSideLeft: {
+    flex: 1,
+    alignItems: 'flex-end',
+    paddingRight: 8,
+    paddingVertical: 4,
+  },
+  spineSideRight: {
+    flex: 1,
+    alignItems: 'flex-start',
+    paddingLeft: 8,
+    paddingVertical: 4,
+  },
+  spineEventCardLeft: {
+    alignItems: 'flex-end',
+  },
+  spineEventCardRight: {
+    alignItems: 'flex-start',
+  },
+  spineEventTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  spinePlayerName: {
+    fontSize: 12,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
+  spineSubText: {
+    color: COLORS.textSecondary,
+    fontSize: 10,
+    marginTop: 2,
+  },
+  spineCenter: {
+    width: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+  },
+  spineLine: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 1.5,
+    backgroundColor: COLORS.cardBorder,
+  },
+  spineMinuteBadge: {
+    backgroundColor: COLORS.cardElevated,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorderActive,
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  spineMinuteText: {
+    color: COLORS.volt,
+    fontSize: 10,
+    fontWeight: '800',
   },
   lineupSideTitle: {
     fontSize: 13,
     fontWeight: '800',
-    marginBottom: 8,
-  },
-  lineupRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 7,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255, 255, 255, 0.04)',
-  },
-  shirtNum: {
-    width: 24,
-    color: COLORS.textDim,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  lineupPlayerName: {
-    color: COLORS.text,
-    fontSize: 13,
-    fontWeight: '600',
-    flex: 1,
-  },
-  posBadge: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    backgroundColor: COLORS.cardElevated,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
   },
   statMetricRow: {
     flexDirection: 'row',
@@ -1067,69 +1289,47 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flex: 1,
   },
-  factsGrid: {
+  probHead: {
     flexDirection: 'row',
-    gap: 12,
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 5,
   },
-  factCard: {
-    flex: 1,
-    backgroundColor: COLORS.cardElevated,
-    borderRadius: 10,
-    padding: 12,
-    alignItems: 'center',
-  },
-  probHead: { flexDirection: 'row', alignItems: 'baseline',
-              justifyContent: 'space-between', gap: 10, marginBottom: 5 },
   probLabel: { color: COLORS.text, fontSize: 13, flex: 1 },
   probVal: { fontSize: 17, fontWeight: '900' },
   probTrack: { height: 6, borderRadius: 999, backgroundColor: COLORS.bg, overflow: 'hidden' },
   probFill: { height: '100%', borderRadius: 999 },
   baseTag: { color: COLORS.textDim, fontSize: 9, fontWeight: '700' },
-  ratingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-               paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.cardBorder, gap: 12 },
+  ratingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.cardBorder,
+    gap: 12,
+  },
   ratingTeam: { color: COLORS.text, fontSize: 14, flexShrink: 1 },
   ratingVal: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '700' },
-  winProbBig: { color: COLORS.volt, fontSize: 32, fontWeight: '900', marginBottom: 6 },
   bestShape: { color: COLORS.text, fontSize: 18, fontWeight: '700', letterSpacing: 1 },
   formColumns: { flexDirection: 'row', gap: 12 },
   formColumn: { flex: 1, minWidth: 0 },
-  formResultRow: { flexDirection: 'row', alignItems: 'center', gap: 6,
-                   borderRadius: 8, borderWidth: 1, paddingHorizontal: 8,
-                   paddingVertical: 6, marginTop: 6 },
+  formResultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    marginTop: 6,
+  },
   formCrestSlot: { width: 16, height: 16, alignItems: 'center', justifyContent: 'center' },
   formCrest: { width: 16, height: 16 },
   formOpponent: { flex: 1, color: COLORS.text, fontSize: 11 },
   formScore: { color: COLORS.text, fontSize: 11, fontWeight: '800' },
   factsEmpty: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 19 },
-  factLabel: {
-    color: COLORS.textDim,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  factVal: {
-    fontSize: 24,
-    fontWeight: '900',
-    marginTop: 4,
-  },
-  winProbTitle: {
-    color: COLORS.textDim,
-    fontSize: 10,
-    fontWeight: '800',
-    marginBottom: 6,
-  },
-  winProbRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    backgroundColor: COLORS.cardElevated,
-    padding: 10,
-    borderRadius: 8,
-  },
-  winProbText: {
-    color: COLORS.text,
-    fontSize: 12,
-    fontWeight: '700',
-  },
   noDataText: {
     color: COLORS.textDim,
     fontSize: 12,

@@ -15,9 +15,9 @@ import { COLORS } from '../theme';
 import { StandingsTable } from '../components/StandingsTable';
 import { MatchCard } from '../components/MatchCard';
 import { FollowButton } from '../components/FollowButton';
+import * as api from '../services/api';
 import {
   getLeagues,
-  getTournaments,
   getLeagueSeasons,
   getStandings,
   getLeagueFixtures,
@@ -30,7 +30,6 @@ import {
   type MatchSummary,
   type TopStatPlayer,
   type LeagueSeason,
-  type TournamentSummary,
 } from '../services/api';
 
 interface LeaguesScreenProps {
@@ -59,9 +58,9 @@ const MONTHS = [
 
 export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route }) => {
   const [leagues, setLeagues] = useState<{ league_id: number; name: string }[]>([]);
-  const [localTournaments, setLocalTournaments] = useState<TournamentSummary[]>([]);
+  const [localTournaments, setLocalTournaments] = useState<any[]>([]);
   const [selectedLeagueId, setSelectedLeagueId] = useState<number | null>(
-    route?.params?.leagueId || null
+    route?.params?.leagueId ?? null
   );
   const [leagueTitle, setLeagueTitle] = useState<string>(route?.params?.leagueName || '');
   const [leagueCountry, setLeagueCountry] = useState<string>('');
@@ -83,27 +82,40 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
   const [topCards, setTopCards] = useState<TopStatPlayer[]>([]);
   const [teamStats, setTeamStats] = useState<any>(null);
 
-  // Fixture Date + Month + Year + Status filters
   const [selectedDay, setSelectedDay] = useState<string>('');
   const [selectedMonth, setSelectedMonth] = useState<string>('');
   const [selectedYear, setSelectedYear] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'upcoming' | 'finished' | 'live'>('all');
 
   useEffect(() => {
+    let alive = true;
     getLeagues()
       .then((res) => {
-        const list = res.leagues || [];
+        if (!alive) return;
+        const list = Array.isArray(res?.leagues) ? res.leagues : [];
         setLeagues(list);
         if (!selectedLeagueId && list.length > 0) {
           setSelectedLeagueId(list[0].league_id);
-          setLeagueTitle(list[0].name);
+          setLeagueTitle(list[0].name || '');
+        } else if (list.length === 0) {
+          setLoading(false);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (alive) setLoading(false);
+      });
 
-    getTournaments()
-      .then((res) => setLocalTournaments(res.tournaments || []))
-      .catch(() => {});
+    const fetchTournaments = (api as any).getTournaments;
+    if (typeof fetchTournaments === 'function') {
+      fetchTournaments()
+        .then((res: any) => {
+          if (!alive) return;
+          setLocalTournaments(Array.isArray(res?.tournaments) ? res.tournaments : []);
+        })
+        .catch(() => { });
+    }
+
+    return () => { alive = false; };
   }, []);
 
   useEffect(() => {
@@ -113,9 +125,9 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
     }
   }, [route?.params?.leagueId, route?.params?.leagueName]);
 
-  // Load seasons when league changes
   useEffect(() => {
     if (!selectedLeagueId) return;
+    let alive = true;
     setSelectedSeasonId(null);
     setSelectedSeasonLabel('');
     setSelectedDay('');
@@ -125,17 +137,22 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
 
     getLeagueSeasons(selectedLeagueId)
       .then((res) => {
-        if (res.league && res.league !== 'Unknown') setLeagueTitle(res.league);
-        if (res.country) setLeagueCountry(res.country);
-        const list = res.seasons || [];
+        if (!alive) return;
+        if (res?.league && res.league !== 'Unknown') setLeagueTitle(res.league);
+        if (res?.country) setLeagueCountry(res.country);
+        const list = Array.isArray(res?.seasons) ? res.seasons : [];
         setSeasons(list);
         if (list.length > 0) {
           const cur = list.find((s) => s.is_current) || list[0];
           setSelectedSeasonId(cur.id);
-          setSelectedSeasonLabel(cur.label);
+          setSelectedSeasonLabel(cur.label || '');
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (alive) setSeasons([]);
+      });
+
+    return () => { alive = false; };
   }, [selectedLeagueId]);
 
   const loadLeagueData = useCallback(async (id: number, sId: number | null) => {
@@ -147,16 +164,16 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
         getLeagueTopStats(id, sId).catch(() => ({ scorers: [], assists: [], ratings: [], cards: [] })),
         getLeagueTeamStats(id, sId).catch(() => null),
       ]);
-      if (stdRes.league && stdRes.league !== 'Unknown') setLeagueTitle(stdRes.league);
-      if (stdRes.country) setLeagueCountry(stdRes.country);
-      setStandings(stdRes.standings || []);
-      setGroups(stdRes.groups || []);
-      setFixtures(fixRes.matches || []);
-      setTopScorers(topRes.scorers || []);
-      setTopAssists(topRes.assists || []);
-      setTopRatings(topRes.ratings || []);
-      setTopCards(topRes.cards || []);
-      setTeamStats(tmStatsRes);
+      if (stdRes?.league && stdRes.league !== 'Unknown') setLeagueTitle(stdRes.league);
+      if (stdRes?.country) setLeagueCountry(stdRes.country);
+      setStandings(Array.isArray(stdRes?.standings) ? stdRes.standings : []);
+      setGroups(Array.isArray(stdRes?.groups) ? stdRes.groups : []);
+      setFixtures(Array.isArray(fixRes?.matches) ? fixRes.matches : []);
+      setTopScorers(Array.isArray(topRes?.scorers) ? topRes.scorers : []);
+      setTopAssists(Array.isArray(topRes?.assists) ? topRes.assists : []);
+      setTopRatings(Array.isArray(topRes?.ratings) ? topRes.ratings : []);
+      setTopCards(Array.isArray(topRes?.cards) ? topRes.cards : []);
+      setTeamStats(tmStatsRes && typeof tmStatsRes === 'object' ? tmStatsRes : null);
     } finally {
       setLoading(false);
     }
@@ -170,21 +187,23 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
 
   const pickSeason = (s: LeagueSeason) => {
     setSelectedSeasonId(s.id);
-    setSelectedSeasonLabel(s.label);
+    setSelectedSeasonLabel(s.label || '');
     setSeasonModalOpen(false);
   };
 
-  // Fixture Date/Month/Year filtering & grouping
   const dateKey = (date: Date) =>
     `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
       date.getDate()
     ).padStart(2, '0')}`;
 
+  const safeFixtures = Array.isArray(fixtures) ? fixtures : [];
+
   const availableYears = Array.from(
     new Set(
-      fixtures
+      safeFixtures
         .map((m) => {
-          const date = new Date(m.kickoff || '');
+          if (!m?.kickoff) return '';
+          const date = new Date(m.kickoff);
           return Number.isNaN(date.getTime()) ? '' : String(date.getFullYear());
         })
         .filter((y) => /^\d{4}$/.test(y))
@@ -193,9 +212,10 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
 
   const availableDates = Array.from(
     new Set(
-      fixtures
+      safeFixtures
         .filter((m) => {
-          const d = new Date(m.kickoff || '');
+          if (!m?.kickoff) return false;
+          const d = new Date(m.kickoff);
           if (Number.isNaN(d.getTime())) return false;
           const y = String(d.getFullYear());
           const mo = String(d.getMonth() + 1).padStart(2, '0');
@@ -203,12 +223,13 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
           if (selectedMonth && mo !== selectedMonth) return false;
           return true;
         })
-        .map((m) => dateKey(new Date(m.kickoff || '')))
+        .map((m) => dateKey(new Date(m.kickoff!)))
     )
   ).sort();
 
-  const filteredFixtures = fixtures.filter((m) => {
-    const d = new Date(m.kickoff || '');
+  const filteredFixtures = safeFixtures.filter((m) => {
+    if (!m?.kickoff) return false;
+    const d = new Date(m.kickoff);
     if (Number.isNaN(d.getTime())) return false;
     const y = String(d.getFullYear());
     const mo = String(d.getMonth() + 1).padStart(2, '0');
@@ -235,6 +256,7 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
     .sort((a, b) => String(a.kickoff || '').localeCompare(String(b.kickoff || '')))
     .forEach((m) => {
       const d = new Date(m.kickoff || '');
+      if (Number.isNaN(d.getTime())) return;
       const key = d.toLocaleDateString('en-GB', {
         weekday: 'long',
         day: 'numeric',
@@ -255,7 +277,7 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={{ paddingHorizontal: 14, gap: 8 }}
           >
-            {localTournaments.map((t) => (
+            {localTournaments.map((t: any) => (
               <TouchableOpacity
                 key={t.id}
                 onPress={() =>
@@ -373,11 +395,11 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
           {activeTab === 'table' && (
             <View>
               {groups.length > 0 ? (
-                groups.map((g) => (
-                  <View key={g.group} style={{ marginBottom: 12 }}>
-                    <Text style={styles.groupHeading}>{g.group.toUpperCase()}</Text>
+                groups.map((g, gi) => (
+                  <View key={g.group || `grp-${gi}`} style={{ marginBottom: 12 }}>
+                    <Text style={styles.groupHeading}>{String(g.group || 'GROUP').toUpperCase()}</Text>
                     <StandingsTable
-                      standings={g.standings}
+                      standings={Array.isArray(g.standings) ? g.standings : []}
                       onSelectTeam={(teamId, teamName) =>
                         navigation.navigate('TeamDetail', { teamId, teamName })
                       }
@@ -402,10 +424,9 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
             </View>
           )}
 
-          {/* TAB 2: FIXTURES (DATE + MONTH + YEAR + STATUS FILTERING) */}
+          {/* TAB 2: FIXTURES */}
           {activeTab === 'matches' && (
             <View style={{ gap: 10 }}>
-              {/* Status Filter Row */}
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
                 {(['all', 'live', 'upcoming', 'finished'] as const).map((st) => {
                   const on = statusFilter === st;
@@ -423,7 +444,6 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
                 })}
               </ScrollView>
 
-              {/* Year + Month Filter Row */}
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
                 <TouchableOpacity
                   onPress={() => { setSelectedYear(''); setSelectedDay(''); }}
@@ -470,7 +490,6 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
                 })}
               </ScrollView>
 
-              {/* Exact Date Strip */}
               {availableDates.length > 0 && (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
                   <TouchableOpacity
@@ -600,11 +619,11 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
           {activeTab === 'team-stats' && (
             <View style={{ gap: 14 }}>
               {[
-                { title: 'GOALS PER MATCH', key: 'goals_per_match', rows: teamStats?.goals_per_match || [], suffix: '' },
-                { title: 'CONCEDED PER MATCH', key: 'conceded_per_match', rows: teamStats?.conceded_per_match || [], suffix: '' },
-                { title: 'CLEAN SHEETS', key: 'clean_sheets', rows: teamStats?.clean_sheets || [], suffix: '' },
-                { title: 'WIN RATE %', key: 'win_rate', rows: teamStats?.win_rate || [], suffix: '%' },
-                { title: 'AVERAGE POSSESSION %', key: 'possession_avg', rows: teamStats?.possession || [], suffix: '%' },
+                { title: 'GOALS PER MATCH', key: 'goals_per_match', rows: Array.isArray(teamStats?.goals_per_match) ? teamStats.goals_per_match : [], suffix: '' },
+                { title: 'CONCEDED PER MATCH', key: 'conceded_per_match', rows: Array.isArray(teamStats?.conceded_per_match) ? teamStats.conceded_per_match : [], suffix: '' },
+                { title: 'CLEAN SHEETS', key: 'clean_sheets', rows: Array.isArray(teamStats?.clean_sheets) ? teamStats.clean_sheets : [], suffix: '' },
+                { title: 'WIN RATE %', key: 'win_rate', rows: Array.isArray(teamStats?.win_rate) ? teamStats.win_rate : [], suffix: '%' },
+                { title: 'AVERAGE POSSESSION %', key: 'possession_avg', rows: Array.isArray(teamStats?.possession) ? teamStats.possession : [], suffix: '%' },
               ]
                 .filter((c) => c.rows.length > 0)
                 .map((card) => (
@@ -656,44 +675,48 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
               <View style={styles.leaderHeader}>
                 <Text style={styles.leaderTitle}>SEASONS &amp; PREVIOUS WINNERS</Text>
               </View>
-              {seasons.map((s) => {
-                const isSelected = s.label === selectedSeasonLabel;
-                const winnerLogo = teamLogoUrl(s.winner_id);
-                return (
-                  <TouchableOpacity
-                    key={s.label}
-                    onPress={() => {
-                      pickSeason(s);
-                      setActiveTab('table');
-                    }}
-                    style={[
-                      styles.leaderRow,
-                      isSelected && { backgroundColor: COLORS.voltMuted, borderRadius: 8, paddingHorizontal: 8 },
-                    ]}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.leaderPlayerName}>
-                        {s.label} {s.is_current ? '(Current)' : ''}
-                      </Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                        {winnerLogo ? (
-                          <Image source={{ uri: winnerLogo }} style={{ width: 16, height: 16 }} resizeMode="contain" />
-                        ) : null}
-                        <Text style={styles.leaderTeamName}>
-                          {s.winner_name
-                            ? `Winner: ${s.winner_name}`
-                            : s.is_current
-                            ? 'Season in progress'
-                            : 'Tap to view table'}
+              {seasons.length === 0 ? (
+                <Text style={styles.noDataText}>No season history available.</Text>
+              ) : (
+                seasons.map((s, idx) => {
+                  const isSelected = s.label === selectedSeasonLabel;
+                  const winnerLogo = teamLogoUrl(s.winner_id);
+                  return (
+                    <TouchableOpacity
+                      key={s.label || `season-${idx}`}
+                      onPress={() => {
+                        pickSeason(s);
+                        setActiveTab('table');
+                      }}
+                      style={[
+                        styles.leaderRow,
+                        isSelected && { backgroundColor: COLORS.voltMuted, borderRadius: 8, paddingHorizontal: 8 },
+                      ]}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.leaderPlayerName}>
+                          {s.label} {s.is_current ? '(Current)' : ''}
                         </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                          {winnerLogo ? (
+                            <Image source={{ uri: winnerLogo }} style={{ width: 16, height: 16 }} resizeMode="contain" />
+                          ) : null}
+                          <Text style={styles.leaderTeamName}>
+                            {s.winner_name
+                              ? `Winner: ${s.winner_name}`
+                              : s.is_current
+                                ? 'Season in progress'
+                                : 'Tap to view table'}
+                          </Text>
+                        </View>
                       </View>
-                    </View>
-                    <Text style={{ color: COLORS.volt, fontSize: 11, fontWeight: '700' }}>
-                      Table →
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
+                      <Text style={{ color: COLORS.volt, fontSize: 11, fontWeight: '700' }}>
+                        Table →
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
             </View>
           )}
         </ScrollView>
@@ -713,11 +736,11 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
         >
           <View style={styles.modalSheet}>
             <Text style={styles.leaderTitle}>SELECT SEASON</Text>
-            {seasons.map((s) => {
+            {seasons.map((s, idx) => {
               const active = s.label === selectedSeasonLabel;
               return (
                 <TouchableOpacity
-                  key={s.label}
+                  key={s.label || `modal-season-${idx}`}
                   onPress={() => pickSeason(s)}
                   style={[styles.modalRow, active && { backgroundColor: COLORS.voltMuted }]}
                 >

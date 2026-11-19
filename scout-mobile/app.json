@@ -43,6 +43,18 @@
           "icon": "./assets/android-icon-monochrome.png",
           "color": "#c8ff00"
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "buildArchitectures": [
+              "arm64-v8a"
+            ],
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          }
+        }
       ]
     ],
     "extra": {

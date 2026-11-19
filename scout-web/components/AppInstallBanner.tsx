@@ -39,7 +39,7 @@ export default function AppInstallBanner() {
                         </p>
                         <p className="text-xs font-semibold text-white">
                             {platform === "android"
-                                ? "Download the Android app for instant KWASU live scores"
+                                ? "Get the Android app for instant live scores, lineups, and match stats"
                                 : "Add Scout to your iPhone Home Screen"}
                         </p>
                     </div>
