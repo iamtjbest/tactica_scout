@@ -10,8 +10,19 @@ import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet } from 'react-native';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import * as Notifications from 'expo-notifications';
+import { useFonts } from 'expo-font';
+import {
+  DMSans_400Regular,
+  DMSans_500Medium,
+  DMSans_600SemiBold,
+  DMSans_700Bold,
+} from '@expo-google-fonts/dm-sans';
+import {
+  PlayfairDisplay_700Bold,
+  PlayfairDisplay_900Black,
+} from '@expo-google-fonts/playfair-display';
 
-import { COLORS } from './src/theme';
+import { COLORS, FONTS } from './src/theme';
 import { Header } from './src/components/Header';
 import { SearchModal } from './src/components/SearchModal';
 import { initPushNotifications } from './src/services/notifications';
@@ -54,7 +65,7 @@ export type RootStackParamList = {
 
 export type MainTabParamList = {
   Matches: undefined;
-  Compare: undefined;
+  Compare: { initialPlayerId?: number; initialPlayerName?: string } | undefined;
   Leagues: { leagueId?: number; leagueName?: string } | undefined;
   News: undefined;
 };
@@ -142,6 +153,15 @@ function MainTabs({ navigation, onOpenSearch }: { navigation: any; onOpenSearch:
 }
 
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    DMSans_400Regular,
+    DMSans_500Medium,
+    DMSans_600SemiBold,
+    DMSans_700Bold,
+    PlayfairDisplay_700Bold,
+    PlayfairDisplay_900Black,
+  });
+
   const [searchVisible, setSearchVisible] = useState(false);
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
 
@@ -166,6 +186,8 @@ export default function App() {
 
     return () => responseSub.remove();
   }, []);
+
+  if (!fontsLoaded) return null;
 
   return (
     <SafeAreaProvider>
@@ -198,6 +220,7 @@ export default function App() {
           onClose={() => setSearchVisible(false)}
           onSelectTeam={(teamId, teamName) => { navigationRef.current?.navigate('TeamDetail', { teamId, teamName }); }}
           onSelectPlayer={(playerId, playerName) => { navigationRef.current?.navigate('PlayerDetail', { playerId, playerName }); }}
+          onSelectTournament={(tournamentId, tournamentName) => { navigationRef.current?.navigate('TournamentDetail', { tournamentId, tournamentName }); }}
         />
       </NavigationContainer>
     </SafeAreaProvider>
@@ -211,5 +234,5 @@ const styles = StyleSheet.create({
     borderTopColor: COLORS.cardBorder,
     paddingTop: 6,
   },
-  tabBarLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
+  tabBarLabel: { fontFamily: FONTS.bold, fontSize: 10, letterSpacing: 0.3 },
 });

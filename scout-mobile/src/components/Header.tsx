@@ -1,4 +1,4 @@
-// src/components/Header.tsx — Top tactical bar for Tactica Scout
+// src/components/Header.tsx - Top tactical bar for Tactica Scout
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform, StatusBar } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -35,7 +35,7 @@ export const Header: React.FC<HeaderProps> = ({
           ) : (
             <View style={styles.brandContainer}>
               <View style={styles.logoBadge}>
-                <Text style={styles.brandText}>SCOUT</Text>
+                <Text style={styles.brandText} numberOfLines={1}>SCOUT</Text>
               </View>
             </View>
           )}
@@ -89,7 +89,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   leftSection: {
-    width: 84,
+    minWidth: 74,
+    marginRight: 6,
     alignItems: 'flex-start',
     justifyContent: 'center',
   },
@@ -106,21 +107,21 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(212, 255, 0, 0.08)',
     borderColor: 'rgba(212, 255, 0, 0.25)',
     borderWidth: 1,
-    paddingHorizontal: 8,
+    paddingHorizontal: 9,
     paddingVertical: 4,
     borderRadius: 6,
   },
   brandText: {
     color: COLORS.text,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '900',
-    letterSpacing: 1.5,
+    letterSpacing: 1.2,
   },
   centerSection: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 6,
+    paddingHorizontal: 4,
   },
   searchBar: {
     width: '100%',
@@ -145,7 +146,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   rightSection: {
-    width: 44,
+    width: 36,
     alignItems: 'flex-end',
     justifyContent: 'center',
   },

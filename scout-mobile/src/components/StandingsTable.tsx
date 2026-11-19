@@ -2,7 +2,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS } from '../theme';
+import { COLORS, FONTS } from '../theme';
 import { StandingsRow, teamLogoUrl } from '../services/api';
 
 interface StandingsTableProps {
@@ -125,9 +125,9 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardElevated,
   },
   headCol: {
+    fontFamily: FONTS.bold,
     color: COLORS.textDim,
     fontSize: 10,
-    fontWeight: '800',
     letterSpacing: 0.5,
   },
   dataRow: {
@@ -162,9 +162,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   posText: {
+    fontFamily: FONTS.semibold,
     color: COLORS.textSecondary,
     fontSize: 11,
-    fontWeight: '600',
     textAlign: 'center',
   },
   colTeam: {
@@ -187,16 +187,16 @@ const styles = StyleSheet.create({
     height: 18,
   },
   teamName: {
+    fontFamily: FONTS.semibold,
     color: COLORS.text,
     fontSize: 12,
-    fontWeight: '600',
     flex: 1,
   },
   colStat: {
     width: 24,
+    fontFamily: FONTS.medium,
     color: COLORS.textSecondary,
     fontSize: 11,
-    fontWeight: '500',
     textAlign: 'center',
     fontVariant: ['tabular-nums'],
   },
@@ -206,9 +206,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ptsText: {
+    fontFamily: FONTS.bold,
     color: COLORS.text,
     fontSize: 12,
-    fontWeight: '800',
     textAlign: 'center',
     fontVariant: ['tabular-nums'],
   },
@@ -216,10 +216,11 @@ const styles = StyleSheet.create({
     color: COLORS.volt,
   },
   highlightTextBold: {
+    fontFamily: FONTS.bold,
     color: COLORS.volt,
-    fontWeight: '800',
   },
   highlightPts: {
+    fontFamily: FONTS.bold,
     color: COLORS.volt,
     fontSize: 13,
   },

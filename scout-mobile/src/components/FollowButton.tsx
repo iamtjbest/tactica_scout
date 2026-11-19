@@ -10,7 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS } from '../theme';
+import { COLORS, FONTS } from '../theme';
 import { getMe, updateFollowedTeams } from '../services/api';
 import { isSignedIn } from '../services/auth';
 
@@ -185,10 +185,11 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(212, 255, 0, 0.3)',
   },
   btnText: {
+    fontFamily: FONTS.bold,
     fontSize: 12,
-    fontWeight: '700',
   },
   btnTextSmall: {
+    fontFamily: FONTS.bold,
     fontSize: 11,
   },
   unauthText: {

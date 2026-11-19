@@ -1,374 +1,614 @@
-/**
- * src/screens/TournamentDetailScreen.tsx
- *
- * A published local competition, as a fan sees it. Mirrors the web
- * /tournament/[id] page: Matches, Table, Teams.
- *
- * Opens on Matches rather than the table: someone arriving mid-season
- * wants today's score, and the table is one tap away. A knockout has no
- * table at all, so that tab isn't drawn for one.
- */
-import React, { useCallback, useEffect, useState } from 'react';
+// src/screens/TournamentDetailScreen.tsx - Local competition hub (full parity with LeaguesScreen detail)
+import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, Image,
-  ActivityIndicator, RefreshControl,
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  StyleSheet,
+  Image,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
-import { COLORS } from '../theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { COLORS, FONTS } from '../theme';
 import {
   getTournament,
-  type TournamentDetail, type TournamentFixture, type TournamentStanding,
+  type MatchSummary,
+  type TournamentDetail,
+  type TournamentFixture,
+  type TournamentStanding,
 } from '../services/api';
+import { MatchCard } from '../components/MatchCard';
 import { FollowButton } from '../components/FollowButton';
 
 type Tab = 'matches' | 'table' | 'teams' | 'stats' | 'bracket';
 
-/**
- * Organisers type the group as "B" or as "Group B". Prefixing blindly is
- * what produced the "GROUP GROUP B" heading, so this is the one place
- * that decides the label.
- */
 function groupLabel(name?: string | null): string {
   const g = (name || '').trim();
   if (!g) return '';
   return /^group\b/i.test(g) ? g : `Group ${g}`;
 }
 
-/**
- * "5 Sep – 12 Dec 2026" rather than the raw ISO the API stores. The year
- * is printed on both ends only when the season crosses into a new one.
- */
 function seasonRange(start?: string | null, end?: string | null): string {
   const fmt = (iso: string, withYear: boolean) => {
     const t = Date.parse(iso);
     if (Number.isNaN(t)) return iso;
     return new Date(t).toLocaleDateString('en-GB', {
-      day: 'numeric', month: 'short', ...(withYear ? { year: 'numeric' } : {}),
+      day: 'numeric',
+      month: 'short',
+      ...(withYear ? { year: 'numeric' } : {}),
     });
   };
   if (!start && !end) return '';
   if (!start) return fmt(end as string, true);
   if (!end) return `From ${fmt(start, true)}`;
   const sameYear = start.slice(0, 4) === end.slice(0, 4);
-  return `${fmt(start, !sameYear)} – ${fmt(end, true)}`;
+  return `${fmt(start, !sameYear)} - ${fmt(end, true)}`;
+}
+
+function toMatchSummary(fx: TournamentFixture, tournamentId: string, competitionName: string): MatchSummary {
+  return {
+    event_id: fx.id,
+    source: 'local',
+    tournament_id: tournamentId,
+    home_crest: fx.home_crest,
+    away_crest: fx.away_crest,
+    home_team: fx.home_team || 'TBD',
+    away_team: fx.away_team || 'TBD',
+    home_score: fx.home_score ?? 0,
+    away_score: fx.away_score ?? 0,
+    minute: 0,
+    status: fx.status || 'scheduled',
+    kickoff: fx.kickoff_at || undefined,
+    competition: competitionName,
+    round: fx.round,
+  };
 }
 
 export const TournamentDetailScreen: React.FC<any> = ({ route, navigation }) => {
+  const insets = useSafeAreaInsets();
   const { tournamentId, tournamentName } = route.params;
   const [d, setD] = useState<TournamentDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('matches');
   const [refreshing, setRefreshing] = useState(false);
 
+  useLayoutEffect(() => {
+    navigation.setOptions({ headerShown: false });
+  }, [navigation]);
+
   const load = useCallback(() => {
     getTournament(tournamentId)
-      .then((x) => { setD(x); setError(null); })
-      .catch((e) => setError(e.message))
+      .then((x) => {
+        setD(x);
+        setError(null);
+      })
+      .catch((e) => setError(e?.message || 'Failed to load competition.'))
       .finally(() => setRefreshing(false));
   }, [tournamentId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const hasLive = Boolean(d?.fixtures?.some((fx) =>
-    ['live', 'ht'].includes(String(fx.status).toLowerCase())
-  ));
+  const fixtures = Array.isArray(d?.fixtures) ? d!.fixtures : [];
+  const teams = Array.isArray(d?.teams) ? d!.teams : [];
+  const standings = Array.isArray(d?.standings) ? d!.standings : [];
+
+  const hasLive = fixtures.some((fx) =>
+    ['live', 'ht'].includes(String(fx.status || '').toLowerCase())
+  );
+
   useEffect(() => {
     if (!hasLive) return;
     const timer = setInterval(() => load(), 25_000);
     return () => clearInterval(timer);
   }, [hasLive, load]);
 
-  React.useLayoutEffect(() => {
-    navigation.setOptions({ title: tournamentName || 'Competition' });
-  }, [navigation, tournamentName]);
+  const openLocalTeam = (teamId: string | undefined, name: string, crest: string | null) => {
+    navigation.navigate('TeamDetail', {
+      source: 'local',
+      tournamentId,
+      teamId,
+      teamName: name,
+      teamCrest: crest,
+    });
+  };
 
-  if (error && !d) return <Text style={s.error}>{error}</Text>;
-  if (!d) {
-    return (
-      <View style={s.center}><ActivityIndicator color={COLORS.volt} /></View>
-    );
-  }
-
-  const hasTable = Boolean(
-    d.standings?.length || Object.keys(d.group_tables ?? {}).length
-  );
-  const tabs: Tab[] = [
-    'matches',
-    ...(hasTable ? ['table' as const] : []),
-    'teams',
-    'stats',
-    ...(d.tournament.format !== 'league' ? ['bracket' as const] : []),
+  const compName = d?.tournament?.name || tournamentName || 'Competition';
+  const hasTable = Boolean(standings.length || Object.keys(d?.group_tables ?? {}).length);
+  const tabs: { id: Tab; label: string }[] = [
+    ...(hasTable ? [{ id: 'table' as const, label: 'Table' }] : []),
+    { id: 'matches', label: 'Fixtures' },
+    { id: 'teams', label: 'Teams' },
+    { id: 'stats', label: 'Player Stats' },
+    ...(d?.tournament?.format !== 'league' ? [{ id: 'bracket' as const, label: 'Bracket' }] : []),
   ];
 
   return (
-    <ScrollView
-      style={s.wrap}
-      contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 12 }}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} tintColor={COLORS.volt}
-                        onRefresh={() => { setRefreshing(true); load(); }} />
-      }
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-        <View style={{ flex: 1 }}>
-          <Text style={s.title}>{d.tournament.name}</Text>
-          <Text style={s.muted}>
-            {d.tournament.organizing_body} • {d.tournament.country}
-          </Text>
-          <Text style={s.mono}>{seasonRange(d.tournament.start_date, d.tournament.end_date)}</Text>
+    <View style={styles.container}>
+      {/* Top Safe-Area Navigation Bar */}
+      <View style={[styles.topNav, { paddingTop: Math.max(insets.top, 12) + 4 }]}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backBtn}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="chevron-back" size={24} color={COLORS.text} />
+        </TouchableOpacity>
+        <Text style={styles.navTitle} numberOfLines={1}>
+          {compName}
+        </Text>
+        <View style={{ width: 32 }} />
+      </View>
+
+      {error && !d ? (
+        <View style={styles.centerBox}>
+          <Text style={styles.errorText}>{error}</Text>
         </View>
-        <FollowButton
-          teamName={d.tournament.name}
-          token={`tournament:${tournamentId}:${d.tournament.name}`}
-          size="sm"
-        />
-      </View>
-
-      <View style={s.tabs}>
-        {tabs.map((x) => (
-          <TouchableOpacity key={x} onPress={() => setTab(x)}
-                            style={[s.pill, tab === x && s.pillOn]}>
-            <Text style={[s.pillText, tab === x && s.pillTextOn]}>
-              {x.toUpperCase()}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {tab === 'matches' && (
-        <Matches fixtures={d.fixtures} navigation={navigation}
-                 tournamentId={tournamentId} />
-      )}
-
-      {tab === 'bracket' && d.tournament.format !== 'league' && (
-        <Matches fixtures={d.fixtures} navigation={navigation}
-                 tournamentId={tournamentId} />
-      )}
-
-      {tab === 'stats' && (
-        <View style={{ gap: 12 }}>
-          {([
-            { title: 'GOLDEN BOOT', rows: d.top_scorers ?? [], suffix: 'G' },
-            { title: 'TOP ASSISTS', rows: d.top_assists ?? [], suffix: 'A' },
-          ] as const).map(({ title, rows, suffix }) => (
-            <View key={title} style={s.card}>
-              <Text style={s.label}>{title}</Text>
-              {rows.length ? rows.slice(0, 10).map((player, index) => (
-                <View key={`${player.player_id}-${index}`} style={[s.row, { paddingVertical: 8 }]}>
-                  <Text style={[s.mono, { width: 22 }]}>{index + 1}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.body} numberOfLines={1}>{player.player_name}</Text>
-                    <Text style={s.muted} numberOfLines={1}>{player.team_name}</Text>
-                  </View>
-                  <Text style={[s.body, { color: COLORS.volt, fontWeight: '800' }]}>
-                    {player.value} {suffix}
-                  </Text>
-                </View>
-              )) : <Text style={s.muted}>No {title.toLowerCase()} recorded yet.</Text>}
+      ) : !d || !d.tournament ? (
+        <View style={styles.centerBox}>
+          <ActivityIndicator size="large" color={COLORS.volt} />
+          <Text style={styles.loadingText}>Loading competition data...</Text>
+        </View>
+      ) : (
+        <>
+          {/* Competition Hero Header */}
+          <View style={styles.leagueHeaderCard}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.leagueHeroTitle} numberOfLines={1}>
+                {d.tournament.name}
+              </Text>
+              <Text style={styles.leagueHeroCountry} numberOfLines={1}>
+                {[d.tournament.organizing_body, d.tournament.country].filter(Boolean).join(' • ').toUpperCase()}
+              </Text>
+              {!!seasonRange(d.tournament.start_date, d.tournament.end_date) && (
+                <Text style={styles.seasonRangeText}>
+                  {seasonRange(d.tournament.start_date, d.tournament.end_date)}
+                </Text>
+              )}
             </View>
-          ))}
-        </View>
-      )}
 
-      {tab === 'table' && hasTable && (
-        <View style={{ gap: 16 }}>
-          {d.group_tables
-            ? Object.keys(d.group_tables).sort().map((g) => (
-                <View key={g} style={{ gap: 6 }}>
-                  <Text style={s.label}>{groupLabel(g).toUpperCase()}</Text>
-                  <Table rows={d.group_tables![g]} />
-                </View>
-              ))
-            : <Table rows={d.standings ?? []} />}
-          <Text style={s.mono}>
-            Built from finished matches only.
-            {d.points_rules
-              ? ` ${d.points_rules.win} for a win, ${d.points_rules.draw} for a draw.`
-              : ''}
-          </Text>
-        </View>
-      )}
+            <FollowButton
+              teamName={d.tournament.name}
+              token={`tournament:${tournamentId}:${d.tournament.name}`}
+              size="sm"
+            />
+          </View>
 
-      {tab === 'teams' && (
-        <View style={{ gap: 8 }}>
-          {d.teams.map((tm) => (
-            <View key={tm.team_id} style={s.card}>
-              <View style={s.row}>
-                <Crest url={tm.crest_url} name={tm.name} size={22} />
-                <Text style={[s.body, { flex: 1 }]} numberOfLines={1}>{tm.name}</Text>
-                {tm.group_name ? (
-                  <Text style={s.mono}>{groupLabel(tm.group_name)}</Text>
-                ) : null}
+          {/* Underline Navigation Tabs */}
+          <View style={styles.tabRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 14, gap: 18 }}
+            >
+              {tabs.map((t) => {
+                const active = tab === t.id;
+                return (
+                  <TouchableOpacity
+                    key={t.id}
+                    style={[styles.tabBtn, active && styles.tabBtnActive]}
+                    onPress={() => setTab(t.id)}
+                  >
+                    <Text style={[styles.tabText, active && styles.tabTextActive]}>
+                      {t.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+
+          {/* Tab Body */}
+          <ScrollView
+            contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 44, paddingTop: 12 }}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                tintColor={COLORS.volt}
+                onRefresh={() => {
+                  setRefreshing(true);
+                  load();
+                }}
+              />
+            }
+          >
+            {/* FIXTURES / BRACKET */}
+            {(tab === 'matches' || (tab === 'bracket' && d.tournament.format !== 'league')) && (
+              <FixtureGroups
+                fixtures={fixtures}
+                tournamentId={tournamentId}
+                competitionName={d.tournament.name}
+                navigation={navigation}
+              />
+            )}
+
+            {/* TABLE */}
+            {tab === 'table' && hasTable && (
+              <View style={{ gap: 16 }}>
+                {d.group_tables && Object.keys(d.group_tables).length > 0 ? (
+                  Object.keys(d.group_tables)
+                    .sort()
+                    .map((g) => (
+                      <View key={g} style={{ gap: 6 }}>
+                        <Text style={styles.groupHeading}>{groupLabel(g).toUpperCase()}</Text>
+                        <Table
+                          rows={Array.isArray(d.group_tables![g]) ? d.group_tables![g] : []}
+                          onSelectTeam={(row) => openLocalTeam(row.team_id, row.name, row.crest_url)}
+                        />
+                      </View>
+                    ))
+                ) : (
+                  <Table
+                    rows={standings}
+                    onSelectTeam={(row) => openLocalTeam(row.team_id, row.name, row.crest_url)}
+                  />
+                )}
+                <Text style={styles.mono}>
+                  Built from finished matches only.
+                  {d.points_rules
+                    ? ` ${d.points_rules.win} for a win, ${d.points_rules.draw} for a draw.`
+                    : ''}
+                </Text>
               </View>
-            </View>
-          ))}
-        </View>
+            )}
+
+            {/* TEAMS */}
+            {tab === 'teams' && (
+              <View style={styles.leaderCard}>
+                <View style={styles.leaderHeader}>
+                  <Text style={styles.leaderTitle}>PARTICIPATING TEAMS ({teams.length})</Text>
+                </View>
+                {teams.length > 0 ? (
+                  teams.map((tm) => (
+                    <TouchableOpacity
+                      key={tm.team_id}
+                      style={styles.leaderRow}
+                      activeOpacity={0.75}
+                      onPress={() => openLocalTeam(tm.team_id, tm.name, tm.crest_url)}
+                    >
+                      <Crest url={tm.crest_url} name={tm.name} size={28} />
+                      <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={styles.leaderPlayerName} numberOfLines={1}>
+                          {tm.name}
+                        </Text>
+                        {tm.group_name ? (
+                          <Text style={styles.leaderTeamName}>{groupLabel(tm.group_name)}</Text>
+                        ) : null}
+                      </View>
+                      <Ionicons name="chevron-forward" size={16} color={COLORS.textDim} />
+                    </TouchableOpacity>
+                  ))
+                ) : (
+                  <Text style={styles.noDataText}>No teams registered yet.</Text>
+                )}
+              </View>
+            )}
+
+            {/* PLAYER STATS */}
+            {tab === 'stats' && (
+              <View style={{ gap: 14 }}>
+                {[
+                  {
+                    title: 'TOP GOALSCORERS',
+                    tag: 'G',
+                    rows: Array.isArray(d.top_scorers) ? d.top_scorers : [],
+                    color: COLORS.volt,
+                  },
+                  {
+                    title: 'TOP ASSISTS',
+                    tag: 'A',
+                    rows: Array.isArray(d.top_assists) ? d.top_assists : [],
+                    color: '#38bdf8',
+                  },
+                ].map((board) => (
+                  <View key={board.title} style={styles.leaderCard}>
+                    <View style={styles.leaderHeader}>
+                      <Text style={[styles.leaderTitle, { color: board.color }]}>{board.title}</Text>
+                    </View>
+                    {board.rows.length > 0 ? (
+                      board.rows.slice(0, 10).map((p, idx) => (
+                        <TouchableOpacity
+                          key={`${board.title}-${p.player_id}-${idx}`}
+                          style={styles.leaderRow}
+                          onPress={() =>
+                            navigation.navigate('TournamentPlayer', {
+                              tournamentId,
+                              playerId: p.player_id,
+                              playerName: p.player_name,
+                            })
+                          }
+                        >
+                          <Text style={styles.rankNum}>{idx + 1}</Text>
+                          <View style={{ flex: 1, marginLeft: 8 }}>
+                            <Text style={styles.leaderPlayerName} numberOfLines={1}>
+                              {p.player_name}
+                            </Text>
+                            <Text style={styles.leaderTeamName} numberOfLines={1}>
+                              {p.team_name}
+                            </Text>
+                          </View>
+                          <View style={styles.statValBadge}>
+                            <Text style={[styles.statValText, { color: board.color }]}>
+                              {p.value}
+                            </Text>
+                            <Text style={[styles.statValSub, { color: board.color }]}>
+                              {board.tag}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                      ))
+                    ) : (
+                      <Text style={styles.noDataText}>No stats recorded yet.</Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
+          </ScrollView>
+        </>
       )}
-    </ScrollView>
+    </View>
   );
 };
 
-function Crest({ url, name, size = 20 }: {
-  url: string | null; name: string; size?: number;
+function FixtureGroups({
+  fixtures,
+  tournamentId,
+  competitionName,
+  navigation,
+}: {
+  fixtures: TournamentFixture[];
+  tournamentId: string;
+  competitionName: string;
+  navigation: any;
 }) {
-  const [failed, setFailed] = useState(false);
-  if (!url || failed) {
-    const initials = (name || '?').split(/\s+/).filter(Boolean).slice(0, 2)
-      .map((w) => w[0].toUpperCase()).join('');
+  if (!Array.isArray(fixtures) || fixtures.length === 0) {
     return (
-      <View style={[s.crest, { width: size, height: size, borderRadius: size / 2 }]}>
-        <Text style={s.crestText}>{initials}</Text>
+      <View style={styles.centerBox}>
+        <Ionicons name="calendar-outline" size={36} color={COLORS.textDim} />
+        <Text style={styles.emptyText}>No fixtures published yet.</Text>
       </View>
     );
   }
-  return (
-    <Image source={{ uri: url }} onError={() => setFailed(true)}
-           style={{ width: size, height: size, borderRadius: size / 2 }}
-           resizeMode="cover" />
-  );
-}
 
-/** Grouped by round or group, in playing order. A flat list of thirty
- *  fixtures is unusable on a phone. */
-function Matches({ fixtures, navigation, tournamentId }: {
-  fixtures: TournamentFixture[]; navigation: any; tournamentId: string;
-}) {
-  if (fixtures.length === 0) {
-    return <Text style={s.muted}>No fixtures published yet.</Text>;
-  }
+  const sorted = fixtures
+    .slice()
+    .sort((a, b) => (a.kickoff_at || '').localeCompare(b.kickoff_at || ''));
+
   const grouped: Record<string, TournamentFixture[]> = {};
-  for (const fx of fixtures) {
-    // Organisers type the group as "B" or as "Group B". Prefixing blindly
-    // is what produced the "GROUP GROUP B" heading.
-    // Group and round both, so matchday 7 and 8 don't run into one list.
-    const key = [groupLabel(fx.group_name), (fx.round || '').trim()]
-      .filter(Boolean).join(' · ') || 'Fixtures';
+  for (const fx of sorted) {
+    let key = 'FIXTURES';
+    if (fx.kickoff_at) {
+      const dt = new Date(fx.kickoff_at);
+      if (!Number.isNaN(dt.getTime())) {
+        key = dt.toLocaleDateString('en-GB', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+        });
+      }
+    } else {
+      key =
+        [groupLabel(fx.group_name), (fx.round || '').trim()].filter(Boolean).join(' • ') ||
+        'FIXTURES';
+    }
     (grouped[key] ||= []).push(fx);
   }
 
   return (
-    <View style={{ gap: 16 }}>
+    <View style={{ gap: 14 }}>
       {Object.keys(grouped).map((heading) => (
-        <View key={heading} style={{ gap: 8 }}>
-          <Text style={s.label}>{heading.toUpperCase()}</Text>
-          {grouped[heading]
-            .slice()
-            .sort((a, b) => (a.kickoff_at || '').localeCompare(b.kickoff_at || ''))
-            .map((fx) => {
-              const live = ['live', 'ht'].includes(String(fx.status).toLowerCase());
-              return (
-                <TouchableOpacity
-                  key={fx.id} style={s.card}
-                  onPress={() => navigation.navigate('TournamentMatch', {
-                    tournamentId, fixtureId: fx.id,
-                  })}
-                >
-                  <View style={s.row}>
-                    <View style={{ flex: 1, gap: 6 }}>
-                      <Side name={fx.home_team} crest={fx.home_crest} score={fx.home_score} />
-                      <Side name={fx.away_team} crest={fx.away_crest} score={fx.away_score} />
-                    </View>
-                    <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={[s.mono, live && { color: '#FF4444' }]}>
-                        {live ? 'LIVE' : String(fx.status).toUpperCase()}
-                      </Text>
-                      <Text style={s.mono}>
-                        {fx.kickoff_at
-                          ? new Date(fx.kickoff_at).toLocaleString('en-GB', {
-                              day: 'numeric', month: 'short',
-                              hour: '2-digit', minute: '2-digit',
-                            })
-                          : ''}
-                      </Text>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
+        <View key={heading}>
+          <Text style={styles.groupHeading}>{heading.toUpperCase()}</Text>
+          {grouped[heading].map((fx) => (
+            <MatchCard
+              key={fx.id}
+              match={toMatchSummary(fx, tournamentId, competitionName)}
+              onPress={() =>
+                navigation.navigate('TournamentMatch', {
+                  tournamentId,
+                  fixtureId: fx.id,
+                  tournamentName: competitionName,
+                })
+              }
+            />
+          ))}
         </View>
       ))}
     </View>
   );
 }
 
-function Side({ name, crest, score }: {
-  name: string | null; crest: string | null; score: number | null;
-}) {
+function Crest({ url, name, size = 20 }: { url: string | null; name: string; size?: number }) {
+  const [failed, setFailed] = useState(false);
+  if (!url || failed) {
+    const initials = (name || '?')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0].toUpperCase())
+      .join('');
+    return (
+      <View style={[styles.crest, { width: size, height: size, borderRadius: size / 2 }]}>
+        <Text style={styles.crestText}>{initials}</Text>
+      </View>
+    );
+  }
   return (
-    <View style={s.row}>
-      <Crest url={crest} name={name ?? '?'} size={18} />
-      <Text style={[s.body, { flex: 1 }]} numberOfLines={1}>{name ?? 'Unknown'}</Text>
-      <Text style={s.score}>{score ?? '–'}</Text>
-    </View>
+    <Image
+      source={{ uri: url }}
+      onError={() => setFailed(true)}
+      style={{ width: size, height: size, borderRadius: size / 2 }}
+      resizeMode="cover"
+    />
   );
 }
 
-function Table({ rows }: { rows: TournamentStanding[] }) {
-  if (rows.length === 0) return <Text style={s.muted}>No finished matches yet.</Text>;
+function Table({
+  rows,
+  onSelectTeam,
+}: {
+  rows: TournamentStanding[];
+  onSelectTeam: (row: TournamentStanding) => void;
+}) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return <Text style={styles.noDataText}>No finished matches yet.</Text>;
+  }
   return (
-    <View style={s.card}>
-      <View style={[s.row, { paddingBottom: 6 }]}>
-        <Text style={[s.mono, { width: 18 }]}>#</Text>
-        <Text style={[s.mono, { flex: 1 }]}>TEAM</Text>
-        <Text style={[s.mono, s.col]}>P</Text>
-        <Text style={[s.mono, s.col]}>W</Text>
-        <Text style={[s.mono, s.col]}>D</Text>
-        <Text style={[s.mono, s.col]}>L</Text>
-        <Text style={[s.mono, s.colWide]}>GD</Text>
-        <Text style={[s.mono, s.colWide]}>PTS</Text>
+    <View style={styles.leaderCard}>
+      <View style={[styles.row, { paddingBottom: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.cardBorder }]}>
+        <Text style={[styles.mono, { width: 18 }]}>#</Text>
+        <Text style={[styles.mono, { flex: 1 }]}>CLUB</Text>
+        <Text style={[styles.mono, styles.col]}>P</Text>
+        <Text style={[styles.mono, styles.col]}>W</Text>
+        <Text style={[styles.mono, styles.col]}>D</Text>
+        <Text style={[styles.mono, styles.col]}>L</Text>
+        <Text style={[styles.mono, styles.colWide]}>GD</Text>
+        <Text style={[styles.mono, styles.colWide]}>PTS</Text>
       </View>
       {rows.map((r) => (
-        <View key={r.team_id} style={[s.row, { paddingVertical: 6 }]}>
-          <Text style={[s.mono, { width: 18 }]}>{r.position}</Text>
-          <View style={[s.row, { flex: 1 }]}>
-            <Crest url={r.crest_url} name={r.name} size={16} />
-            <Text style={[s.body, { flex: 1 }]} numberOfLines={1}>{r.name}</Text>
+        <TouchableOpacity
+          key={r.team_id}
+          style={[styles.row, { paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.04)' }]}
+          activeOpacity={0.7}
+          onPress={() => onSelectTeam(r)}
+        >
+          <Text style={[styles.mono, { width: 18 }]}>{r.position}</Text>
+          <View style={[styles.row, { flex: 1 }]}>
+            <Crest url={r.crest_url} name={r.name} size={18} />
+            <Text style={[styles.leaderPlayerName, { flex: 1 }]} numberOfLines={1}>
+              {r.name}
+            </Text>
           </View>
-          <Text style={[s.cell, s.col]}>{r.played}</Text>
-          <Text style={[s.cell, s.col]}>{r.won}</Text>
-          <Text style={[s.cell, s.col]}>{r.drawn}</Text>
-          <Text style={[s.cell, s.col]}>{r.lost}</Text>
-          <Text style={[s.cell, s.colWide]}>
+          <Text style={[styles.cell, styles.col]}>{r.played}</Text>
+          <Text style={[styles.cell, styles.col]}>{r.won}</Text>
+          <Text style={[styles.cell, styles.col]}>{r.drawn}</Text>
+          <Text style={[styles.cell, styles.col]}>{r.lost}</Text>
+          <Text style={[styles.cell, styles.colWide]}>
             {r.goal_difference > 0 ? `+${r.goal_difference}` : r.goal_difference}
           </Text>
-          <Text style={[s.pts, s.colWide]}>{r.points}</Text>
-        </View>
+          <Text style={[styles.pts, styles.colWide]}>{r.points}</Text>
+        </TouchableOpacity>
       ))}
     </View>
   );
 }
 
-const s = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: COLORS.bg },
-  center: { flex: 1, backgroundColor: COLORS.bg, justifyContent: 'center' },
-  card: {
-    backgroundColor: COLORS.card, borderRadius: 12, padding: 12,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: COLORS.bg },
+  topNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+    backgroundColor: COLORS.card,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.cardBorder,
+  },
+  backBtn: { padding: 4 },
+  navTitle: {
+    fontFamily: FONTS.bold,
+    color: COLORS.text,
+    fontSize: 15,
+    maxWidth: '80%',
+    textAlign: 'center',
+  },
+  leagueHeaderCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: COLORS.card,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.cardBorder,
+  },
+  leagueHeroTitle: { fontFamily: FONTS.display, color: COLORS.text, fontSize: 18 },
+  leagueHeroCountry: { fontFamily: FONTS.bold, color: COLORS.textDim, fontSize: 10, marginTop: 2 },
+  seasonRangeText: { fontFamily: FONTS.regular, color: COLORS.textSecondary, fontSize: 11, marginTop: 2 },
+  tabRow: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.cardBorder,
+    backgroundColor: COLORS.cardElevated,
+  },
+  tabBtn: { paddingVertical: 10 },
+  tabBtnActive: { borderBottomWidth: 2, borderBottomColor: COLORS.volt },
+  tabText: { fontFamily: FONTS.medium, color: COLORS.textDim, fontSize: 12 },
+  tabTextActive: { fontFamily: FONTS.bold, color: COLORS.volt },
+  groupHeading: {
+    fontFamily: FONTS.bold,
+    color: COLORS.volt,
+    fontSize: 10,
+    letterSpacing: 1.3,
+    marginBottom: 6,
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  title: { color: COLORS.text, fontSize: 20, fontWeight: '900' },
-  body: { color: COLORS.text, fontSize: 13 },
-  muted: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
-  mono: { color: COLORS.textDim, fontSize: 10 },
-  label: { color: COLORS.volt, fontSize: 10, fontWeight: '800', letterSpacing: 1.4 },
-  score: { color: COLORS.text, fontSize: 14, fontWeight: '900' },
-  pts: { color: COLORS.volt, fontSize: 13, fontWeight: '800', textAlign: 'center' },
-  // Six numeric columns have to fit beside the club name at 390pt.
+  mono: { fontFamily: FONTS.bold, color: COLORS.textDim, fontSize: 10 },
+  pts: { fontFamily: FONTS.bold, color: COLORS.volt, fontSize: 13, textAlign: 'center' },
   col: { width: 18, textAlign: 'center' },
   colWide: { width: 28, textAlign: 'center' },
   cell: { color: COLORS.textSecondary, fontSize: 12 },
-  error: { color: '#FF4444', fontSize: 13, fontWeight: '600', padding: 16 },
-  tabs: { flexDirection: 'row', gap: 6 },
-  pill: {
-    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', backgroundColor: COLORS.card,
+  centerBox: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 30,
+    minHeight: 200,
   },
-  pillOn: { borderColor: COLORS.cardBorderActive, backgroundColor: COLORS.voltMuted },
-  pillText: { color: COLORS.textSecondary, fontSize: 11, fontWeight: '700' },
-  pillTextOn: { color: COLORS.volt },
+  loadingText: { color: COLORS.textSecondary, fontSize: 13, marginTop: 10 },
+  emptyText: { color: COLORS.textDim, fontSize: 13, marginTop: 8, textAlign: 'center' },
+  errorText: { color: '#FF4444', fontSize: 13, fontWeight: '600', textAlign: 'center' },
+  leaderCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    padding: 12,
+  },
+  leaderHeader: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.cardBorder,
+    paddingBottom: 8,
+    marginBottom: 8,
+  },
+  leaderTitle: { fontFamily: FONTS.bold, color: COLORS.volt, fontSize: 11, letterSpacing: 1 },
+  leaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 9,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  rankNum: { fontFamily: FONTS.bold, width: 20, color: COLORS.textDim, fontSize: 12, textAlign: 'center' },
+  leaderPlayerName: { fontFamily: FONTS.semibold, color: COLORS.text, fontSize: 13 },
+  leaderTeamName: { fontFamily: FONTS.regular, color: COLORS.textSecondary, fontSize: 11, marginTop: 1 },
+  statValBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.voltMuted,
+    borderColor: COLORS.cardBorderActive,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    gap: 3,
+  },
+  statValText: { fontSize: 13, fontWeight: '800' },
+  statValSub: { fontSize: 10, fontWeight: '700' },
+  noDataText: { color: COLORS.textDim, fontSize: 12, paddingVertical: 12, textAlign: 'center' },
   crest: {
-    backgroundColor: COLORS.cardElevated, borderWidth: 1,
+    backgroundColor: COLORS.cardElevated,
+    borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   crestText: { color: COLORS.textSecondary, fontSize: 8, fontWeight: '700' },
 });

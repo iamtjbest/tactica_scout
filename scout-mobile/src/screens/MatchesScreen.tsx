@@ -1,15 +1,16 @@
-// src/screens/MatchesScreen.tsx — Matches feed with date strip and filters
-import React, { useState, useEffect, useCallback } from 'react';
+// src/screens/MatchesScreen.tsx - Matches feed with 7-day centered date strip and filters
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   FlatList,
   RefreshControl,
+  ScrollView,
   StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS } from '../theme';
+import { COLORS, FONTS } from '../theme';
 import { MatchCard } from '../components/MatchCard';
 import {
   getMatchesByDate,
@@ -25,11 +26,19 @@ interface MatchesScreenProps {
 
 type FilterType = 'all' | 'live' | 'upcoming' | 'finished' | 'following';
 
-function todayLocalISO(): string {
-  const d = new Date();
+function formatLocalISO(d: Date): string {
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${d.getFullYear()}-${month}-${day}`;
+}
+
+function todayLocalISO(): string {
+  return formatLocalISO(new Date());
+}
+
+function parseISO(iso: string): Date {
+  const [year, month, day] = iso.split('-').map(Number);
+  return new Date(year, month - 1, day);
 }
 
 export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
@@ -41,25 +50,22 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
   const [liveCount, setLiveCount] = useState(0);
   const [followedTeams, setFollowedTeams] = useState<string[]>([]);
 
-  // Fetch followed clubs
   const loadFollowed = useCallback(async () => {
     try {
       const res = await getMe();
       setFollowedTeams(res.user?.followed_teams || []);
-    } catch {}
+    } catch { }
   }, []);
 
-  // Fetch matches for the day
   const fetchMatches = useCallback(async () => {
     try {
       const res = await getMatchesByDate(selectedDate);
       setLeagues(res.leagues || []);
 
-      // Also get live scores count
       try {
         const liveRes = await getLiveScores();
         setLiveCount(liveRes.count || 0);
-      } catch {}
+      } catch { }
     } catch (err) {
       console.warn('Failed to fetch matches:', err);
     } finally {
@@ -80,29 +86,35 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
     loadFollowed();
   };
 
-  // Date controls
+  const todayStr = todayLocalISO();
+  const dateStrip = useMemo(() => {
+    const center = parseISO(selectedDate);
+    const days: { iso: string; dow: string; label: string; isToday: boolean }[] = [];
+    for (let offset = -3; offset <= 3; offset++) {
+      const d = new Date(center);
+      d.setDate(center.getDate() + offset);
+      const iso = formatLocalISO(d);
+      days.push({
+        iso,
+        dow: d.toLocaleDateString('en-GB', { weekday: 'short' }).toUpperCase(),
+        label: d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }),
+        isToday: iso === todayStr,
+      });
+    }
+    return days;
+  }, [selectedDate, todayStr]);
+
   const changeDateBy = (days: number) => {
-    const [year, month, day] = selectedDate.split('-').map(Number);
-    const d = new Date(year, month - 1, day);
+    const d = parseISO(selectedDate);
     d.setDate(d.getDate() + days);
-    setSelectedDate(
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    );
-  };
-
-  const isToday = () => {
-    return selectedDate === todayLocalISO();
-  };
-
-  const setDateToday = () => {
-    setSelectedDate(todayLocalISO());
+    setSelectedDate(formatLocalISO(d));
   };
 
   useEffect(() => {
-    if (!isToday()) return;
+    if (selectedDate !== todayStr) return;
     const timer = setInterval(() => { void fetchMatches(); }, 25_000);
     return () => clearInterval(timer);
-  }, [selectedDate, fetchMatches]);
+  }, [selectedDate, todayStr, fetchMatches]);
 
   const isTokenMatch = (m: MatchSummary, leagueGroup: LeagueMatches): boolean => {
     if (!followedTeams || followedTeams.length === 0) return false;
@@ -137,10 +149,9 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
     if (activeFilter === 'finished') return isFinished;
     if (activeFilter === 'upcoming') return isUpcoming;
     if (activeFilter === 'following') return isTokenMatch(m, leagueGroup);
-    return true; // 'all'
+    return true;
   };
 
-  // Filter leagues with at least one matching match
   const filteredLeagues = leagues
     .map((l) => ({
       ...l,
@@ -161,67 +172,87 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      {/* Date Bar */}
+      {/* 7-Day Centered Date Strip (Past 3 days, Center, Next 3 days) */}
       <View style={styles.dateBar}>
         <TouchableOpacity
           onPress={() => changeDateBy(-1)}
           style={styles.dateArrow}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
         >
-          <Ionicons name="chevron-back" size={20} color={COLORS.textSecondary} />
+          <Ionicons name="chevron-back" size={16} color={COLORS.textSecondary} />
         </TouchableOpacity>
 
-        <TouchableOpacity
-          onPress={setDateToday}
-          style={[styles.dateBadge, isToday() && styles.dateBadgeToday]}
-        >
-          <Ionicons
-            name="calendar-outline"
-            size={14}
-            color={isToday() ? COLORS.volt : COLORS.textSecondary}
-            style={{ marginRight: 6 }}
-          />
-          <Text style={[styles.dateText, isToday() && styles.dateTextToday]}>
-            {selectedDate} {isToday() ? '(Today)' : ''}
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.sevenDayRow}>
+          {dateStrip.map((day) => {
+            const active = day.iso === selectedDate;
+            return (
+              <TouchableOpacity
+                key={day.iso}
+                onPress={() => setSelectedDate(day.iso)}
+                style={[styles.dayCell, active && styles.dayCellActive]}
+                activeOpacity={0.75}
+              >
+                {day.isToday ? (
+                  <Text style={[styles.todayPillText, active && { color: COLORS.volt }]}>
+                    TODAY
+                  </Text>
+                ) : (
+                  <>
+                    <Text style={[styles.dayDow, active && styles.dayTextActive]}>
+                      {day.dow}
+                    </Text>
+                    <Text style={[styles.dayNum, active && styles.dayTextActive]}>
+                      {day.label}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
 
         <TouchableOpacity
           onPress={() => changeDateBy(1)}
           style={styles.dateArrow}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
         >
-          <Ionicons name="chevron-forward" size={20} color={COLORS.textSecondary} />
+          <Ionicons name="chevron-forward" size={16} color={COLORS.textSecondary} />
         </TouchableOpacity>
       </View>
 
       {/* Filter Chips Bar */}
-      <View style={styles.filterBar}>
-        {(['all', 'live', 'upcoming', 'finished', 'following'] as FilterType[]).map((f) => {
-          const isActive = activeFilter === f;
-          return (
-            <TouchableOpacity
-              key={f}
-              onPress={() => setActiveFilter(f)}
-              style={[styles.filterChip, isActive && styles.filterChipActive]}
-            >
-              {f === 'live' && liveCount > 0 && (
-                <View style={styles.livePulseDot} />
-              )}
-              <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
-                {f === 'all'
-                  ? 'All'
-                  : f === 'live'
-                  ? `Live (${liveCount})`
-                  : f === 'upcoming'
-                  ? 'Upcoming'
-                  : f === 'finished'
-                  ? 'Finished'
-                  : 'Following'}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
+      <View style={styles.filterBarWrap}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterBar}
+        >
+          {(['all', 'following', 'live', 'upcoming', 'finished'] as FilterType[]).map((f) => {
+            const isActive = activeFilter === f;
+            return (
+              <TouchableOpacity
+                key={f}
+                onPress={() => setActiveFilter(f)}
+                style={[styles.filterChip, isActive && styles.filterChipActive]}
+              >
+                {f === 'live' && liveCount > 0 && (
+                  <View style={styles.livePulseDot} />
+                )}
+                <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
+                  {f === 'all'
+                    ? 'All'
+                    : f === 'live'
+                      ? `Live (${liveCount})`
+                      : f === 'upcoming'
+                        ? 'Upcoming'
+                        : f === 'finished'
+                          ? 'Finished'
+                          : 'Following'}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
 
       {/* Matches List */}
@@ -285,7 +316,6 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
           }
           renderItem={({ item }) => (
             <View style={styles.leagueSection}>
-              {/* League Header */}
               <TouchableOpacity
                 style={styles.leagueHeader}
                 activeOpacity={item.league_id || item.tournament_id ? 0.7 : 1}
@@ -298,8 +328,6 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
                     return;
                   }
                   if (item.league_id) {
-                    // There is no 'LeagueDetail' route. The Leagues tab is
-                    // the league screen and already accepts these params.
                     navigation.navigate('MainTabs', {
                       screen: 'Leagues',
                       params: {
@@ -319,19 +347,17 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
                 )}
               </TouchableOpacity>
 
-              {/* League Match Cards */}
               {item.matches.map((m, idx) => (
                 <MatchCard
                   key={`match-${m.event_id ?? idx}`}
                   match={m}
                   onPress={() => {
                     if (!m.event_id) return;
-                    // A local competition's fixture has its own screen:
-                    // its id is our uuid and nothing about it is BSD.
                     if (m.source === 'local' && m.tournament_id) {
                       navigation.navigate('TournamentMatch', {
                         tournamentId: m.tournament_id,
                         fixtureId: String(m.event_id),
+                        tournamentName: item.league,
                       });
                       return;
                     }
@@ -350,56 +376,50 @@ export const MatchesScreen: React.FC<MatchesScreenProps> = ({ navigation }) => {
   );
 };
 
+export default MatchesScreen;
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
-  },
+  container: { flex: 1, backgroundColor: COLORS.bg },
   dateBar: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.cardBorder,
+    backgroundColor: COLORS.bg,
+  },
+  dateArrow: { width: 26, height: 36, alignItems: 'center', justifyContent: 'center' },
+  sevenDayRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    gap: 2,
+  },
+  dayCell: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    minHeight: 40,
+  },
+  dayCellActive: {
+    backgroundColor: 'rgba(200, 255, 0, 0.10)',
+    borderColor: COLORS.volt,
+  },
+  dayDow: { fontFamily: FONTS.bold, color: COLORS.textDim, fontSize: 9, letterSpacing: 0.3 },
+  dayNum: { fontFamily: FONTS.bold, color: COLORS.textSecondary, fontSize: 10, marginTop: 1 },
+  dayTextActive: { color: COLORS.volt },
+  todayPillText: { fontFamily: FONTS.bold, color: COLORS.text, fontSize: 9, letterSpacing: 0.4 },
+  filterBarWrap: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.cardBorder,
   },
-  dateArrow: {
-    padding: 6,
-    borderRadius: 8,
-    backgroundColor: COLORS.card,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-  },
-  dateBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 8,
-    backgroundColor: COLORS.card,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-  },
-  dateBadgeToday: {
-    borderColor: 'rgba(212, 255, 0, 0.35)',
-    backgroundColor: 'rgba(212, 255, 0, 0.08)',
-  },
-  dateText: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  dateTextToday: {
-    color: COLORS.volt,
-    fontWeight: '700',
-  },
-  filterBar: {
-    flexDirection: 'row',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    gap: 8,
-  },
+  filterBar: { flexDirection: 'row', paddingHorizontal: 14, paddingVertical: 10, gap: 8 },
   filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -414,25 +434,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(212, 255, 0, 0.12)',
     borderColor: COLORS.volt,
   },
-  filterChipText: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  filterChipTextActive: {
-    color: COLORS.volt,
-    fontWeight: '700',
-  },
-  livePulseDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: COLORS.live,
-    marginRight: 5,
-  },
-  leagueSection: {
-    marginTop: 12,
-  },
+  filterChipText: { fontFamily: FONTS.semibold, color: COLORS.textSecondary, fontSize: 12 },
+  filterChipTextActive: { fontFamily: FONTS.bold, color: COLORS.volt },
+  livePulseDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.live, marginRight: 5 },
+  leagueSection: { marginTop: 12 },
   leagueHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -440,35 +445,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     marginBottom: 6,
   },
-  leagueName: {
-    color: COLORS.text,
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
-  centerBox: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 30,
-  },
-  loadingText: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    marginTop: 12,
-  },
-  emptyTitle: {
-    color: COLORS.text,
-    fontSize: 16,
-    fontWeight: '700',
-    marginTop: 12,
-  },
-  emptySubtitle: {
-    color: COLORS.textDim,
-    fontSize: 13,
-    marginTop: 4,
-    textAlign: 'center',
-  },
+  leagueName: { fontFamily: FONTS.bold, color: COLORS.text, fontSize: 13, letterSpacing: 0.3 },
+  centerBox: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30 },
+  emptyTitle: { fontFamily: FONTS.bold, color: COLORS.text, fontSize: 16, marginTop: 12 },
+  emptySubtitle: { fontFamily: FONTS.regular, color: COLORS.textDim, fontSize: 13, marginTop: 4, textAlign: 'center' },
   resetFilterBtn: {
     marginTop: 14,
     backgroundColor: COLORS.cardElevated,
@@ -478,9 +458,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
   },
-  resetFilterText: {
-    color: COLORS.volt,
-    fontSize: 12,
-    fontWeight: '700',
-  },
+  resetFilterText: { fontFamily: FONTS.bold, color: COLORS.volt, fontSize: 12 },
 });

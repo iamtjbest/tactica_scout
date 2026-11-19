@@ -1,5 +1,5 @@
-// src/screens/LeaguesScreen.tsx — Full 5-Tab Mobile League & Competition Hub
-import React, { useState, useEffect, useCallback } from 'react';
+// src/screens/LeaguesScreen.tsx - FotMob-style Leagues Directory + Full 5-Tab League Hub
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,21 +8,24 @@ import {
   ActivityIndicator,
   Image,
   Modal,
+  TextInput,
   StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS } from '../theme';
+import { COLORS, FONTS } from '../theme';
 import { StandingsTable } from '../components/StandingsTable';
 import { MatchCard } from '../components/MatchCard';
 import { FollowButton } from '../components/FollowButton';
-import * as api from '../services/api';
 import {
   getLeagues,
+  getTournaments,
   getLeagueSeasons,
   getStandings,
   getLeagueFixtures,
   getLeagueTopStats,
   getLeagueTeamStats,
+  getMe,
+  isSignedIn,
   playerImageUrl,
   teamLogoUrl,
   type StandingsRow,
@@ -30,6 +33,7 @@ import {
   type MatchSummary,
   type TopStatPlayer,
   type LeagueSeason,
+  type TournamentSummary,
 } from '../services/api';
 
 interface LeaguesScreenProps {
@@ -47,18 +51,13 @@ const TABS: { id: LeagueTab; label: string }[] = [
   { id: 'season', label: 'Season' },
 ];
 
-const MONTHS = [
-  { val: '01', label: 'Jan' }, { val: '02', label: 'Feb' },
-  { val: '03', label: 'Mar' }, { val: '04', label: 'Apr' },
-  { val: '05', label: 'May' }, { val: '06', label: 'Jun' },
-  { val: '07', label: 'Jul' }, { val: '08', label: 'Aug' },
-  { val: '09', label: 'Sep' }, { val: '10', label: 'Oct' },
-  { val: '11', label: 'Nov' }, { val: '12', label: 'Dec' },
-];
-
 export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route }) => {
   const [leagues, setLeagues] = useState<{ league_id: number; name: string }[]>([]);
-  const [localTournaments, setLocalTournaments] = useState<any[]>([]);
+  const [localTournaments, setLocalTournaments] = useState<TournamentSummary[]>([]);
+  const [followedTokens, setFollowedTokens] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [directoryLoading, setDirectoryLoading] = useState(true);
+
   const [selectedLeagueId, setSelectedLeagueId] = useState<number | null>(
     route?.params?.leagueId ?? null
   );
@@ -71,7 +70,7 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
   const [seasonModalOpen, setSeasonModalOpen] = useState(false);
 
   const [activeTab, setActiveTab] = useState<LeagueTab>('table');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   const [standings, setStandings] = useState<StandingsRow[]>([]);
   const [groups, setGroups] = useState<StandingsGroup[]>([]);
@@ -82,38 +81,35 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
   const [topCards, setTopCards] = useState<TopStatPlayer[]>([]);
   const [teamStats, setTeamStats] = useState<any>(null);
 
-  const [selectedDay, setSelectedDay] = useState<string>('');
-  const [selectedMonth, setSelectedMonth] = useState<string>('');
-  const [selectedYear, setSelectedYear] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'upcoming' | 'finished' | 'live'>('all');
+  const bodyScrollRef = useRef<any>(null);
+  const [nextMatchOffsetY, setNextMatchOffsetY] = useState<number | null>(null);
+  const hasAutoScrolledRef = useRef(false);
 
   useEffect(() => {
     let alive = true;
-    getLeagues()
-      .then((res) => {
+    setDirectoryLoading(true);
+    Promise.all([
+      getLeagues().catch(() => ({ leagues: [] })),
+      getTournaments().catch(() => ({ tournaments: [] })),
+      (async () => {
+        try {
+          if (await isSignedIn()) {
+            const me = await getMe();
+            return Array.isArray(me?.user?.followed_teams) ? me.user.followed_teams : [];
+          }
+        } catch { }
+        return [];
+      })(),
+    ])
+      .then(([lgRes, trRes, follows]) => {
         if (!alive) return;
-        const list = Array.isArray(res?.leagues) ? res.leagues : [];
-        setLeagues(list);
-        if (!selectedLeagueId && list.length > 0) {
-          setSelectedLeagueId(list[0].league_id);
-          setLeagueTitle(list[0].name || '');
-        } else if (list.length === 0) {
-          setLoading(false);
-        }
+        setLeagues(Array.isArray(lgRes?.leagues) ? lgRes.leagues : []);
+        setLocalTournaments(Array.isArray(trRes?.tournaments) ? trRes.tournaments : []);
+        setFollowedTokens(follows);
       })
-      .catch(() => {
-        if (alive) setLoading(false);
+      .finally(() => {
+        if (alive) setDirectoryLoading(false);
       });
-
-    const fetchTournaments = (api as any).getTournaments;
-    if (typeof fetchTournaments === 'function') {
-      fetchTournaments()
-        .then((res: any) => {
-          if (!alive) return;
-          setLocalTournaments(Array.isArray(res?.tournaments) ? res.tournaments : []);
-        })
-        .catch(() => { });
-    }
 
     return () => { alive = false; };
   }, []);
@@ -122,6 +118,7 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
     if (route?.params?.leagueId) {
       setSelectedLeagueId(route.params.leagueId);
       if (route.params.leagueName) setLeagueTitle(route.params.leagueName);
+      setActiveTab('table');
     }
   }, [route?.params?.leagueId, route?.params?.leagueName]);
 
@@ -130,10 +127,6 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
     let alive = true;
     setSelectedSeasonId(null);
     setSelectedSeasonLabel('');
-    setSelectedDay('');
-    setSelectedMonth('');
-    setSelectedYear('');
-    setStatusFilter('all');
 
     getLeagueSeasons(selectedLeagueId)
       .then((res) => {
@@ -157,6 +150,8 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
 
   const loadLeagueData = useCallback(async (id: number, sId: number | null) => {
     setLoading(true);
+    setNextMatchOffsetY(null);
+    hasAutoScrolledRef.current = false;
     try {
       const [stdRes, fixRes, topRes, tmStatsRes] = await Promise.all([
         getStandings(id, sId).catch(() => ({ league: '', country: '', standings: [], groups: [] })),
@@ -185,178 +180,286 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
     }
   }, [selectedLeagueId, selectedSeasonId, loadLeagueData]);
 
+  useEffect(() => {
+    if (activeTab === 'matches') {
+      hasAutoScrolledRef.current = false;
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (
+      activeTab === 'matches' &&
+      !loading &&
+      nextMatchOffsetY != null &&
+      nextMatchOffsetY > 0 &&
+      !hasAutoScrolledRef.current
+    ) {
+      hasAutoScrolledRef.current = true;
+      const timer = setTimeout(() => {
+        bodyScrollRef.current?.scrollTo({ y: Math.max(0, nextMatchOffsetY - 8), animated: false });
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTab, loading, nextMatchOffsetY]);
+
   const pickSeason = (s: LeagueSeason) => {
     setSelectedSeasonId(s.id);
     setSelectedSeasonLabel(s.label || '');
     setSeasonModalOpen(false);
   };
 
-  const dateKey = (date: Date) =>
-    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
-      date.getDate()
-    ).padStart(2, '0')}`;
+  const openLeague = (id: number, name: string) => {
+    setSelectedLeagueId(id);
+    setLeagueTitle(name);
+    setLeagueCountry('');
+    setActiveTab('table');
+  };
 
-  const safeFixtures = Array.isArray(fixtures) ? fixtures : [];
+  // VIEW A: FOTMOB-STYLE VERTICAL LEAGUES DIRECTORY
+  if (selectedLeagueId == null) {
+    const q = searchQuery.trim().toLowerCase();
 
-  const availableYears = Array.from(
-    new Set(
-      safeFixtures
-        .map((m) => {
-          if (!m?.kickoff) return '';
-          const date = new Date(m.kickoff);
-          return Number.isNaN(date.getTime()) ? '' : String(date.getFullYear());
-        })
-        .filter((y) => /^\d{4}$/.test(y))
-    )
-  ).sort();
+    const isLeagueFollowed = (l: { league_id: number; name: string }) =>
+      followedTokens.some(
+        (tok) => tok.startsWith(`league:${l.league_id}:`) || tok.toLowerCase() === l.name.toLowerCase()
+      );
 
-  const availableDates = Array.from(
-    new Set(
-      safeFixtures
-        .filter((m) => {
-          if (!m?.kickoff) return false;
-          const d = new Date(m.kickoff);
-          if (Number.isNaN(d.getTime())) return false;
-          const y = String(d.getFullYear());
-          const mo = String(d.getMonth() + 1).padStart(2, '0');
-          if (selectedYear && y !== selectedYear) return false;
-          if (selectedMonth && mo !== selectedMonth) return false;
-          return true;
-        })
-        .map((m) => dateKey(new Date(m.kickoff!)))
-    )
-  ).sort();
+    const isTournamentFollowed = (t: TournamentSummary) =>
+      followedTokens.some(
+        (tok) => tok.startsWith(`tournament:${t.id}:`) || tok.toLowerCase() === t.name.toLowerCase()
+      );
 
-  const filteredFixtures = safeFixtures.filter((m) => {
-    if (!m?.kickoff) return false;
-    const d = new Date(m.kickoff);
-    if (Number.isNaN(d.getTime())) return false;
-    const y = String(d.getFullYear());
-    const mo = String(d.getMonth() + 1).padStart(2, '0');
-    const dayIso = dateKey(d);
+    const filteredLeagues = leagues.filter((l) => !q || l.name.toLowerCase().includes(q));
+    const filteredTournaments = localTournaments.filter(
+      (t) =>
+        !q ||
+        t.name.toLowerCase().includes(q) ||
+        String(t.organizing_body || '').toLowerCase().includes(q)
+    );
 
-    if (selectedYear && y !== selectedYear) return false;
-    if (selectedMonth && mo !== selectedMonth) return false;
-    if (selectedDay && dayIso !== selectedDay) return false;
+    const followedLeagues = filteredLeagues.filter(isLeagueFollowed);
+    const followedTournaments = filteredTournaments.filter(isTournamentFollowed);
+    const hasFollowing = followedLeagues.length > 0 || followedTournaments.length > 0;
 
-    const st = String(m.status || '').toLowerCase();
-    const isFin = ['finished', 'ended', 'played', 'ft'].includes(st);
-    const isUpc = ['scheduled', 'notstarted', 'postponed', 'cancelled', 'delayed', 'tbd'].includes(st);
-    const isLiv = !isFin && !isUpc;
+    return (
+      <View style={styles.container}>
+        <View style={styles.dirHeader}>
+          <Text style={styles.dirTitle}>Leagues</Text>
+          <View style={styles.dirSearchWrap}>
+            <Ionicons name="search" size={16} color={COLORS.textDim} />
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Find leagues"
+              placeholderTextColor={COLORS.textDim}
+              style={styles.dirSearchInput}
+              returnKeyType="search"
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <Ionicons name="close-circle" size={16} color={COLORS.textDim} />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
 
-    if (statusFilter === 'finished' && !isFin) return false;
-    if (statusFilter === 'upcoming' && !isUpc) return false;
-    if (statusFilter === 'live' && !isLiv) return false;
-    return true;
-  });
+        {directoryLoading ? (
+          <View style={styles.centerBox}>
+            <ActivityIndicator size="large" color={COLORS.volt} />
+            <Text style={styles.loadingText}>Loading leagues...</Text>
+          </View>
+        ) : (
+          <ScrollView contentContainerStyle={{ padding: 14, paddingBottom: 40, gap: 16 }} showsVerticalScrollIndicator={false}>
+            {hasFollowing && (
+              <View style={styles.dirCard}>
+                <Text style={styles.dirSectionTitle}>Following</Text>
+                {followedTournaments.map((t) => (
+                  <TouchableOpacity
+                    key={`fol-t-${t.id}`}
+                    style={styles.dirRow}
+                    onPress={() =>
+                      navigation.navigate('TournamentDetail', {
+                        tournamentId: t.id,
+                        tournamentName: t.name,
+                      })
+                    }
+                  >
+                    <View style={styles.dirIconWrap}>
+                      <Ionicons name="star" size={16} color={COLORS.volt} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.dirRowTitle} numberOfLines={1}>{t.name}</Text>
+                      <Text style={styles.dirRowSub} numberOfLines={1}>
+                        {t.organizing_body || 'Local Competition'}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={COLORS.textDim} />
+                  </TouchableOpacity>
+                ))}
+                {followedLeagues.map((l) => (
+                  <TouchableOpacity
+                    key={`fol-l-${l.league_id}`}
+                    style={styles.dirRow}
+                    onPress={() => openLeague(l.league_id, l.name)}
+                  >
+                    <View style={styles.dirIconWrap}>
+                      <Ionicons name="star" size={16} color={COLORS.volt} />
+                    </View>
+                    <Text style={[styles.dirRowTitle, { flex: 1 }]} numberOfLines={1}>
+                      {l.name}
+                    </Text>
+                    <Ionicons name="chevron-forward" size={16} color={COLORS.textDim} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
 
-  const groupedByFullDate: Record<string, MatchSummary[]> = {};
-  filteredFixtures
+            {filteredTournaments.length > 0 && (
+              <View style={styles.dirCard}>
+                <Text style={styles.dirSectionTitle}>Local Competitions</Text>
+                {filteredTournaments.map((t) => (
+                  <TouchableOpacity
+                    key={`loc-${t.id}`}
+                    style={styles.dirRow}
+                    onPress={() =>
+                      navigation.navigate('TournamentDetail', {
+                        tournamentId: t.id,
+                        tournamentName: t.name,
+                      })
+                    }
+                  >
+                    <View style={[styles.dirIconWrap, { borderColor: COLORS.cardBorderActive }]}>
+                      <Ionicons name="trophy" size={15} color={COLORS.volt} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.dirRowTitle} numberOfLines={1}>{t.name}</Text>
+                      <Text style={styles.dirRowSub} numberOfLines={1}>
+                        {t.organizing_body} {t.country ? `• ${t.country}` : ''}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={COLORS.textDim} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            <View style={styles.dirCard}>
+              <Text style={styles.dirSectionTitle}>All Leagues</Text>
+              {filteredLeagues.length > 0 ? (
+                filteredLeagues.map((l) => (
+                  <TouchableOpacity
+                    key={`lg-${l.league_id}`}
+                    style={styles.dirRow}
+                    onPress={() => openLeague(l.league_id, l.name)}
+                  >
+                    <View style={styles.dirIconWrap}>
+                      <Ionicons name="football-outline" size={15} color={COLORS.textSecondary} />
+                    </View>
+                    <Text style={[styles.dirRowTitle, { flex: 1 }]} numberOfLines={1}>
+                      {l.name}
+                    </Text>
+                    <Ionicons name="chevron-forward" size={16} color={COLORS.textDim} />
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <Text style={styles.noDataText}>No leagues match &quot;{searchQuery}&quot;.</Text>
+              )}
+            </View>
+          </ScrollView>
+        )}
+      </View>
+    );
+  }
+
+  // VIEW B: FULL 5-TAB LEAGUE DETAIL HUB
+  const safeFixtures = (Array.isArray(fixtures) ? fixtures : [])
+    .filter((m) => m && m.kickoff)
     .slice()
-    .sort((a, b) => String(a.kickoff || '').localeCompare(String(b.kickoff || '')))
-    .forEach((m) => {
-      const d = new Date(m.kickoff || '');
-      if (Number.isNaN(d.getTime())) return;
-      const key = d.toLocaleDateString('en-GB', {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-      });
-      (groupedByFullDate[key] ||= []).push(m);
+    .sort((a, b) => {
+      const ta = new Date(a.kickoff!).getTime();
+      const tb = new Date(b.kickoff!).getTime();
+      return (Number.isNaN(ta) ? 0 : ta) - (Number.isNaN(tb) ? 0 : tb);
     });
+
+  const nowMs = Date.now();
+  const isFinishedStatus = (st?: string) =>
+    ['finished', 'ended', 'played', 'ft'].includes(String(st || '').toLowerCase());
+
+  const nextAnchorMatch =
+    safeFixtures.find(
+      (m) => !isFinishedStatus(m.status) && new Date(m.kickoff!).getTime() >= nowMs - 3 * 3600 * 1000
+    ) || safeFixtures.find((m) => !isFinishedStatus(m.status));
+
+  const nextAnchorDayKey = nextAnchorMatch
+    ? new Date(nextAnchorMatch.kickoff!).toLocaleDateString('en-GB', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    })
+    : null;
+
+  const dayGroups: { dayLabel: string; matches: MatchSummary[]; isNextAnchor: boolean }[] = [];
+  const dayMap = new Map<string, MatchSummary[]>();
+
+  for (const m of safeFixtures) {
+    const d = new Date(m.kickoff!);
+    if (Number.isNaN(d.getTime())) continue;
+    const key = d.toLocaleDateString('en-GB', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+    if (!dayMap.has(key)) dayMap.set(key, []);
+    dayMap.get(key)!.push(m);
+  }
+
+  dayMap.forEach((matches, dayLabel) => {
+    dayGroups.push({
+      dayLabel,
+      matches,
+      isNextAnchor: dayLabel === nextAnchorDayKey,
+    });
+  });
 
   return (
     <View style={styles.container}>
-      {/* Local Competitions Door */}
-      {localTournaments.length > 0 && (
-        <View style={styles.localBar}>
-          <Text style={styles.localHeading}>LOCAL COMPETITIONS</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingHorizontal: 14, gap: 8 }}
-          >
-            {localTournaments.map((t: any) => (
-              <TouchableOpacity
-                key={t.id}
-                onPress={() =>
-                  navigation.navigate('TournamentDetail', {
-                    tournamentId: t.id,
-                    tournamentName: t.name,
-                  })
-                }
-                style={styles.localCard}
-              >
-                <Text style={styles.localTitle} numberOfLines={1}>
-                  {t.name}
-                </Text>
-                <Text style={styles.localSub} numberOfLines={1}>
-                  {t.organizing_body}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
+      <TouchableOpacity
+        style={styles.backToDirRow}
+        onPress={() => setSelectedLeagueId(null)}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="chevron-back" size={16} color={COLORS.volt} />
+        <Text style={styles.backToDirText}>All Leagues</Text>
+      </TouchableOpacity>
 
-      {/* Horizontal League Selector Pills */}
-      <View style={styles.pillsContainer}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 14, gap: 8 }}
+      <View style={styles.leagueHeaderCard}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.leagueHeroTitle} numberOfLines={1}>
+            {leagueTitle || `League #${selectedLeagueId}`}
+          </Text>
+          {!!leagueCountry && (
+            <Text style={styles.leagueHeroCountry}>{leagueCountry.toUpperCase()}</Text>
+          )}
+        </View>
+
+        <FollowButton
+          teamName={leagueTitle || `League #${selectedLeagueId}`}
+          token={`league:${selectedLeagueId}:${leagueTitle || `League #${selectedLeagueId}`}`}
+          size="sm"
+        />
+
+        <TouchableOpacity
+          onPress={() => setSeasonModalOpen(true)}
+          style={styles.seasonBtn}
+          activeOpacity={0.75}
         >
-          {leagues.map((l) => {
-            const isSelected = l.league_id === selectedLeagueId;
-            return (
-              <TouchableOpacity
-                key={`league-pill-${l.league_id}`}
-                style={[styles.pill, isSelected && styles.pillActive]}
-                onPress={() => {
-                  setSelectedLeagueId(l.league_id);
-                  setLeagueTitle(l.name);
-                }}
-              >
-                <Text style={[styles.pillText, isSelected && styles.pillTextActive]}>
-                  {l.name}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+          <Text style={styles.seasonBtnText}>{selectedSeasonLabel || '2026/2027'}</Text>
+          <Ionicons name="chevron-down" size={14} color={COLORS.volt} />
+        </TouchableOpacity>
       </View>
 
-      {/* Active League Header + Follow + Clickable Season Picker */}
-      {selectedLeagueId != null && (
-        <View style={styles.leagueHeaderCard}>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.leagueHeroTitle} numberOfLines={1}>
-              {leagueTitle || `League #${selectedLeagueId}`}
-            </Text>
-            {!!leagueCountry && (
-              <Text style={styles.leagueHeroCountry}>{leagueCountry.toUpperCase()}</Text>
-            )}
-          </View>
-
-          <FollowButton
-            teamName={leagueTitle || `League #${selectedLeagueId}`}
-            token={`league:${selectedLeagueId}:${leagueTitle || `League #${selectedLeagueId}`}`}
-            size="sm"
-          />
-
-          <TouchableOpacity
-            onPress={() => setSeasonModalOpen(true)}
-            style={styles.seasonBtn}
-            activeOpacity={0.75}
-          >
-            <Text style={styles.seasonBtnText}>{selectedSeasonLabel || '2026/2027'}</Text>
-            <Ionicons name="chevron-down" size={14} color={COLORS.volt} />
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* 5 Complete Navigation Tabs */}
       <View style={styles.tabRow}>
         <ScrollView
           horizontal
@@ -380,7 +483,6 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
         </ScrollView>
       </View>
 
-      {/* Tab Body */}
       {loading ? (
         <View style={styles.centerBox}>
           <ActivityIndicator size="large" color={COLORS.volt} />
@@ -388,10 +490,10 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
         </View>
       ) : (
         <ScrollView
+          ref={bodyScrollRef}
           contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 44, paddingTop: 10 }}
           showsVerticalScrollIndicator={false}
         >
-          {/* TAB 1: TABLE */}
           {activeTab === 'table' && (
             <View>
               {groups.length > 0 ? (
@@ -424,114 +526,50 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
             </View>
           )}
 
-          {/* TAB 2: FIXTURES */}
           {activeTab === 'matches' && (
-            <View style={{ gap: 10 }}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-                {(['all', 'live', 'upcoming', 'finished'] as const).map((st) => {
-                  const on = statusFilter === st;
-                  return (
-                    <TouchableOpacity
-                      key={st}
-                      onPress={() => setStatusFilter(st)}
-                      style={[styles.filterChip, on && styles.filterChipOn]}
-                    >
-                      <Text style={[styles.filterChipText, on && styles.filterChipTextOn]}>
-                        {st.toUpperCase()}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+            <View>
+              {nextMatchOffsetY != null && nextMatchOffsetY > 40 && (
                 <TouchableOpacity
-                  onPress={() => { setSelectedYear(''); setSelectedDay(''); }}
-                  style={[styles.filterChip, !selectedYear && styles.filterChipOn]}
+                  onPress={() =>
+                    bodyScrollRef.current?.scrollTo({
+                      y: Math.max(0, nextMatchOffsetY - 8),
+                      animated: true,
+                    })
+                  }
+                  style={styles.jumpToNextBtn}
                 >
-                  <Text style={[styles.filterChipText, !selectedYear && styles.filterChipTextOn]}>
-                    All Years
-                  </Text>
+                  <Ionicons name="locate-outline" size={14} color={COLORS.volt} />
+                  <Text style={styles.jumpToNextText}>Jump to Next Matchday</Text>
                 </TouchableOpacity>
-                {availableYears.map((y) => {
-                  const on = selectedYear === y;
-                  return (
-                    <TouchableOpacity
-                      key={y}
-                      onPress={() => { setSelectedYear(on ? '' : y); setSelectedDay(''); }}
-                      style={[styles.filterChip, on && styles.filterChipOn]}
-                    >
-                      <Text style={[styles.filterChipText, on && styles.filterChipTextOn]}>{y}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-
-                <TouchableOpacity
-                  onPress={() => { setSelectedMonth(''); setSelectedDay(''); }}
-                  style={[styles.filterChip, !selectedMonth && styles.filterChipOn]}
-                >
-                  <Text style={[styles.filterChipText, !selectedMonth && styles.filterChipTextOn]}>
-                    All Months
-                  </Text>
-                </TouchableOpacity>
-                {MONTHS.map((m) => {
-                  const on = selectedMonth === m.val;
-                  return (
-                    <TouchableOpacity
-                      key={m.val}
-                      onPress={() => { setSelectedMonth(on ? '' : m.val); setSelectedDay(''); }}
-                      style={[styles.filterChip, on && styles.filterChipOn]}
-                    >
-                      <Text style={[styles.filterChipText, on && styles.filterChipTextOn]}>
-                        {m.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-
-              {availableDates.length > 0 && (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-                  <TouchableOpacity
-                    onPress={() => setSelectedDay('')}
-                    style={[styles.filterChip, !selectedDay && styles.filterChipOn]}
-                  >
-                    <Text style={[styles.filterChipText, !selectedDay && styles.filterChipTextOn]}>
-                      All Dates
-                    </Text>
-                  </TouchableOpacity>
-                  {availableDates.map((isoDay) => {
-                    const on = selectedDay === isoDay;
-                    const [year, month, day] = isoDay.split('-').map(Number);
-                    const label = new Date(year, month - 1, day).toLocaleDateString('en-GB', {
-                      day: 'numeric',
-                      month: 'short',
-                    });
-                    return (
-                      <TouchableOpacity
-                        key={isoDay}
-                        onPress={() => setSelectedDay(on ? '' : isoDay)}
-                        style={[styles.filterChip, on && styles.filterChipOn]}
-                      >
-                        <Text style={[styles.filterChipText, on && styles.filterChipTextOn]}>
-                          {label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
               )}
 
-              {Object.keys(groupedByFullDate).length === 0 ? (
+              {dayGroups.length === 0 ? (
                 <View style={styles.centerBox}>
                   <Ionicons name="calendar-outline" size={36} color={COLORS.textDim} />
-                  <Text style={styles.emptyText}>No fixtures match those date filters.</Text>
+                  <Text style={styles.emptyText}>
+                    No fixtures available for {selectedSeasonLabel || 'this season'}.
+                  </Text>
                 </View>
               ) : (
-                Object.keys(groupedByFullDate).map((dayLabel) => (
-                  <View key={dayLabel} style={{ marginTop: 6 }}>
-                    <Text style={styles.groupHeading}>{dayLabel.toUpperCase()}</Text>
-                    {groupedByFullDate[dayLabel].map((m, idx) => (
+                dayGroups.map((grp) => (
+                  <View
+                    key={grp.dayLabel}
+                    style={{ marginTop: 8 }}
+                    onLayout={(e) => {
+                      if (grp.isNextAnchor) {
+                        setNextMatchOffsetY(e.nativeEvent.layout.y);
+                      }
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <Text style={styles.groupHeading}>{grp.dayLabel.toUpperCase()}</Text>
+                      {grp.isNextAnchor && (
+                        <View style={styles.nextBadge}>
+                          <Text style={styles.nextBadgeText}>NEXT UP</Text>
+                        </View>
+                      )}
+                    </View>
+                    {grp.matches.map((m, idx) => (
                       <MatchCard
                         key={`league-fix-${m.event_id ?? idx}`}
                         match={m}
@@ -551,7 +589,6 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
             </View>
           )}
 
-          {/* TAB 3: PLAYER STATS */}
           {activeTab === 'player-stats' && (
             <View style={{ gap: 14 }}>
               {[
@@ -615,7 +652,6 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
             </View>
           )}
 
-          {/* TAB 4: TEAM STATS */}
           {activeTab === 'team-stats' && (
             <View style={{ gap: 14 }}>
               {[
@@ -669,7 +705,6 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
             </View>
           )}
 
-          {/* TAB 5: SEASON HISTORY & PREVIOUS WINNERS */}
           {activeTab === 'season' && (
             <View style={styles.leaderCard}>
               <View style={styles.leaderHeader}>
@@ -722,7 +757,6 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
         </ScrollView>
       )}
 
-      {/* Season Year Picker Modal */}
       <Modal
         visible={seasonModalOpen}
         transparent
@@ -762,44 +796,97 @@ export const LeaguesScreen: React.FC<LeaguesScreenProps> = ({ navigation, route 
   );
 };
 
+export default LeaguesScreen;
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  localBar: { paddingTop: 10, paddingBottom: 4 },
-  localHeading: {
-    color: COLORS.volt,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1.4,
+  dirHeader: {
     paddingHorizontal: 14,
-    marginBottom: 6,
+    paddingTop: 12,
+    paddingBottom: 8,
+    gap: 10,
   },
-  localCard: {
-    backgroundColor: COLORS.card,
-    borderColor: COLORS.cardBorderActive,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    minWidth: 140,
+  dirTitle: {
+    fontFamily: FONTS.display,
+    color: COLORS.text,
+    fontSize: 22,
   },
-  localTitle: { color: COLORS.text, fontSize: 12, fontWeight: '700' },
-  localSub: { color: COLORS.textDim, fontSize: 10, marginTop: 2 },
-  pillsContainer: {
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.cardBorder,
-  },
-  pill: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 20,
+  dirSearchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     backgroundColor: COLORS.card,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 42,
   },
-  pillActive: { backgroundColor: COLORS.voltMuted, borderColor: COLORS.volt },
-  pillText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600' },
-  pillTextActive: { color: COLORS.volt, fontWeight: '700' },
+  dirSearchInput: {
+    flex: 1,
+    color: COLORS.text,
+    fontSize: 14,
+  },
+  dirCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  dirSectionTitle: {
+    fontFamily: FONTS.bold,
+    color: COLORS.volt,
+    fontSize: 11,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  dirRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 11,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.05)',
+  },
+  dirIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: COLORS.cardElevated,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dirRowTitle: {
+    fontFamily: FONTS.semibold,
+    color: COLORS.text,
+    fontSize: 14,
+  },
+  dirRowSub: {
+    fontFamily: FONTS.regular,
+    color: COLORS.textDim,
+    fontSize: 11,
+    marginTop: 1,
+  },
+  backToDirRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: COLORS.card,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.cardBorder,
+  },
+  backToDirText: {
+    fontFamily: FONTS.bold,
+    color: COLORS.volt,
+    fontSize: 12,
+  },
   leagueHeaderCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -810,8 +897,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.cardBorder,
   },
-  leagueHeroTitle: { color: COLORS.text, fontSize: 16, fontWeight: '900' },
-  leagueHeroCountry: { color: COLORS.textDim, fontSize: 10, fontWeight: '700', marginTop: 1 },
+  leagueHeroTitle: { fontFamily: FONTS.display, color: COLORS.text, fontSize: 16 },
+  leagueHeroCountry: { fontFamily: FONTS.bold, color: COLORS.textDim, fontSize: 10, marginTop: 1 },
   seasonBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -823,33 +910,53 @@ const styles = StyleSheet.create({
     borderColor: COLORS.cardBorderActive,
     backgroundColor: COLORS.cardElevated,
   },
-  seasonBtnText: { color: COLORS.volt, fontSize: 11, fontWeight: '800' },
+  seasonBtnText: { fontFamily: FONTS.bold, color: COLORS.volt, fontSize: 11 },
   tabRow: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.cardBorder,
   },
   tabBtn: { paddingVertical: 10 },
   tabBtnActive: { borderBottomWidth: 2, borderBottomColor: COLORS.volt },
-  tabText: { color: COLORS.textDim, fontSize: 12, fontWeight: '600' },
-  tabTextActive: { color: COLORS.text, fontWeight: '800' },
+  tabText: { fontFamily: FONTS.medium, color: COLORS.textDim, fontSize: 12 },
+  tabTextActive: { fontFamily: FONTS.bold, color: COLORS.text },
   groupHeading: {
+    fontFamily: FONTS.bold,
     color: COLORS.volt,
     fontSize: 10,
-    fontWeight: '800',
     letterSpacing: 1.3,
-    marginBottom: 6,
   },
-  filterChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    backgroundColor: COLORS.card,
+  nextBadge: {
+    backgroundColor: COLORS.voltMuted,
     borderWidth: 1,
-    borderColor: COLORS.cardBorder,
+    borderColor: COLORS.volt,
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
   },
-  filterChipOn: { backgroundColor: COLORS.voltMuted, borderColor: COLORS.volt },
-  filterChipText: { color: COLORS.textSecondary, fontSize: 11, fontWeight: '600' },
-  filterChipTextOn: { color: COLORS.volt, fontWeight: '800' },
+  nextBadgeText: {
+    fontFamily: FONTS.bold,
+    color: COLORS.volt,
+    fontSize: 9,
+    letterSpacing: 0.6,
+  },
+  jumpToNextBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    gap: 5,
+    backgroundColor: COLORS.cardElevated,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorderActive,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    marginBottom: 4,
+  },
+  jumpToNextText: {
+    fontFamily: FONTS.bold,
+    color: COLORS.volt,
+    fontSize: 11,
+  },
   centerBox: {
     flex: 1,
     alignItems: 'center',
@@ -857,8 +964,8 @@ const styles = StyleSheet.create({
     padding: 30,
     minHeight: 200,
   },
-  loadingText: { color: COLORS.textSecondary, fontSize: 13, marginTop: 10 },
-  emptyText: { color: COLORS.textDim, fontSize: 13, marginTop: 8, textAlign: 'center' },
+  loadingText: { fontFamily: FONTS.regular, color: COLORS.textSecondary, fontSize: 13, marginTop: 10 },
+  emptyText: { fontFamily: FONTS.regular, color: COLORS.textDim, fontSize: 13, marginTop: 8, textAlign: 'center' },
   leaderCard: {
     backgroundColor: COLORS.card,
     borderRadius: 12,
@@ -872,7 +979,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     marginBottom: 8,
   },
-  leaderTitle: { color: COLORS.volt, fontSize: 11, fontWeight: '800', letterSpacing: 1 },
+  leaderTitle: { fontFamily: FONTS.bold, color: COLORS.volt, fontSize: 11, letterSpacing: 1 },
   leaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -880,7 +987,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(255, 255, 255, 0.04)',
   },
-  rankNum: { width: 20, color: COLORS.textDim, fontSize: 12, fontWeight: '700', textAlign: 'center' },
+  rankNum: { fontFamily: FONTS.bold, width: 20, color: COLORS.textDim, fontSize: 12, textAlign: 'center' },
   playerAvatarWrap: {
     width: 30,
     height: 30,
@@ -892,8 +999,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   playerAvatar: { width: 30, height: 30 },
-  leaderPlayerName: { color: COLORS.text, fontSize: 13, fontWeight: '600' },
-  leaderTeamName: { color: COLORS.textSecondary, fontSize: 11, marginTop: 1 },
+  leaderPlayerName: { fontFamily: FONTS.semibold, color: COLORS.text, fontSize: 13 },
+  leaderTeamName: { fontFamily: FONTS.regular, color: COLORS.textSecondary, fontSize: 11, marginTop: 1 },
   statValBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -905,8 +1012,8 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     gap: 3,
   },
-  statValText: { fontSize: 13, fontWeight: '800' },
-  statValSub: { fontSize: 10, fontWeight: '700' },
+  statValText: { fontFamily: FONTS.bold, fontSize: 13 },
+  statValSub: { fontFamily: FONTS.bold, fontSize: 10 },
   noDataText: { color: COLORS.textDim, fontSize: 12, paddingVertical: 12, textAlign: 'center' },
   modalBackdrop: {
     flex: 1,

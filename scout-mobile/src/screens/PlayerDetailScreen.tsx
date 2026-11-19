@@ -71,7 +71,7 @@ export const PlayerDetailScreen: React.FC<PlayerDetailScreenProps> = ({ route, n
     // catches its own failure, so one dead endpoint can't blank the page.
     getPlayerProfile(playerId)
       .then(setProfile)
-      .catch((err) => console.warn('Failed to load player profile:', err))
+      .catch((err: any) => console.warn('Failed to load player profile:', err))
       .finally(() => setLoading(false));
 
     // NO placeholder radar. This used to fall back to a hardcoded set of
@@ -80,7 +80,7 @@ export const PlayerDetailScreen: React.FC<PlayerDetailScreenProps> = ({ route, n
     // complete invented scouting profile and presented it as analysis.
     // A missing radar is correct; a fabricated one is not.
     getPlayerRadar(playerId)
-      .then((r) => {
+      .then((r: any) => {
         setRadar(r?.radar ?? null);
         setMatchesUsed(r?.matches_used || 0);
       })
@@ -90,15 +90,15 @@ export const PlayerDetailScreen: React.FC<PlayerDetailScreenProps> = ({ route, n
       });
 
     getPlayerCareer(playerId)
-      .then((r) => setCareer({ data: r.seasons || [], degraded: !!r.degraded, failed: false }))
+      .then((r: any) => setCareer({ data: r.seasons || [], degraded: !!r.degraded, failed: false }))
       .catch(() => setCareer({ data: [], degraded: false, failed: true }));
 
     getPlayerTransfers(playerId)
-      .then((r) => setTransfers({ data: r.transfers || [], degraded: !!r.degraded, failed: false }))
+      .then((r: any) => setTransfers({ data: r.transfers || [], degraded: !!r.degraded, failed: false }))
       .catch(() => setTransfers({ data: [], degraded: false, failed: true }));
 
     getPlayerNationalTeam(playerId)
-      .then((r) => {
+      .then((r: any) => {
         // Backend hands back a list or an object depending on BSD's
         // shape, which the docs don't pin down. Take whichever is filled.
         const rows = (r.teams && r.teams.length ? r.teams : null) ?? (r.summary ? [r.summary] : []);
@@ -232,8 +232,14 @@ export const PlayerDetailScreen: React.FC<PlayerDetailScreenProps> = ({ route, n
                 <TouchableOpacity
                   style={styles.compareBtn}
                   onPress={() => {
-                    // Navigate to compare tab
-                    navigation.navigate('Compare');
+                    // Navigate to compare tab in MainTabs
+                    navigation.navigate('MainTabs', {
+                      screen: 'Compare',
+                      params: {
+                        initialPlayerId: playerId,
+                        initialPlayerName: profile?.name || playerName,
+                      },
+                    });
                   }}
                 >
                   <Ionicons name="git-compare-outline" size={14} color={COLORS.volt} style={{ marginRight: 4 }} />

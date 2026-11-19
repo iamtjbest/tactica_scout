@@ -6,17 +6,17 @@ export const COLORS = {
   cardElevated: '#1c222d',
   cardBorder: 'rgba(255, 255, 255, 0.08)',
   cardBorderActive: 'rgba(212, 255, 0, 0.35)',
-  
+
   // Volt accent & neon highlights
   volt: '#d4ff00',
   voltMuted: 'rgba(212, 255, 0, 0.15)',
   voltGlow: 'rgba(212, 255, 0, 0.25)',
-  
+
   // Typography
   text: '#f8fafc',
   textSecondary: '#94a3b8',
   textDim: '#64748b',
-  
+
   // Status & indicators
   live: '#ef4444',
   liveMuted: 'rgba(239, 68, 68, 0.15)',
@@ -26,7 +26,7 @@ export const COLORS = {
   drawMuted: 'rgba(234, 179, 8, 0.15)',
   loss: '#ef4444',
   lossMuted: 'rgba(239, 68, 68, 0.15)',
-  
+
   // Table zones
   ucl: '#3b82f6',
   uel: '#f97316',
@@ -49,4 +49,13 @@ export const RADIUS = {
   lg: 14,
   xl: 18,
   full: 9999,
+};
+
+export const FONTS = {
+  display: 'PlayfairDisplay_700Bold',
+  displayBlack: 'PlayfairDisplay_900Black',
+  regular: 'DMSans_400Regular',
+  medium: 'DMSans_500Medium',
+  semibold: 'DMSans_600SemiBold',
+  bold: 'DMSans_700Bold',
 };

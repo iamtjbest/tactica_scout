@@ -1,5 +1,5 @@
 // src/screens/CompareScreen.tsx — Side-by-side tactical player comparison
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -24,9 +24,10 @@ import {
 
 interface CompareScreenProps {
   navigation: any;
+  route?: any;
 }
 
-export const CompareScreen: React.FC<CompareScreenProps> = ({ navigation }) => {
+export const CompareScreen: React.FC<CompareScreenProps> = ({ navigation, route }) => {
   // Player 1 state
   const [query1, setQuery1] = useState('');
   const [results1, setResults1] = useState<any[]>([]);
@@ -41,6 +42,15 @@ export const CompareScreen: React.FC<CompareScreenProps> = ({ navigation }) => {
 
   const [loading1, setLoading1] = useState(false);
   const [loading2, setLoading2] = useState(false);
+
+  useEffect(() => {
+    if (route?.params?.initialPlayerId) {
+      selectPlayer1({
+        id: route.params.initialPlayerId,
+        name: route.params.initialPlayerName || 'Player',
+      });
+    }
+  }, [route?.params?.initialPlayerId]);
 
   // Search Player 1
   const handleSearch1 = async (text: string) => {

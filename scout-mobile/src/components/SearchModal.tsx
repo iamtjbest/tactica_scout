@@ -10,10 +10,10 @@ import {
   Image,
   ActivityIndicator,
   StyleSheet,
-  SafeAreaView,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../theme';
 import { globalSearch, searchPlayers, teamLogoUrl, playerImageUrl } from '../services/api';
@@ -23,6 +23,7 @@ interface SearchModalProps {
   onClose: () => void;
   onSelectTeam: (teamId: number, teamName: string) => void;
   onSelectPlayer: (playerId: number, playerName: string) => void;
+  onSelectTournament?: (tournamentId: string, tournamentName?: string) => void;
 }
 
 export const SearchModal: React.FC<SearchModalProps> = ({
@@ -30,15 +31,18 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   onClose,
   onSelectTeam,
   onSelectPlayer,
+  onSelectTournament,
 }) => {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
+  const [tournaments, setTournaments] = useState<any[]>([]);
   const [teams, setTeams] = useState<any[]>([]);
   const [players, setPlayers] = useState<any[]>([]);
 
   useEffect(() => {
     if (!visible) {
       setQuery('');
+      setTournaments([]);
       setTeams([]);
       setPlayers([]);
       setLoading(false);
@@ -49,6 +53,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   useEffect(() => {
     const trimmed = query.trim();
     if (trimmed.length < 2) {
+      setTournaments([]);
       setTeams([]);
       setPlayers([]);
       setLoading(false);
@@ -59,6 +64,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
       setLoading(true);
       try {
         const res = await globalSearch(trimmed);
+        setTournaments(res.tournaments || []);
         setTeams(res.teams || []);
         setPlayers(res.players || []);
       } catch (err) {
@@ -111,17 +117,19 @@ export const SearchModal: React.FC<SearchModalProps> = ({
               <ActivityIndicator color={COLORS.volt} size="small" />
               <Text style={styles.loadingText}>Searching data engine...</Text>
             </View>
-          ) : query.trim().length >= 2 && teams.length === 0 && players.length === 0 ? (
+          ) : query.trim().length >= 2 && tournaments.length === 0 && teams.length === 0 && players.length === 0 ? (
             <View style={styles.centerBox}>
               <Ionicons name="alert-circle-outline" size={40} color={COLORS.textDim} />
               <Text style={styles.emptyTitle}>No results found</Text>
-              <Text style={styles.emptySubtitle}>Try searching for another team or player name.</Text>
+              <Text style={styles.emptySubtitle}>Try searching for another team, tournament, or player.</Text>
             </View>
           ) : (
             <FlatList
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}
               data={[
+                ...(tournaments.length > 0 ? [{ type: 'header', title: 'LOCAL COMPETITIONS' }] : []),
+                ...tournaments.map((tr) => ({ ...tr, _type: 'tournament' })),
                 ...(teams.length > 0 ? [{ type: 'header', title: 'TEAMS' }] : []),
                 ...teams.map((t) => ({ ...t, _type: 'team' })),
                 ...(players.length > 0 ? [{ type: 'header', title: 'PLAYERS' }] : []),
@@ -131,6 +139,29 @@ export const SearchModal: React.FC<SearchModalProps> = ({
               renderItem={({ item }) => {
                 if (item.type === 'header') {
                   return <Text style={styles.sectionHeader}>{item.title}</Text>;
+                }
+
+                if (item._type === 'tournament') {
+                  return (
+                    <TouchableOpacity
+                      style={styles.itemRow}
+                      onPress={() => {
+                        onClose();
+                        if (onSelectTournament) {
+                          onSelectTournament(String(item.id), item.name);
+                        }
+                      }}
+                    >
+                      <View style={styles.avatarWrap}>
+                        <Ionicons name="trophy" size={18} color={COLORS.volt} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.itemName}>{item.name}</Text>
+                        <Text style={styles.itemSub}>{item.organizing_body || item.country || 'Local Competition'}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={16} color={COLORS.textDim} />
+                    </TouchableOpacity>
+                  );
                 }
 
                 if (item._type === 'team') {

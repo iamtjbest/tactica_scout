@@ -1,20 +1,42 @@
-// src/components/MatchCard.tsx — Mobile Match card
+// src/components/MatchCard.tsx - Mobile Match card
 import React from 'react';
 import { View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS } from '../theme';
+import { COLORS, FONTS } from '../theme';
 import { MatchSummary, teamLogoUrl } from '../services/api';
 
 interface MatchCardProps {
   match: MatchSummary;
   onPress: () => void;
   showCompetition?: boolean;
+  showDate?: boolean;
+}
+
+function formatKickoff(kickoff?: string, includeDate = false): string {
+  if (!kickoff) return 'VS';
+  const d = new Date(kickoff);
+  if (Number.isNaN(d.getTime())) {
+    return kickoff.slice(11, 16) || kickoff;
+  }
+  const timeStr = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  if (!includeDate) return timeStr;
+  const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return `${dateStr}, ${timeStr}`;
+}
+
+function formatFinishedDate(kickoff?: string): string {
+  if (!kickoff) return 'FT';
+  const d = new Date(kickoff);
+  if (Number.isNaN(d.getTime())) return 'FT';
+  const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return `FT • ${dateStr}`;
 }
 
 export const MatchCard: React.FC<MatchCardProps> = ({
   match,
   onPress,
   showCompetition = false,
+  showDate = false,
 }) => {
   const isLive =
     match.status?.toLowerCase().includes('live') ||
@@ -26,9 +48,6 @@ export const MatchCard: React.FC<MatchCardProps> = ({
     match.status?.toLowerCase() === 'ft' ||
     match.status?.toLowerCase() === 'ended';
 
-  // A local competition's team ids are our own uuids, not BSD team ids,
-  // so BSD's badge CDN has no art for them and would always 404. Use
-  // the crest the organiser uploaded instead.
   const isLocal = match.source === 'local';
   const homeLogo = isLocal ? match.home_crest ?? null : teamLogoUrl(match.home_team_id);
   const awayLogo = isLocal ? match.away_crest ?? null : teamLogoUrl(match.away_team_id);
@@ -72,10 +91,12 @@ export const MatchCard: React.FC<MatchCardProps> = ({
               </Text>
             </View>
           ) : isFinished ? (
-            <Text style={styles.statusText}>FT</Text>
+            <Text style={styles.statusText}>
+              {showDate ? formatFinishedDate(match.kickoff) : 'FT'}
+            </Text>
           ) : (
-            <Text style={styles.kickoffText}>
-              {match.kickoff ? match.kickoff.slice(11, 16) || match.kickoff : 'VS'}
+            <Text style={styles.kickoffText} numberOfLines={1}>
+              {formatKickoff(match.kickoff, showDate)}
             </Text>
           )}
 
@@ -136,7 +157,7 @@ const styles = StyleSheet.create({
   compText: {
     color: COLORS.textDim,
     fontSize: 10,
-    fontWeight: '800',
+    fontFamily: FONTS.bold,
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
@@ -163,13 +184,13 @@ const styles = StyleSheet.create({
     height: 24,
   },
   teamName: {
+    fontFamily: FONTS.semibold,
     color: COLORS.text,
     fontSize: 13,
-    fontWeight: '600',
     maxWidth: '90%',
   },
   centerCol: {
-    width: 80,
+    width: 96,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -179,36 +200,36 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scoreNum: {
+    fontFamily: FONTS.bold,
     color: COLORS.text,
     fontSize: 20,
-    fontWeight: '800',
     fontVariant: ['tabular-nums'],
   },
   liveScore: {
     color: COLORS.volt,
   },
   scoreDivider: {
+    fontFamily: FONTS.semibold,
     color: COLORS.textDim,
     fontSize: 16,
-    fontWeight: '600',
     marginHorizontal: 4,
   },
   vsText: {
+    fontFamily: FONTS.bold,
     color: COLORS.textDim,
     fontSize: 13,
-    fontWeight: '700',
   },
   statusText: {
+    fontFamily: FONTS.bold,
     color: COLORS.textDim,
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 10,
     marginBottom: 2,
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
   },
   kickoffText: {
+    fontFamily: FONTS.semibold,
     color: COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11,
     marginBottom: 2,
   },
   liveBadge: {
@@ -228,9 +249,9 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   liveText: {
+    fontFamily: FONTS.bold,
     color: COLORS.live,
     fontSize: 10,
-    fontWeight: '800',
     letterSpacing: 0.5,
   },
 });

@@ -29,6 +29,32 @@ interface MatchDetailScreenProps {
 
 type TabType = 'overview' | 'timeline' | 'lineups' | 'ratings' | 'stats' | 'h2h' | 'facts';
 
+function formatKickoffFull(iso?: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const datePart = d.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+  const timePart = d.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  return `${datePart}, ${timePart}`;
+}
+
+function formatHeroKickoff(iso?: string): string {
+  if (!iso) return 'UPCOMING';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+  const datePart = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  const timePart = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return `${datePart}, ${timePart}`;
+}
+
 export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, navigation }) => {
   const insets = useSafeAreaInsets();
   const { eventId, matchSummary } = route.params;
@@ -61,7 +87,10 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
   const awayId = detail?.away_team_id ?? matchSummary?.away_team_id;
   const homeScore = detail?.home_score ?? matchSummary?.home_score ?? 0;
   const awayScore = detail?.away_score ?? matchSummary?.away_score ?? 0;
-  const isLive = detail?.status?.toLowerCase().includes('live') || matchSummary?.minute > 0;
+  const statusStr = String(detail?.status || matchSummary?.status || '').toLowerCase();
+  const isLive = statusStr.includes('live') || statusStr.includes('in_progress') || (matchSummary?.minute > 0 && statusStr !== 'finished');
+  const isFinished = ['finished', 'ft', 'ended', 'played'].includes(statusStr);
+  const kickoffIso = detail?.event_date || matchSummary?.kickoff;
 
   const incidents = Array.isArray(detail?.incidents) ? detail!.incidents : [];
   const rawScorers = Array.isArray(detail?.goalscorers) ? detail!.goalscorers : [];
@@ -146,14 +175,20 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
               </View>
             ) : (
               <Text style={styles.statusTag}>
-                {detail?.status === 'finished' ? 'FULL TIME' : detail?.event_date?.slice(0, 10) || 'UPCOMING'}
+                {isFinished ? 'FULL TIME' : formatHeroKickoff(kickoffIso)}
               </Text>
             )}
 
             <View style={styles.heroNumbers}>
-              <Text style={[styles.heroScore, isLive && { color: COLORS.volt }]}>{homeScore}</Text>
-              <Text style={styles.heroColon}>-</Text>
-              <Text style={[styles.heroScore, isLive && { color: COLORS.volt }]}>{awayScore}</Text>
+              {isFinished || isLive ? (
+                <>
+                  <Text style={[styles.heroScore, isLive && { color: COLORS.volt }]}>{homeScore}</Text>
+                  <Text style={styles.heroColon}>-</Text>
+                  <Text style={[styles.heroScore, isLive && { color: COLORS.volt }]}>{awayScore}</Text>
+                </>
+              ) : (
+                <Text style={styles.heroVsText}>VS</Text>
+              )}
             </View>
             {detail?.venue ? (
               <Text style={styles.venueText} numberOfLines={1}>
@@ -245,6 +280,36 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
           {/* TAB 1: OVERVIEW */}
           {activeTab === 'overview' && (
             <View>
+              {/* Match Info Card (Matches Web Kickoff / Round / Venue Block) */}
+              {(kickoffIso || detail?.round || detail?.venue || detail?.referee) && (
+                <View style={[styles.cardSection, { marginBottom: 12, gap: 6 }]}>
+                  {!!kickoffIso && (
+                    <Text style={styles.metaLine}>
+                      <Text style={styles.metaKey}>Kickoff: </Text>
+                      {formatKickoffFull(kickoffIso)}
+                    </Text>
+                  )}
+                  {!!detail?.round && (
+                    <Text style={styles.metaLine}>
+                      <Text style={styles.metaKey}>Round: </Text>
+                      {detail.round}
+                    </Text>
+                  )}
+                  {!!detail?.venue && (
+                    <Text style={styles.metaLine}>
+                      <Text style={styles.metaKey}>Venue: </Text>
+                      {detail.venue}
+                    </Text>
+                  )}
+                  {!!detail?.referee && (
+                    <Text style={styles.metaLine}>
+                      <Text style={styles.metaKey}>Referee: </Text>
+                      {detail.referee}
+                    </Text>
+                  )}
+                </View>
+              )}
+
               {facts &&
                 (facts.home?.win_prob != null || facts.away?.win_prob != null) && (
                   <TouchableOpacity
@@ -460,7 +525,6 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
 
                   return (
                     <View key={inc.id || `tl-${idx}`} style={styles.spineRow}>
-                      {/* Left Column: Home Event */}
                       <View style={styles.spineSideLeft}>
                         {isHome && (
                           <View style={styles.spineEventCardLeft}>
@@ -479,7 +543,6 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
                         )}
                       </View>
 
-                      {/* Center Spine & Minute Pill */}
                       <View style={styles.spineCenter}>
                         <View style={styles.spineLine} />
                         <View style={styles.spineMinuteBadge}>
@@ -487,7 +550,6 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
                         </View>
                       </View>
 
-                      {/* Right Column: Away Event */}
                       <View style={styles.spineSideRight}>
                         {!isHome && (
                           <View style={styles.spineEventCardRight}>
@@ -715,7 +777,7 @@ export const MatchDetailScreen: React.FC<MatchDetailScreenProps> = ({ route, nav
                 }
                 if (!hasRatings && !hasProbs) {
                   const message =
-                    (f as any).unavailable_reason === 'no_prematch_snapshot'
+                    f.unavailable_reason === 'no_prematch_snapshot'
                       ? "No pre-match numbers were saved for this match. Ratings calculated now would include this match's own result, so they wouldn't be pre-match numbers."
                       : f.degraded
                         ? "Tactica ratings couldn't be loaded right now."
@@ -970,7 +1032,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   heroCenter: {
-    width: 120,
+    width: 126,
     alignItems: 'center',
   },
   liveTag: {
@@ -995,10 +1057,10 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   statusTag: {
-    color: COLORS.textDim,
+    color: COLORS.volt,
     fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 0.8,
+    letterSpacing: 0.6,
     marginBottom: 6,
   },
   heroNumbers: {
@@ -1008,6 +1070,11 @@ const styles = StyleSheet.create({
   heroScore: {
     color: COLORS.text,
     fontSize: 32,
+    fontWeight: '900',
+  },
+  heroVsText: {
+    color: COLORS.textDim,
+    fontSize: 22,
     fontWeight: '900',
   },
   heroColon: {
@@ -1020,6 +1087,15 @@ const styles = StyleSheet.create({
     color: COLORS.textDim,
     fontSize: 10,
     marginTop: 6,
+  },
+  metaLine: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  metaKey: {
+    color: COLORS.textSecondary,
+    fontWeight: '500',
   },
   scorersSplitStrip: {
     marginTop: 14,
