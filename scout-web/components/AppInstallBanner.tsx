@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 const APK_DOWNLOAD_URL =
-    "https://github.com/iamtjbest/scout-mobile/releases/download/v1.0.0/scout-by-tactica.apk";
+    "https://github.com/iamtjbest/tactica_scout/releases/download/v1.0.0/scout-by-tactica.apk";
 
 export default function AppInstallBanner() {
     const [platform, setPlatform] = useState<"android" | "ios" | null>(null);
